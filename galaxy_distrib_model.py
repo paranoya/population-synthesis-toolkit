@@ -18,7 +18,8 @@ class Model_grid(object):
         self.log_Z = np.log10(self.metallicities)
         print('Metallicities :', self.metallicities)
 #        self.SFH_model = kwargs['SFH']
-        self.load_models('Results/ExponentialSFRdelayed/tau_M/Mags_colours/')
+#        self.load_models('Results/ExponentialSFRdelayed/tau_M/Mags_colours/')
+        self.load_models('models/')
         self.compute_V_max()
 
     def load_models(self, path, n_metallicities_interpolation=0):
@@ -250,3 +251,26 @@ class Ansatz():
 #
 
 
+if __name__ == "__main__":
+
+    models = Model_grid()
+
+    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
+
+#    plt.figure()
+#    plt.plot(tau_grid.flatten(), (models.u-models.r).flatten(), 'k,')
+
+    plt.figure()
+    plt.title(r'log( Vmax/Mpc$^3$ )')
+    plt.imshow(np.log10(models.V_max[-2]+1),
+               extent=[
+                       models.log_M_inf[0], models.log_M_inf[-1],
+                       models.log_tau[0], models.log_tau[-1]
+                       ],
+               vmin=3.3, vmax=6.7, cmap='gist_earth', aspect='auto'
+               )
+    plt.xlabel(r'log(M$_\infty$)')
+    plt.ylabel(r'log($\tau$)')
+    plt.colorbar()
+
+# ... Paranoy@ rulz!
