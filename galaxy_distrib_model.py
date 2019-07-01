@@ -11,16 +11,105 @@ from scipy.interpolate import interp1d
 from matplotlib import pyplot as plt
 
 
+# =============================================================================
+class Ansatz():
+
+    def parameters_given_M(M_star):
+        M_sym = 10**10.13
+        tau_sym = 2.4
+        alpha_sym = 3.7
+
+        eta_tau = 0.07
+        eta1 = -0.5
+        eta2 = 0.65
+
+        tau_0 = tau_sym*(M_star/M_sym)**eta_tau
+        alpha1 = 1 + (alpha_sym-1)*(M_star/M_sym)**(eta1)
+        alpha2 = 1 + (alpha_sym-1)*(M_star/M_sym)**(eta2)
+        beta = 4
+
+        return tau_0, alpha1, alpha2, beta
+
+    def dp_dtau_given_M(M_star, tau):
+        """
+        Probability density of the characteristic time
+        scale tau (scalar or array) for a given stellar mass (must be scalar)
+        """
+        tau_0, alpha1, alpha2, beta = Ansatz.parameters_given_M(M_star)
+
+        x = tau/tau_0
+        dp_dtau = pow(x, alpha1)/pow(1+x**beta, (alpha1+alpha2)/beta)
+
+        # Normalize dp_dtau by integrating (do the integral in log tau)
+        log_tau_interp = np.linspace(-2, 4, 1000)
+        x = 10**log_tau_interp/tau_0
+        dp_dtau_interp = pow(x, alpha1)/pow(1+x**beta, (alpha1+alpha2)/beta)
+        integral_dpdtau_dtau = np.log(10)*tau_0 * np.trapz(dp_dtau_interp*x,
+                                                           log_tau_interp)
+        return dp_dtau / integral_dpdtau_dtau
+
+    def dp_dtau_grid(M_star, tau):
+        tau_0, alpha1, alpha2, beta = Ansatz.parameters_given_M(M_star)
+
+        x = tau[:, np.newaxis]/tau_0[np.newaxis, :]
+        dp_dtau = pow(x, alpha1[np.newaxis, :]) / pow(
+                1+x**beta, (alpha1[np.newaxis, :]+alpha2[np.newaxis, :])/beta)
+
+        # Normalize dp_dtau by integrating (do the integral in log tau)
+        log_tau_interp = np.linspace(-2, 4, 1000)
+        x = 10**log_tau_interp[:, np.newaxis]/tau_0[np.newaxis, :]
+        dp_dtau_interp = pow(x, alpha1[np.newaxis, :]) / pow(
+                1+x**beta, (alpha1[np.newaxis, :]+alpha2[np.newaxis, :])/beta)
+        integral_dpdtau_dtau = np.log(10)*tau_0 * np.trapz(
+                dp_dtau_interp*x, log_tau_interp, axis=0)
+        return dp_dtau / integral_dpdtau_dtau[np.newaxis, :]
+
+    def dn_dM(M, M_schechter=10**(10.66), alpha=-1.25, phi=0.02):
+        """
+        Multiplicity function (number density of galaxies
+        per unit comoving volume per unit mass), described
+        as a Schechter function.
+        """
+        return phi*np.exp(-(M/M_schechter))/M_schechter * (M/M_schechter)**alpha
+
+    def dn_dMdtau_grid(M, tau):
+        """
+        Returns number density of galaxies as a function of M and tau
+        """
+# Alternative way of creating dp_dtau grid:
+#        N_tau = len(tau)
+#        N_M = len(M)
+#        dp_dtau_grid = Ansatz.dp_dtau_unnorm(M.repeat(N_tau), np.tile(tau, N_M))
+#        dp_dtau_grid.shape = (N_M, N_tau)
+#
+#        log_tau = np.log10(tau)
+#        d_log_tau = np.concatenate((
+#                log_tau[1]-log_tau[0],
+#                (log_tau[2:]-log_tau[:-2]) / 2,
+#                log_tau[-1]-log_tau[-2]
+#                ))
+#        norm = np.log(10) * np.sum(
+#                dp_dtau_grid * d_log_tau[np.newaxis, :]*tau[np.newaxis, :],
+#                axis=1)
+        dn_dM = Ansatz.dn_dM(M)
+        return dn_dM[np.newaxis, :] * Ansatz.dp_dtau_grid(M, tau)
+
+
+# =============================================================================
 class Model_grid(object):
 
     def __init__(self, **kwargs):
         self.metallicities = [0.0004, 0.004, 0.008, 0.02, 0.05]
         self.log_Z = np.log10(self.metallicities)
         print('Metallicities :', self.metallicities)
-#        self.SFH_model = kwargs['SFH']
+
+        self.log_M_star = np.linspace(8, 12, 200)
+        self.M_star = 10**self.log_M_star
+
 #        self.load_models('Results/ExponentialSFRdelayed/tau_M/Mags_colours/')
         self.load_models('models/')
         self.compute_V_max()
+        self.compute_N_galaxies()
 
     def load_models(self, path, n_metallicities_interpolation=0):
 
@@ -65,19 +154,18 @@ class Model_grid(object):
             print('New range of metallicities: \n', new_metallicities)
 
         # Add axis for M_inf and create model grid
-        self.log_M_inf = np.linspace(6, 14, 100)
-        self.M_inf = 10**self.log_M_inf
 
-        self.u = (np.array(u_model)[:, :, np.newaxis]
-                  - 2.5*self.log_M_inf[np.newaxis, np.newaxis, :])
-        self.g = (np.array(g_model)[:, :, np.newaxis]
-                  - 2.5*self.log_M_inf[np.newaxis, np.newaxis, :])
-        self.r = (np.array(r_model)[:, :, np.newaxis]
-                  - 2.5*self.log_M_inf[np.newaxis, np.newaxis, :])
-        self.i = (np.array(i_model)[:, :, np.newaxis]
-                  - 2.5*self.log_M_inf[np.newaxis, np.newaxis, :])
-        self.z = (np.array(z_model)[:, :, np.newaxis]
-                  - 2.5*self.log_M_inf[np.newaxis, np.newaxis, :])
+        t0 = 13.7  # Gyr
+        x = t0/self.tau
+        self.M_inf = self.M_star[np.newaxis, :] / (
+                1 - np.exp(-x[:, np.newaxis])*(1+x[:, np.newaxis]))
+        delta_mag = 2.5 * np.log10(self.M_inf)
+
+        self.u = np.array(u_model)[:, :, np.newaxis] - delta_mag[np.newaxis, :, :]
+        self.g = np.array(g_model)[:, :, np.newaxis] - delta_mag[np.newaxis, :, :]
+        self.r = np.array(r_model)[:, :, np.newaxis] - delta_mag[np.newaxis, :, :]
+        self.i = np.array(i_model)[:, :, np.newaxis] - delta_mag[np.newaxis, :, :]
+        self.z = np.array(z_model)[:, :, np.newaxis] - delta_mag[np.newaxis, :, :]
 
     def compute_V_max(self):
         u_limit = 19
@@ -97,6 +185,33 @@ class Model_grid(object):
 
         D_max = np.min([D_u, D_g, D_r], axis=(0)).clip(D_z_min, D_z_max)
         self.V_max = survey_solid_angle * (D_max**3 - D_z_min**3) / 3
+
+    def compute_N_galaxies(self):
+        """
+        Compute number density of galaxies per unit comoving volume within
+        each bin of the grid, according to the ansatz, as well as
+        total number of galaxies observed by the SDSS, taking into account
+        Vmax (depending on metallicity).
+        """
+        # Cosmic number density:
+        self.n_ansatz = Ansatz.dn_dMdtau_grid(self.M_star, self.tau)
+        d_log_tau = np.concatenate((
+                np.array([self.log_tau[1]-self.log_tau[0]]),
+                (self.log_tau[2:]-self.log_tau[:-2]) / 2,
+                np.array([self.log_tau[-1]-self.log_tau[-2]])
+                ))
+        d_log_M = np.concatenate((
+                np.array([self.log_M_star[1]-self.log_M_star[0]]),
+                (self.log_M_star[2:]-self.log_M_star[:-2]) / 2,
+                np.array([self.log_M_star[-1]-self.log_M_star[-2]])
+                ))
+        d_log_tau = np.abs(d_log_tau)
+        self.n_ansatz *= self.tau[:, np.newaxis]*d_log_tau[:, np.newaxis]
+        self.n_ansatz *= self.M_star[np.newaxis, :]*d_log_M[np.newaxis, :]
+        self.n_ansatz *= np.log(10)**2
+
+        # Observed by SDSS:
+        self.N_galaxies = self.n_ansatz[np.newaxis, :, :] * self.V_max
 
     def bayesian_model_assignment(self, **kwargs):
         u = kwargs['u']
@@ -147,130 +262,201 @@ class Model_grid(object):
         return np.array(Z_galaxy), np.array(tau_galaxy), np.array(M_inf_galaxy)
 
 
-class Ansatz():
-
-
-    def alpha12beta_powlaw(tau, tau_0, alpha1, alpha2, beta):
-
-        x = tau/tau_0
-        dN_dtau = pow(x, alpha1)/pow(1+x**beta, (alpha1+alpha2)/beta)
-        dtau = np.interp(tau, tau[0:-1], np.diff(tau))
-#        return  dN_dtau
-        return  dN_dtau/(np.sum(dN_dtau*dtau))
-
-    def dpdtau(M, tau):
-        """The propability of presenting tau given a mass"""
-        eta_tau = 0.07
-        tau_c = 2.454
-        tau_0 = tau_c*(M/(10**(10.13)))**eta_tau
-
-        eta1 = -0.65
-        alpha_c1 = 3.7
-        alpha1 = 1 +(alpha_c1-1)*(M/10**(10.13))**(eta1)
-
-        eta2 = 0.65
-        alpha_c2 = 3.7
-        alpha2 = 1 +(alpha_c2-1)*(M/10**(10.13))**(eta2)
-
-        beta = 4
-
-        dpdtau = Ansatz.alpha12beta_powlaw(tau,
-                                          tau_0,
-                                          alpha1,
-                                          alpha2,
-                                          beta)
-        return dpdtau
-
-    def dndMass(M, Mprime=10**(10.6), alpha= -1.25, phi=1.5*1e10):
-        """schechter_mass_function"""
-        return phi*np.exp(-(M/Mprime))/Mprime *(M/Mprime)**(alpha+1)
-
-    def dNdMdtau(mass_range, tau_range):
-
-        """CONVENTION: Mass is the first dimension"""
-        """CONVENTION: Provide always logspace """
-
-        """dpdtau"""
-        eta_tau = 0.07
-        tau_c = 2.454
-        tau_0 = tau_c*(mass_range/(10**(10.13)))**eta_tau
-
-        eta1 = -0.65
-        alpha_c1 = 3.7
-        alpha1 = 1 +(alpha_c1-1)*(mass_range/10**(10.13))**eta1
-
-        eta2 = 0.65
-        alpha_c2 = 3.7
-        alpha2 = 1 +(alpha_c2-1)*(mass_range/10**(10.13))**eta2
-
-        beta = 4
-
-        x = tau_range[np.newaxis, :]/ tau_0[:, np.newaxis]
-
-        dp_dtau = pow(x, alpha1[:, np.newaxis])/pow(
-                1+x**beta, (
-                alpha1[:, np.newaxis]+alpha2[:, np.newaxis])/beta)
-
-        # Trying to avoid wrong normalization by increasing the number of points
-
-        interpolator = interpolate.interp1d(tau_range, dp_dtau, axis=1)
-        tau_interp =np.logspace(np.log10(tau_range[0]), np.log10(tau_range[-1]),
-                                                          len(tau_range)*1000)
-        dp_dtau_interp = interpolator(tau_interp)
-
-        int_dp_dtau = np.trapz(dp_dtau_interp, tau_interp)
-
-
-#        dtau = np.interp(tau_range, tau_range[0:-1], np.diff(tau_range))
-
-        # integration along tau axis
-#        int_dp_dtau = np.sum(dp_dtau*dtau[np.newaxis, :], axis=1)
-
-        dp_dtau_norm = dp_dtau/int_dp_dtau[:, np.newaxis]
-
-
-        """dNdMass"""
-        Mprime=10**(10.6)
-        alpha_sch= -1.25
-        phi=1.5*1e10
-        dndM = phi*np.exp(-(mass_range/Mprime))/Mprime *(
-                mass_range/Mprime)**(alpha_sch+1)
-
-        """dndMdtau"""
-
-        return dp_dtau_norm*dndM[:, np.newaxis], int_dp_dtau, dp_dtau_norm, dndM
-#        return dp_dtau_norm
-
-#
-#
-#        dpdtau = Ansatz.alpha12beta_powlaw(tau,
-#                                          tau_0,
-#                                          alpha1,
-#                                          alpha2,
-#                                          beta)
-#
-
-
+# =============================================================================
 if __name__ == "__main__":
 
+    u, g, r = np.loadtxt('SDSS/photometry.dat', usecols=(1, 3, 5), unpack=True)
     models = Model_grid()
 
-    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
-
+#    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
 #    plt.figure()
 #    plt.plot(tau_grid.flatten(), (models.u-models.r).flatten(), 'k,')
 
+#    plt.figure()
+#    plt.title(r'log( Vmax/Mpc$^3$ )')
+#    plt.imshow(np.log10(models.V_max[-2]+1),
+#               extent=[
+#                       models.log_M_star[0], models.log_M_star[-1],
+#                       models.log_tau[0], models.log_tau[-1]
+#                       ],
+#               vmin=3.3, vmax=6.7, cmap='gist_earth',
+#               aspect='auto', origin='lower',
+#               )
+#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+#    plt.ylabel(r'log($\tau$ / Gyr)')
+#    plt.colorbar()
+
+#    plt.figure()
+#    plt.plot(models.M_star, Ansatz.dn_dM(models.M_star))
+#    plt.xlabel(r'M$_*$ / M$_\odot$')
+#    plt.ylabel(r'dn / dM$_*$')
+#    plt.xscale('log')
+#    plt.yscale('log')
+
+#    grid_p = Ansatz.dp_dtau_grid(models.M_star, models.tau)
+#    plt.figure()
+#    plt.title(r'log( dp/d$\tau$ )')
+#    plt.imshow(np.log10(grid_p),
+#               extent=[
+#                       models.log_M_star[0], models.log_M_star[-1],
+#                       models.log_tau[0], models.log_tau[-1]
+#                       ],
+#               aspect='auto', origin='lower',
+#               vmin=-3.8, vmax=-0.2, cmap='gist_earth',
+##               vmin=.1, vmax=0.7, cmap='gist_earth',
+#               )
+#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+#    plt.ylabel(r'log($\tau$)')
+#    plt.colorbar()
+
+#    plt.figure()
+#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e13, models.tau), 'k-')
+#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e11, models.tau), 'r-')
+#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e10, models.tau), 'g-')
+#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e9, models.tau), 'b-')
+#    plt.plot(models.tau, grid_p[:, 50], 'b.')
+#    plt.plot(models.tau, grid_p[:, 100], 'g.')
+#    plt.plot(models.tau, grid_p[:, 150], 'r.')
+#    plt.xlabel(r'$\tau$')
+#    plt.ylabel(r'dp / d$\tau$')
+#    plt.xscale('log')
+#    plt.yscale('log')
+#    plt.ylim(1e-6, 1)
+#    plt.grid(b=True)
+
+#    grid_n = Ansatz.dn_dMdtau_grid(models.M_star, models.tau)
+#    plt.figure()
+#    plt.title(r'log( dn/dMd$\tau$ )')
+#    plt.imshow(np.log10(grid_n),
+#               extent=[
+#                       models.log_M_star[0], models.log_M_star[-1],
+#                       models.log_tau[0], models.log_tau[-1]
+#                       ],
+#               aspect='auto', origin='lower',
+#               vmin=-20, vmax=-13, cmap='gist_earth',
+#               )
+#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+#    plt.ylabel(r'log($\tau$)')
+#    plt.colorbar()
+
+#    for Z in [1, 2, 3]:
+#        plt.figure()
+#        plt.title(r'log (N_galaxies)')
+#        plt.imshow(np.log10(models.N_galaxies[Z]),
+#                   extent=[
+#                           models.log_M_star[0], models.log_M_star[-1],
+#                           models.log_tau[0], models.log_tau[-1]
+#                           ],
+#                   aspect='auto', origin='lower',
+#                   vmin=-1.5, vmax=1.5, cmap='gist_earth',
+#                   )
+#        plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+#        plt.ylabel(r'log($\tau$)')
+#        plt.colorbar()
+
     plt.figure()
-    plt.title(r'log( Vmax/Mpc$^3$ )')
-    plt.imshow(np.log10(models.V_max[-2]+1),
-               extent=[
-                       models.log_M_inf[0], models.log_M_inf[-1],
-                       models.log_tau[0], models.log_tau[-1]
-                       ],
-               vmin=3.3, vmax=6.7, cmap='gist_earth', aspect='auto'
-               )
-    plt.xlabel(r'log(M$_\infty$)')
-    plt.ylabel(r'log($\tau$)')
+    for Z in [1, 2, 3]:
+        plt.hist(models.u[Z].flatten(),
+                 weights=models.N_galaxies[Z].flatten(),
+                 bins=np.linspace(-24, -16, 50),
+                 label=str(models.metallicities[Z]),
+                 histtype='bar', alpha=.7)
+    plt.hist(u,
+             bins=np.linspace(-24, -16, 50),
+             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+    plt.xlabel(r'u')
+    plt.ylabel(r'N')
+    plt.grid(b=True)
+    plt.legend()
+
+    plt.figure()
+    for Z in [1, 2, 3]:
+        plt.hist(models.g[Z].flatten(),
+                 weights=models.N_galaxies[Z].flatten(),
+                 bins=np.linspace(-24, -16, 50),
+                 label=str(models.metallicities[Z]),
+                 histtype='bar', alpha=.7)
+    plt.hist(g,
+             bins=np.linspace(-24, -16, 50),
+             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+    plt.xlabel(r'g')
+    plt.ylabel(r'N')
+    plt.grid(b=True)
+    plt.legend()
+
+    plt.figure()
+    for Z in [1, 2, 3]:
+        plt.hist(models.r[Z].flatten(),
+                 weights=models.N_galaxies[Z].flatten(),
+                 bins=np.linspace(-24, -16, 50),
+                 label=str(models.metallicities[Z]),
+                 histtype='bar', alpha=.7)
+    plt.hist(r,
+             bins=np.linspace(-24, -16, 50),
+             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+    plt.xlabel(r'r')
+    plt.ylabel(r'N')
+    plt.grid(b=True)
+    plt.legend()
+
+    plt.figure()
+    for Z in [1, 2, 3]:
+        u_r = models.u[Z] - models.r[Z]
+        plt.hist(u_r.flatten(),
+                 weights=models.N_galaxies[Z].flatten(),
+                 bins=np.linspace(1, 3.5, 50),
+                 label=str(models.metallicities[Z]),
+                 histtype='bar', alpha=.7)
+    plt.hist(u-r,
+             bins=np.linspace(1, 3.5, 30),
+             label=str(models.metallicities[Z]), histtype='step')
+    plt.xlabel(r'u-r')
+    plt.ylabel(r'N')
+    plt.grid(b=True)
+    plt.legend()
+
+    plt.figure()
+    for Z in [2, 3]:
+        g_r = models.g[Z] - models.r[Z]
+        plt.hist(g_r.flatten(),
+                 weights=models.N_galaxies[Z].flatten(),
+                 bins=np.linspace(0.2, 1.2, 50),
+                 label=str(models.metallicities[Z]),
+                 histtype='bar', alpha=.7)
+    plt.hist(g-r,
+             bins=np.linspace(0.2, 1.2, 30),
+             label=str(models.metallicities[Z]), histtype='step')
+    plt.xlabel(r'g-r')
+    plt.ylabel(r'N')
+    plt.grid(b=True)
+    plt.legend()
+
+    plt.figure()
+    plt.plot(g-r, u-r, 'g.', alpha=.05)
+    for Z in [1, 2, 3]:
+        u_r = models.u[Z] - models.r[Z]
+        g_r = models.g[Z] - models.r[Z]
+        plt.plot(g_r, u_r, 'k.')
+    plt.xlim(0, 2)
+    plt.ylim(0, 4)
+
+    plt.figure()
+    plt.hist2d(r, u-r,
+               range=[[-24, -16], [.5, 3.5]], bins=30,
+               cmap='gist_earth')
+    plt.xlim(-24, -16)
+    plt.ylim(0, 4)
+    plt.colorbar()
+    plt.figure()
+    for Z in [3]:
+        u_r = models.u[Z] - models.r[Z]
+        plt.hist2d(models.r[Z].flatten(), u_r.flatten(),
+                   weights=models.N_galaxies[Z].flatten(),
+                   range=[[-24, -16], [.5, 3.5]], bins=30,
+                   cmap='gist_earth')
+    plt.xlim(-24, -16)
+    plt.ylim(0, 4)
     plt.colorbar()
 
+# =============================================================================
 # ... Paranoy@ rulz!
