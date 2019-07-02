@@ -11,20 +11,40 @@ from scipy.interpolate import interp1d
 from matplotlib import pyplot as plt
 
 
+def V_max(u, g, r):
+    u_limit = 19
+    g_limit = 19
+    r_limit = 17.77
+    z_min = 0.02
+    z_max = 0.07
+    H0 = 95  # km/s/Mpc
+    D_z_min = z_min * 3e5/H0
+    D_z_max = z_max * 3e5/H0
+    survey_solid_angle = 1317  # deg**2
+    survey_solid_angle *= (np.pi/180)**2  # steradian
+
+    D_u = 10**(0.2 * (u_limit-u) - 5)  # Mpc
+    D_g = 10**(0.2 * (g_limit-g) - 5)  # Mpc
+    D_r = 10**(0.2 * (r_limit-r) - 5)  # Mpc
+
+    D_max = np.min([D_u, D_g, D_r], axis=(0)).clip(D_z_min, D_z_max)
+    return survey_solid_angle * (D_max**3 - D_z_min**3) / 3
+
+
 # =============================================================================
 class Ansatz():
 
     def parameters_given_M(M_star):
-        M_sym = 10**10.13
-        tau_sym = 2.4
-        alpha_sym = 3.7
+        M_sym = 10**10
+        tau_sym = 2.16
+        alpha_sym = 3.6
 
-        eta_tau = 0.07
-        eta1 = -0.5
-        eta2 = 0.65
+        eta_tau = 0.09
+        eta1 = -0.3
+        eta2 = 1
 
         tau_0 = tau_sym*(M_star/M_sym)**eta_tau
-        alpha1 = 1 + (alpha_sym-1)*(M_star/M_sym)**(eta1)
+        alpha1 = -1 + (alpha_sym+1)*(M_star/M_sym)**(eta1)
         alpha2 = 1 + (alpha_sym-1)*(M_star/M_sym)**(eta2)
         beta = 4
 
@@ -64,7 +84,7 @@ class Ansatz():
                 dp_dtau_interp*x, log_tau_interp, axis=0)
         return dp_dtau / integral_dpdtau_dtau[np.newaxis, :]
 
-    def dn_dM(M, M_schechter=10**(10.66), alpha=-1.25, phi=0.02):
+    def dn_dM(M, M_schechter=10**(11), alpha=-1.5, phi=0.01):
         """
         Multiplicity function (number density of galaxies
         per unit comoving volume per unit mass), described
@@ -265,8 +285,19 @@ class Model_grid(object):
 # =============================================================================
 if __name__ == "__main__":
 
-    u, g, r = np.loadtxt('SDSS/photometry.dat', usecols=(1, 3, 5), unpack=True)
+    u, g, r, SDSS_V_max = np.loadtxt('SDSS/photometry.dat',
+                                     usecols=(1, 3, 5, 6), unpack=True)
     models = Model_grid()
+
+    plt.figure()
+    yago = V_max(u, g, r)
+    pablo = 1/SDSS_V_max
+    plt.plot(yago, pablo/yago, 'k.', alpha=.1)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel('Yago')
+    plt.ylabel('Pablo')
+    plt.grid(b=True)
 
 #    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
 #    plt.figure()
@@ -354,16 +385,17 @@ if __name__ == "__main__":
 #        plt.ylabel(r'log($\tau$)')
 #        plt.colorbar()
 
+    alfa_models = 0.5
     plt.figure()
     for Z in [1, 2, 3]:
         plt.hist(models.u[Z].flatten(),
                  weights=models.N_galaxies[Z].flatten(),
                  bins=np.linspace(-24, -16, 50),
                  label=str(models.metallicities[Z]),
-                 histtype='bar', alpha=.7)
+                 histtype='bar', alpha=alfa_models)
     plt.hist(u,
              bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
     plt.xlabel(r'u')
     plt.ylabel(r'N')
     plt.grid(b=True)
@@ -375,10 +407,10 @@ if __name__ == "__main__":
                  weights=models.N_galaxies[Z].flatten(),
                  bins=np.linspace(-24, -16, 50),
                  label=str(models.metallicities[Z]),
-                 histtype='bar', alpha=.7)
+                 histtype='bar', alpha=alfa_models)
     plt.hist(g,
              bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
     plt.xlabel(r'g')
     plt.ylabel(r'N')
     plt.grid(b=True)
@@ -390,42 +422,43 @@ if __name__ == "__main__":
                  weights=models.N_galaxies[Z].flatten(),
                  bins=np.linspace(-24, -16, 50),
                  label=str(models.metallicities[Z]),
-                 histtype='bar', alpha=.7)
+                 histtype='bar', alpha=alfa_models)
     plt.hist(r,
              bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=.7)
+             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
     plt.xlabel(r'r')
     plt.ylabel(r'N')
     plt.grid(b=True)
     plt.legend()
 
+    n_bins = 50
     plt.figure()
     for Z in [1, 2, 3]:
         u_r = models.u[Z] - models.r[Z]
         plt.hist(u_r.flatten(),
                  weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(1, 3.5, 50),
+                 bins=np.linspace(1, 3.5, n_bins),
                  label=str(models.metallicities[Z]),
-                 histtype='bar', alpha=.7)
+                 histtype='bar', alpha=alfa_models)
     plt.hist(u-r,
-             bins=np.linspace(1, 3.5, 30),
-             label=str(models.metallicities[Z]), histtype='step')
+             bins=np.linspace(1, 3.5, n_bins),
+             label='SDSS', histtype='step')
     plt.xlabel(r'u-r')
     plt.ylabel(r'N')
     plt.grid(b=True)
     plt.legend()
 
     plt.figure()
-    for Z in [2, 3]:
+    for Z in [1, 2, 3]:
         g_r = models.g[Z] - models.r[Z]
         plt.hist(g_r.flatten(),
                  weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(0.2, 1.2, 50),
+                 bins=np.linspace(0.2, 1.2, n_bins),
                  label=str(models.metallicities[Z]),
-                 histtype='bar', alpha=.7)
+                 histtype='bar', alpha=alfa_models)
     plt.hist(g-r,
-             bins=np.linspace(0.2, 1.2, 30),
-             label=str(models.metallicities[Z]), histtype='step')
+             bins=np.linspace(0.2, 1.2, n_bins),
+             label='SDSS', histtype='step')
     plt.xlabel(r'g-r')
     plt.ylabel(r'N')
     plt.grid(b=True)
@@ -447,16 +480,17 @@ if __name__ == "__main__":
     plt.xlim(-24, -16)
     plt.ylim(0, 4)
     plt.colorbar()
-    plt.figure()
-    for Z in [3]:
+
+    for Z in [1, 2, 3]:
+        plt.figure()
         u_r = models.u[Z] - models.r[Z]
         plt.hist2d(models.r[Z].flatten(), u_r.flatten(),
                    weights=models.N_galaxies[Z].flatten(),
                    range=[[-24, -16], [.5, 3.5]], bins=30,
                    cmap='gist_earth')
-    plt.xlim(-24, -16)
-    plt.ylim(0, 4)
-    plt.colorbar()
+        plt.xlim(-24, -16)
+        plt.ylim(0, 4)
+        plt.colorbar()
 
 # =============================================================================
 # ... Paranoy@ rulz!
