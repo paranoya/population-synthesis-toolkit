@@ -127,7 +127,7 @@ class Model_grid(object):
         self.log_M_star = np.linspace(8, 12, 200)
         self.M_star = 10**self.log_M_star
 
-        self.load_models('models/', n_metallicities_interpolation=10)
+        self.load_models('models/', n_metallicities_interpolation=21)
         self.compute_V_max()
         self.compute_N_galaxies()
 
@@ -284,354 +284,392 @@ class Model_grid(object):
         return np.array(Z_galaxy), np.array(tau_galaxy), np.array(M_inf_galaxy)
 
 
-# =============================================================================
-if __name__ == "__main__":
-
-    u, g, r, SDSS_V_max = np.loadtxt('SDSS/photometry.dat',
-                                     usecols=(1, 3, 5, 6), unpack=True)
-    models = Model_grid()
-
-    plt.figure()
-    yago = V_max(u, g, r)
-    pablo = 1/SDSS_V_max
-    plt.plot(yago, pablo/yago, 'k.', alpha=.1)
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.xlabel('Yago')
-    plt.ylabel('Pablo')
-    plt.grid(b=True)
-
-#    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
+## =============================================================================
+#if __name__ == "__main__":
+#
+#    u, g, r, SDSS_V_max = np.loadtxt('SDSS/photometry.dat',
+#                                     usecols=(1, 3, 5, 6), unpack=True)
+#    models = Model_grid()
+#
 #    plt.figure()
-#    plt.plot(tau_grid.flatten(), (models.u-models.r).flatten(), 'k,')
-
-#    plt.figure()
-#    plt.title(r'log( Vmax/Mpc$^3$ )')
-#    plt.imshow(np.log10(models.V_max[-2]+1),
-#               extent=[
-#                       models.log_M_star[0], models.log_M_star[-1],
-#                       models.log_tau[0], models.log_tau[-1]
-#                       ],
-#               vmin=3.3, vmax=6.7, cmap='gist_earth',
-#               aspect='auto', origin='lower',
-#               )
-#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
-#    plt.ylabel(r'log($\tau$ / Gyr)')
-#    plt.colorbar()
-
-#    plt.figure()
-#    plt.plot(models.M_star, Ansatz.dn_dM(models.M_star))
-#    plt.xlabel(r'M$_*$ / M$_\odot$')
-#    plt.ylabel(r'dn / dM$_*$')
+#    yago = V_max(u, g, r)
+#    pablo = 1/SDSS_V_max
+#    plt.plot(yago, pablo/yago, 'k.', alpha=.1)
 #    plt.xscale('log')
 #    plt.yscale('log')
-
-#    grid_p = Ansatz.dp_dtau_grid(models.M_star, models.tau)
-#    plt.figure()
-#    plt.title(r'log( dp/d$\tau$ )')
-#    plt.imshow(np.log10(grid_p),
-#               extent=[
-#                       models.log_M_star[0], models.log_M_star[-1],
-#                       models.log_tau[0], models.log_tau[-1]
-#                       ],
-#               aspect='auto', origin='lower',
-#               vmin=-3.8, vmax=-0.2, cmap='gist_earth',
-##               vmin=.1, vmax=0.7, cmap='gist_earth',
-#               )
-#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
-#    plt.ylabel(r'log($\tau$)')
-#    plt.colorbar()
-
-#    plt.figure()
-#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e13, models.tau), 'k-')
-#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e11, models.tau), 'r-')
-#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e10, models.tau), 'g-')
-#    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e9, models.tau), 'b-')
-#    plt.plot(models.tau, grid_p[:, 50], 'b.')
-#    plt.plot(models.tau, grid_p[:, 100], 'g.')
-#    plt.plot(models.tau, grid_p[:, 150], 'r.')
-#    plt.xlabel(r'$\tau$')
-#    plt.ylabel(r'dp / d$\tau$')
-#    plt.xscale('log')
-#    plt.yscale('log')
-#    plt.ylim(1e-6, 1)
+#    plt.xlabel('Yago')
+#    plt.ylabel('Pablo')
 #    plt.grid(b=True)
-
-#    grid_n = Ansatz.dn_dMdtau_grid(models.M_star, models.tau)
+#
+##    tau_grid = np.ones_like(models.u) * models.tau[np.newaxis, :, np.newaxis]
+##    plt.figure()
+##    plt.plot(tau_grid.flatten(), (models.u-models.r).flatten(), 'k,')
+#
+##    plt.figure()
+##    plt.title(r'log( Vmax/Mpc$^3$ )')
+##    plt.imshow(np.log10(models.V_max[-2]+1),
+##               extent=[
+##                       models.log_M_star[0], models.log_M_star[-1],
+##                       models.log_tau[0], models.log_tau[-1]
+##                       ],
+##               vmin=3.3, vmax=6.7, cmap='gist_earth',
+##               aspect='auto', origin='lower',
+##               )
+##    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+##    plt.ylabel(r'log($\tau$ / Gyr)')
+##    plt.colorbar()
+#
+##    plt.figure()
+##    plt.plot(models.M_star, Ansatz.dn_dM(models.M_star))
+##    plt.xlabel(r'M$_*$ / M$_\odot$')
+##    plt.ylabel(r'dn / dM$_*$')
+##    plt.xscale('log')
+##    plt.yscale('log')
+#
+##    grid_p = Ansatz.dp_dtau_grid(models.M_star, models.tau)
+##    plt.figure()
+##    plt.title(r'log( dp/d$\tau$ )')
+##    plt.imshow(np.log10(grid_p),
+##               extent=[
+##                       models.log_M_star[0], models.log_M_star[-1],
+##                       models.log_tau[0], models.log_tau[-1]
+##                       ],
+##               aspect='auto', origin='lower',
+##               vmin=-3.8, vmax=-0.2, cmap='gist_earth',
+###               vmin=.1, vmax=0.7, cmap='gist_earth',
+##               )
+##    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+##    plt.ylabel(r'log($\tau$)')
+##    plt.colorbar()
+#
+##    plt.figure()
+##    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e13, models.tau), 'k-')
+##    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e11, models.tau), 'r-')
+##    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e10, models.tau), 'g-')
+##    plt.plot(models.tau, Ansatz.dp_dtau_given_M(1e9, models.tau), 'b-')
+##    plt.plot(models.tau, grid_p[:, 50], 'b.')
+##    plt.plot(models.tau, grid_p[:, 100], 'g.')
+##    plt.plot(models.tau, grid_p[:, 150], 'r.')
+##    plt.xlabel(r'$\tau$')
+##    plt.ylabel(r'dp / d$\tau$')
+##    plt.xscale('log')
+##    plt.yscale('log')
+##    plt.ylim(1e-6, 1)
+##    plt.grid(b=True)
+#
+##    grid_n = Ansatz.dn_dMdtau_grid(models.M_star, models.tau)
+##    plt.figure()
+##    plt.title(r'log( dn/dMd$\tau$ )')
+##    plt.imshow(np.log10(grid_n),
+##               extent=[
+##                       models.log_M_star[0], models.log_M_star[-1],
+##                       models.log_tau[0], models.log_tau[-1]
+##                       ],
+##               aspect='auto', origin='lower',
+##               vmin=-20, vmax=-13, cmap='gist_earth',
+##               )
+##    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+##    plt.ylabel(r'log($\tau$)')
+##    plt.colorbar()
+#
+##    for Z in [1, 2, 3]:
+##        plt.figure()
+##        plt.title(r'log (N_galaxies)')
+##        plt.imshow(np.log10(models.N_galaxies[Z]),
+##                   extent=[
+##                           models.log_M_star[0], models.log_M_star[-1],
+##                           models.log_tau[0], models.log_tau[-1]
+##                           ],
+##                   aspect='auto', origin='lower',
+##                   vmin=-1.5, vmax=1.5, cmap='gist_earth',
+##                   )
+##        plt.xlabel(r'log(M$_*$ / M$_\odot$)')
+##        plt.ylabel(r'log($\tau$)')
+##        plt.colorbar()
+#    
+#    GOOD_MET = [2, 5, 9]
+#
+#    alfa_models = 0.5
 #    plt.figure()
-#    plt.title(r'log( dn/dMd$\tau$ )')
-#    plt.imshow(np.log10(grid_n),
-#               extent=[
-#                       models.log_M_star[0], models.log_M_star[-1],
-#                       models.log_tau[0], models.log_tau[-1]
-#                       ],
-#               aspect='auto', origin='lower',
-#               vmin=-20, vmax=-13, cmap='gist_earth',
-#               )
-#    plt.xlabel(r'log(M$_*$ / M$_\odot$)')
-#    plt.ylabel(r'log($\tau$)')
-#    plt.colorbar()
-
-#    for Z in [1, 2, 3]:
-#        plt.figure()
-#        plt.title(r'log (N_galaxies)')
-#        plt.imshow(np.log10(models.N_galaxies[Z]),
-#                   extent=[
-#                           models.log_M_star[0], models.log_M_star[-1],
-#                           models.log_tau[0], models.log_tau[-1]
-#                           ],
-#                   aspect='auto', origin='lower',
-#                   vmin=-1.5, vmax=1.5, cmap='gist_earth',
-#                   )
-#        plt.xlabel(r'log(M$_*$ / M$_\odot$)')
-#        plt.ylabel(r'log($\tau$)')
-#        plt.colorbar()
-
-    alfa_models = 0.5
-    plt.figure()
-    for Z in [2, 4, 6]:
-        plt.hist(models.u[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -16, 50),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='bar', alpha=alfa_models)
-    plt.hist(u,
-             bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
-    plt.xlabel(r'u')
-    plt.ylabel(r'N')
-    plt.grid(b=True)
-    plt.legend()
-
-    plt.figure()
-    for Z in [2, 4, 6]:
-        plt.hist(models.g[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -16, 50),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='bar', alpha=alfa_models)
-    plt.hist(g,
-             bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
-    plt.xlabel(r'g')
-    plt.ylabel(r'N')
-    plt.grid(b=True)
-    plt.legend()
-
-    plt.figure()
-    for Z in [2, 4, 6]:
-        plt.hist(models.r[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -16, 50),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='bar', alpha=alfa_models)
-    plt.hist(r,
-             bins=np.linspace(-24, -16, 50),
-             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
-    plt.xlabel(r'r')
-    plt.ylabel(r'N')
-    plt.grid(b=True)
-    plt.legend()
-
-    n_bins = 50
-    plt.figure()
-    for Z in [2, 4, 6]:
-        u_r = models.u[Z] - models.r[Z]
-        plt.hist(u_r.flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(1, 3.5, n_bins),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='bar', alpha=alfa_models)
-    plt.hist(u-r,
-             bins=np.linspace(1, 3.5, n_bins),
-             label='SDSS', histtype='step')
-    plt.xlabel(r'u-r')
-    plt.ylabel(r'N')
-    plt.grid(b=True)
-    plt.legend()
-
-    plt.figure()
-    for Z in [2, 4, 6]:
-        g_r = models.g[Z] - models.r[Z]
-        plt.hist(g_r.flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(0.2, 1.2, n_bins),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='bar', alpha=alfa_models)
-    plt.hist(g-r,
-             bins=np.linspace(0.2, 1.2, n_bins),
-             label='SDSS', histtype='step')
-    plt.xlabel(r'g-r')
-    plt.ylabel(r'N')
-    plt.grid(b=True)
-    plt.legend()
-
-    plt.figure()
-    plt.plot(g-r, u-r, 'g.', alpha=.05)
-    for Z in [2, 4, 6]:
-        u_r = models.u[Z] - models.r[Z]
-        g_r = models.g[Z] - models.r[Z]
-        plt.plot(g_r, u_r, 'k.')
-    plt.xlim(0, 2)
-    plt.ylim(0, 4)
-
-    plt.figure()
-    plt.hist2d(r, u-r,
-               range=[[-24, -16], [.5, 3.5]], bins=30,
-               cmap='gist_earth')
-    plt.xlim(-24, -16)
-    plt.ylim(0, 4)
-    plt.colorbar()
-
-    for Z in [2, 4, 6]:
-        plt.figure()
-        u_r = models.u[Z] - models.r[Z]
-        plt.hist2d(models.r[Z].flatten(), u_r.flatten(),
-                   weights=models.N_galaxies[Z].flatten(),
-                   range=[[-24, -16], [.5, 3.5]], bins=30,
-                   cmap='gist_earth')
-        plt.xlim(-24, -16)
-        plt.ylim(0, 4)
-        plt.colorbar()
-
-#%% -----------------------------------------------------------------------------        
-    plt.rcParams['axes.edgecolor']='white'
-    plt.rcParams['axes.facecolor']='black'
-    plt.figure(figsize=(10,10))
-    
-    GOOD_MET = [2, 5, 9]
-    plt.subplot(221)
-    plt.hist2d(r, u-r,
-               range=[[-24, -16], [.5, 3.5]], bins=30,
-               cmap='Greys_r')
-    plt.xlim(-16, -24)
-    plt.ylim(0, 4)
-#    plt.colorbar()
-    
-    color_met = ['blue', 'orange', 'limegreen']
-    for i, Z in enumerate(GOOD_MET):
-        
-        u_r = models.u[Z] - models.r[Z]
-        hist_u_r, r_edges, u_r_edges = np.histogram2d(
-                models.r[Z].flatten(), 
-                u_r.flatten(),
-                weights=models.N_galaxies[Z].flatten(),
-                range=[[-24, -16], [.5, 3.5]], bins=30)
-        levels = [np.max(hist_u_r)*0.1, np.max(hist_u_r)*0.3,
-                  np.max(hist_u_r)*0.7, np.max(hist_u_r)*0.95]
-        plt.contour(r_edges[0:-1], u_r_edges[0:-1], 
-                    hist_u_r.T, colors=color_met[i], 
-                    levels=levels,
-                    linewidths=2)
-        plt.xlim(-16.5, -23.5)
-        plt.ylim(0.5, 3.5)
-        plt.grid(b=True)
-    plt.xlabel(r'r', fontsize=12)
-    plt.ylabel(r'u-r', fontsize=12)
-    plt.locator_params(axis='x', nbins=5)
-    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
-                    top=True, labelsize=11, color='white')
-# -----------------------------------------------------------------------------        
-    ax = plt.subplot(222)
-    plt.hist2d(r, g-r,
-               range=[[-24, -16], [.1, 1.2]], bins=30,
-               cmap='Greys_r')
-    plt.xlim(-16, -24)
-    plt.ylim(0, 4)
-#    plt.colorbar()
-    
-    for i, Z in enumerate(GOOD_MET):
-        
-        g_r = models.g[Z] - models.r[Z]
-        hist_g_r, r_edges, g_r_edges = np.histogram2d(
-                models.r[Z].flatten(), 
-                g_r.flatten(),
-                weights=models.N_galaxies[Z].flatten(),
-                range=[[-24, -16], [.1, 1.2]], bins=30)
-        levels = [np.max(hist_g_r)*0.1, np.max(hist_g_r)*0.3,
-                  np.max(hist_g_r)*0.7, np.max(hist_g_r)*0.95]
-        plt.contour(r_edges[0:-1], g_r_edges[0:-1], 
-                    hist_g_r.T, colors=color_met[i], 
-                    levels=levels,
-                    linewidths=2)
-        plt.xlim(-16.5, -23.5)
-        plt.ylim(0.1, 1.)
-        plt.grid(b=True)
-    plt.xlabel(r'r', fontsize=12)
-    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
-                    top=True, labelsize=11, color='white', labelright=True, labelleft=False)
-    ax.yaxis.set_label_position("right")
-    plt.ylabel(r'g-r', fontsize=12)
-    plt.locator_params(axis='y', nbins=6)
-    plt.locator_params(axis='x', nbins=5)
-#        plt.colorbar()
-# -----------------------------------------------------------------------------        
-        
-    alfa_models = 1
-    alfa_data = 0.4
-    plt.subplot(234)
-    plt.hist(u,
-             bins=np.linspace(-24, -15.5, 50),
-             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
-    for i, Z in enumerate(GOOD_MET):
-        plt.hist(models.u[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -16, 50),
-                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='step', alpha=alfa_models,
-                 color=color_met[i])
-    plt.ylim(0, 15000)
-    plt.xlabel(r'u', fontsize=13)
-    plt.ylabel(r'N', fontsize=13)
-    plt.grid(b=True)
-    plt.legend(facecolor='white', framealpha=1, loc='upper left')
-    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
-                    top=True, labelsize=11, color='white')
-    plt.locator_params(axis='x', nbins=5)
-    
-    ax2 = plt.subplot(235)
-    plt.hist(g,
-             bins=np.linspace(-24, -15.5, 50),
-             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
-    for i, Z in enumerate(GOOD_MET):
-        plt.hist(models.g[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -15.5, 50),
-                 label=r'{:.4} $Z_\odot$'.format(models.metallicities[Z]/0.02),
-                 histtype='step', alpha=alfa_models,
-                 color=color_met[i])
-    plt.setp(ax2.get_yticklabels(), visible=False)
-    plt.ylim(0, 15000)
-    plt.xlabel(r'g', fontsize=13)
-    plt.grid(b=True)
-    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
-                    top=True, labelsize=11, color='white')
-    plt.locator_params(axis='x', nbins=5)
+#    for Z in GOOD_MET:
+#        plt.hist(models.u[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -16, 50),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='bar', alpha=alfa_models)
+#    plt.hist(u,
+#             bins=np.linspace(-24, -16, 50),
+#             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
+#    plt.xlabel(r'u')
+#    plt.ylabel(r'N')
+#    plt.grid(b=True)
 #    plt.legend()
-
-    ax3 = plt.subplot(236)
-    plt.hist(r,
-             bins=np.linspace(-24, -15.5, 50),
-             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
-    for i, Z in enumerate(GOOD_MET):
-        plt.hist(models.r[Z].flatten(),
-                 weights=models.N_galaxies[Z].flatten(),
-                 bins=np.linspace(-24, -15.5, 50),
-                 label=str(models.metallicities[Z]),
-                 histtype='step', alpha=alfa_models,
-                 color=color_met[i])            
-        
-    plt.setp(ax3.get_yticklabels(), visible=False)
-    plt.ylim(0, 15000)
-    plt.xlabel(r'r', fontsize=13)
-    plt.grid(b=True)
-    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
-                    top=True, labelsize=11, color='white')
-    plt.locator_params(axis='x', nbins=5)
-plt.subplots_adjust(hspace=0.15, wspace=0.05)
-
-plt.rcParams['axes.edgecolor']='black'
-plt.rcParams['axes.facecolor']='white'
-#    plt.legend()       
+#
+#    plt.figure()
+#    for Z in GOOD_MET:
+#        plt.hist(models.g[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -16, 50),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='bar', alpha=alfa_models)
+#    plt.hist(g,
+#             bins=np.linspace(-24, -16, 50),
+#             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
+#    plt.xlabel(r'g')
+#    plt.ylabel(r'N')
+#    plt.grid(b=True)
+#    plt.legend()
+#
+#    plt.figure()
+#    for Z in GOOD_MET:
+#        plt.hist(models.r[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -16, 50),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='bar', alpha=alfa_models)
+#    plt.hist(r,
+#             bins=np.linspace(-24, -16, 50),
+#             label=str(models.metallicities[Z]), histtype='step', alpha=alfa_models)
+#    plt.xlabel(r'r')
+#    plt.ylabel(r'N')
+#    plt.grid(b=True)
+#    plt.legend()
+#
+#    n_bins = 50
+#    plt.figure()
+#    for Z in GOOD_MET:
+#        u_r = models.u[Z] - models.r[Z]
+#        plt.hist(u_r.flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(1, 3.5, n_bins),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='bar', alpha=alfa_models)
+#    plt.hist(u-r,
+#             bins=np.linspace(1, 3.5, n_bins),
+#             label='SDSS', histtype='step')
+#    plt.xlabel(r'u-r')
+#    plt.ylabel(r'N')
+#    plt.grid(b=True)
+#    plt.legend()
+#
+#    plt.figure()
+#    for Z in GOOD_MET:
+#        g_r = models.g[Z] - models.r[Z]
+#        plt.hist(g_r.flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(0.2, 1.2, n_bins),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='bar', alpha=alfa_models)
+#    plt.hist(g-r,
+#             bins=np.linspace(0.2, 1.2, n_bins),
+#             label='SDSS', histtype='step')
+#    plt.xlabel(r'g-r')
+#    plt.ylabel(r'N')
+#    plt.grid(b=True)
+#    plt.legend()
+#
+#    plt.figure()
+#    plt.plot(g-r, u-r, 'g.', alpha=.05)
+#    for Z in GOOD_MET:
+#        u_r = models.u[Z] - models.r[Z]
+#        g_r = models.g[Z] - models.r[Z]
+#        plt.plot(g_r, u_r, 'k.')
+#    plt.xlim(0, 2)
+#    plt.ylim(0, 4)
+#
+#    plt.figure()
+#    plt.hist2d(r, u-r,
+#               range=[[-24, -16], [.5, 3.5]], bins=30,
+#               cmap='gist_earth')
+#    plt.xlim(-24, -16)
+#    plt.ylim(0, 4)
+#    plt.colorbar()
+#
+#    for Z in GOOD_MET:
+#        plt.figure()
+#        u_r = models.u[Z] - models.r[Z]
+#        plt.hist2d(models.r[Z].flatten(), u_r.flatten(),
+#                   weights=models.N_galaxies[Z].flatten(),
+#                   range=[[-24, -16], [.5, 3.5]], bins=30,
+#                   cmap='gist_earth')
+#        plt.xlim(-24, -16)
+#        plt.ylim(0, 4)
+#        plt.colorbar()
+#
+##%% -----------------------------------------------------------------------------        
+#    plt.rcParams['axes.edgecolor']='white'
+#    plt.rcParams['axes.facecolor']='black'
+#    plt.figure(figsize=(10,10))
+#    
+#    GOOD_MET = [5, 10, 15, 20]
+#    plt.subplot(221)
+#    plt.hist2d(r, u-r,
+#               range=[[-24, -16], [.5, 3.5]], bins=30,
+#               cmap='Greys_r')
+#    plt.xlim(-16, -24)
+#    plt.ylim(0, 4)
+##    plt.colorbar()
+#    
+#    color_met = ['blue', 'limegreen', 'orange', 'red']
+#    for i, Z in enumerate(GOOD_MET):
+#        
+#        u_r = models.u[Z] - models.r[Z]
+#        hist_u_r, r_edges, u_r_edges = np.histogram2d(
+#                models.r[Z].flatten(), 
+#                u_r.flatten(),
+#                weights=models.N_galaxies[Z].flatten(),
+#                range=[[-24, -16], [.5, 3.5]], bins=30)
+#        levels = [np.max(hist_u_r)*0.1, np.max(hist_u_r)*0.3,
+#                  np.max(hist_u_r)*0.7, np.max(hist_u_r)*0.95]
+#        plt.contour(r_edges[0:-1], u_r_edges[0:-1], 
+#                    hist_u_r.T, colors=color_met[i], 
+#                    levels=levels,
+#                    linewidths=2)
+#        plt.xlim(-16.5, -23.5)
+#        plt.ylim(0.5, 3.5)
+#        plt.grid(b=True)
+#    plt.xlabel(r'r', fontsize=12)
+#    plt.ylabel(r'u-r', fontsize=12)
+#    plt.locator_params(axis='x', nbins=5)
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='white')
+## -----------------------------------------------------------------------------        
+#    ax = plt.subplot(222)
+#    plt.hist2d(r, g-r,
+#               range=[[-24, -16], [.1, 1.2]], bins=30,
+#               cmap='Greys_r')
+#    plt.xlim(-16, -24)
+#    plt.ylim(0, 4)
+##    plt.colorbar()
+#    
+#    for i, Z in enumerate(GOOD_MET):
+#        
+#        g_r = models.g[Z] - models.r[Z]
+#        hist_g_r, r_edges, g_r_edges = np.histogram2d(
+#                models.r[Z].flatten(), 
+#                g_r.flatten(),
+#                weights=models.N_galaxies[Z].flatten(),
+#                range=[[-24, -16], [.1, 1.2]], bins=30)
+#        levels = [np.max(hist_g_r)*0.1, np.max(hist_g_r)*0.3,
+#                  np.max(hist_g_r)*0.7, np.max(hist_g_r)*0.95]
+#        plt.contour(r_edges[0:-1], g_r_edges[0:-1], 
+#                    hist_g_r.T, colors=color_met[i], 
+#                    levels=levels,
+#                    linewidths=2)
+#        plt.xlim(-16.5, -23.5)
+#        plt.ylim(0.1, 1.)
+#        plt.grid(b=True)
+#    plt.xlabel(r'r', fontsize=12)
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='white', labelright=True, labelleft=False)
+#    ax.yaxis.set_label_position("right")
+#    plt.ylabel(r'g-r', fontsize=12)
+#    plt.locator_params(axis='y', nbins=6)
+#    plt.locator_params(axis='x', nbins=5)
+##        plt.colorbar()
+## -----------------------------------------------------------------------------        
+#        
+#    alfa_models = 1
+#    alfa_data = 0.4
+#    plt.subplot(234)
+#    plt.hist(u,
+#             bins=np.linspace(-24, -15.5, 50),
+#             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
+#    for i, Z in enumerate(GOOD_MET):
+#        plt.hist(models.u[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -16, 50),
+#                 label=r'{:.2} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='step', alpha=alfa_models,
+#                 color=color_met[i])
+#    plt.ylim(0, 15000)
+#    plt.xlabel(r'u', fontsize=13)
+#    plt.ylabel(r'N', fontsize=13)
+#    plt.grid(b=True)
+#    plt.legend(facecolor='white', framealpha=1, loc='upper left')
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='white')
+#    plt.locator_params(axis='x', nbins=5)
+#    
+#    ax2 = plt.subplot(235)
+#    plt.hist(g,
+#             bins=np.linspace(-24, -15.5, 50),
+#             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
+#    for i, Z in enumerate(GOOD_MET):
+#        plt.hist(models.g[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -15.5, 50),
+#                 label=r'{:.4} $Z_\odot$'.format(models.metallicities[Z]/0.02),
+#                 histtype='step', alpha=alfa_models,
+#                 color=color_met[i])
+#    plt.setp(ax2.get_yticklabels(), visible=False)
+#    plt.ylim(0, 15000)
+#    plt.xlabel(r'g', fontsize=13)
+#    plt.grid(b=True)
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='white')
+#    plt.locator_params(axis='x', nbins=5)
+##    plt.legend()
+#
+#    ax3 = plt.subplot(236)
+#    plt.hist(r,
+#             bins=np.linspace(-24, -15.5, 50),
+#             label='SDSS', histtype='bar', alpha=alfa_data, color='silver')
+#    for i, Z in enumerate(GOOD_MET):
+#        plt.hist(models.r[Z].flatten(),
+#                 weights=models.N_galaxies[Z].flatten(),
+#                 bins=np.linspace(-24, -15.5, 50),
+#                 label=str(models.metallicities[Z]),
+#                 histtype='step', alpha=alfa_models,
+#                 color=color_met[i])            
+#        
+#    plt.setp(ax3.get_yticklabels(), visible=False)
+#    plt.ylim(0, 15000)
+#    plt.xlabel(r'r', fontsize=13)
+#    plt.grid(b=True)
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='white')
+#    plt.locator_params(axis='x', nbins=5)
+#plt.subplots_adjust(hspace=0.15, wspace=0.05)
+#plt.savefig('derived_colcol_mags_ansatz.png')
+#plt.rcParams['axes.edgecolor']='black'
+#plt.rcParams['axes.facecolor']='white'
+##    plt.legend()       
+#
+#
+##%% =============================================================================
+## Model index-color as function of tau
+## =============================================================================
+#plt.figure(figsize=(8,6))
+#
+#for i, Z in enumerate(GOOD_MET):
+#    u_r = models.u[Z, :, 0]-models.r[Z, :, 0]
+#    
+#    g_r = models.g[Z, :, 0]-models.r[Z, :, 0]
+#    
+#    plt.subplot(121)
+#    plt.plot(models.tau, u_r, 'o-', color=color_met[i],
+#    label=r'{:.4} $Z_\odot$'.format(models.metallicities[Z]/0.02), 
+#            markevery=15)
+#    
+#    plt.xscale('log')
+#    plt.xlabel(r'$\tau$ [Gyrs]', fontsize=13)
+#    plt.ylabel(r'$u -r$', fontsize=13)
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='black')
+#    plt.legend()    
+#    plt.subplot(122)
+#    plt.plot(models.tau, g_r, 'o-', color=color_met[i], 
+#             label=r'{:.4} $Z_\odot$'.format(models.metallicities[Z]/0.02), 
+#             markevery=15)    
+#
+#    plt.xlabel(r'$\tau$ [Gyrs]', fontsize=13)
+#    plt.ylabel(r'$g-r$', fontsize=13)
+#    plt.xscale('log')
+#    plt.tick_params(which='both', length=4, direction = 'in',  right = True,
+#                    top=True, labelsize=11, color='black')
+#plt.legend()
+#plt.subplots_adjust(hspace=0.15, wspace=0.25)
+#plt.savefig('index_color_models.png')
 # =============================================================================
 # ... Paranoy@ rulz!
