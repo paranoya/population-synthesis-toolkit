@@ -179,7 +179,7 @@ for i, Z in enumerate(GOOD_MET):
 
     plt.plot(np.log10(mass_vector), schechter_dn_dlog10M(mass_vector,
              10**(11), alpha=-1.55, phi=.01), '--k')
-    plt.plot(np.log10(mass_vector), GAMA_dn_dlog10M(mass_vector/.7)*5/.7**3, '-k')
+    plt.plot(np.log10(mass_vector), GAMA_dn_dlog10M(mass_vector/.7)/.7**3, '-k')
 
     plt.ylim(3e-5, 3)
     plt.yscale('log')
@@ -188,6 +188,7 @@ for i, Z in enumerate(GOOD_MET):
     plt.legend()
     plt.tick_params(which='both', length=4, direction='in',
                     right=True, top=True, labelsize=13, color='black')
+    plt.grid(b=True)
 
 plt.savefig('mass_distrib_schechter.png')
 
