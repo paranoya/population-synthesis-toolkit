@@ -3,8 +3,7 @@
 
 import numpy as np
 from astropy import units as u
-from . import chemical_evolution as SPiCE_CEM
-from . import observables
+import pst
 
 
 # %%
@@ -24,10 +23,10 @@ class Polynomial_MFH_fit:
             primordial_coeffs.append(c)
 
             L = []
-            p = SPiCE_CEM.Polynomial_MFH(t_start=t_start, t_end=t_end, coeffs=c)
+            p = pst.models.Polynomial_MFH(t_start=t_start, t_end=t_end, coeffs=c)
             sed = p.compute_SED(SSP, t_end)
             for filter_name in obs_filters:
-                photo = observables.luminosity(
+                photo = pst.observables.luminosity(
                     flux=sed, wavelength=SSP.wavelength, filter_name=filter_name)
                 L.append(photo.integral_flux.to_value(u.Lsun))  # linalg complains about units
             primordial_L.append(np.array(L))
@@ -52,7 +51,7 @@ class Polynomial_MFH_fit:
     def fit(self, L_obs_Lsun):
         solution = np.matmul(self.lstsq_solution, L_obs_Lsun)
         c = np.matmul(solution, self.primordial_coeffs)
-        return SPiCE_CEM.Polynomial_MFH(
+        return pst.models.Polynomial_MFH(
             t_start=self.t_start, t_end=self.t_end, coeffs=c)
 
 

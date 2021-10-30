@@ -14,12 +14,9 @@ from astropy.io import fits
 
 # You must install the pst package in ediatable/development form.
 # Go to the pst root folder an type:
-# `python -m pip install -e .`
+# `python -m pip install pst -e .`
 #
-from pst import chemical_evolution as SPiCE_CEM
-from pst import SSP as SPiCE_SSP
-from pst import observables
-from pst.fit import Polynomial_MFH_fit as Fit
+import pst
 
 
 # %% System settings
@@ -34,7 +31,8 @@ for dataset in input_paths:
         raise FileNotFoundError('Cannot find input directory "{}"'.format(path))
 
 output_paths = {}
-output_paths['Illustris'] = os.path.join('.', 'results', 'Illustris')
+output_paths['root'] = os.path.join('.', 'results')
+output_paths['Illustris'] = os.path.join(output_paths['root'], 'Illustris')
 for dataset in output_paths:
     path = output_paths[dataset]
     if os.path.isdir(path) is False:
@@ -42,70 +40,16 @@ for dataset in output_paths:
         print('Created "{}" directory'.format(path))
 
 
-# Plots
+# %% Stellar population synthesys
 
-figures = {}
-panels = {}
-plot_params = {}
-# plot verbosity flags (e.g. show, save, show|save to do both, 0 to do nothing)
-flags = {}
-show = 1
-save = 2
-
-flags['sample_SSP'] = 0  # sample SED for a certain age and Z
-flags['SED'] = 0  # model and fitted SED and luminosities
-flags['Mass'] = 0  # mass formation histories
-flags['mean_SFR'] = 0  # mean star formation rate over a lookback time
-flags['SFR'] = 0  # star formation history
-flags['dot_SFR'] = 0  # time derivative d(SFR)/dt
-flags['ddot_SFR'] = 0  # second time derivative d^2(SFR)/dt^2
-flags['distances'] = 0  # fit residuals
-
-plot_params['sample_SSP'] = {'ages': [0, 10, 60, 80, 100], 'metallicities':[4]}
-
-
-def individual_plots(keys):
-    for key in keys:
-        if flags[key] & (show|save):
-            figures[key] = {}
-            panels[key] = {}
-
-individual_plots(['SED', 'Mass', 'mean_SFR', 'SFR', 'dot_SFR', 'ddot_SFR'])
-
-
-# %% Observables
+# Observables
 
 t0 = 13.7 * u.Gyr  # time of observation
 obs_filters = ['u', 'g', 'r', 'i', 'z']
 
+# SSPs
 
-# %% Stellar population synthesys
-
-SSP = SPiCE_SSP.PopStar(IMF="sal_0.15_100")
-
-if flags['sample_SSP'] & (show|save):
-    fig, ax = plt.subplots()
-    ax.set_title('Some sample SSPs')
-    ax.set_xlabel(r'$\lambda$ [$\AA$]')
-    ax.set_xscale('log')
-    ax.set_ylabel(r'$\lambda L_\lambda$ [L$_\odot$/M$_\odot$]')
-    ax.set_ylim(1e-6, 1e3)
-    ax.set_yscale('log')
-    for age_i in plot_params['sample_SSP']['ages']:
-        for Z_i in plot_params['sample_SSP']['metallicities']:
-            ax.plot(SSP.wavelength,
-                    SSP.wavelength*SSP.SED[Z_i][age_i],
-                    label='Z={}, {:.4f} Myr'.format(
-                        SSP.metallicities[Z_i], SSP.ages[age_i].to_value(u.Myr)))
-    ax.legend()
-    if (flags['sample_SSP'] & show):
-        fig.show()
-        print('show')
-    if (flags['sample_SSP'] & save):
-        path_create(output_path)
-        fig.savefig(os.path.join('sample_SSP.png'))
-        fig.close()
-        print('close')
+ssp = pst.SSP.PopStar(IMF="sal_0.15_100")
 
 
 # %% Primordial polynomia
@@ -115,7 +59,7 @@ N_max = len(obs_filters)  # maximum polynomial degree
 
 poly_fits = []
 for N in range(1, N_max+1):  # for every polynomial degree N up to N_max
-    poly_fits.append(Fit(N, SSP, obs_filters, t0))
+    poly_fits.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
 
 
 # %% Read Illustris MFHs
@@ -133,7 +77,7 @@ for filename in os.listdir(input_paths['Illustris']):
             t_sorted = (t0-lb_time)[::-1]
             mfh_sorted = np.cumsum(mass_formed[::-1])
 
-            model = SPiCE_CEM.Tabular_MFH(t_sorted, mfh_sorted)
+            model = pst.models.Tabular_MFH(t_sorted, mfh_sorted)
             real_models[subhalo] = model
     else:
         print('Skipping', filename)
@@ -145,29 +89,13 @@ observed_lumonosities = {}
 
 for model_name in real_models:
     model = real_models[model_name]
-    real_sed = model.compute_SED(SSP, t0)
-
-    if flags['SED'] & (show|save):
-        fig, ax = plt.subplots()
-        figures['SED'] = fig
-        panels['SED'] = ax
-        ax.xlabel(r'$\lambda$ [$\AA$]')
-        ax.xlim(3000, 10000)
-        ax.xscale('log')
-        ax.ylabel(r'$\lambda L_\lambda\ [L_\odot]$')
-        ax.yscale('log')
-        ax.plot(SSP.wavelength, SSP.wavelength*real_sed, 'k-', label=model_name)
+    real_sed = model.compute_SED(ssp, t0)
 
     L_Lsun = []
     for filter_name in obs_filters:
-        photo = observables.luminosity(
-            flux=real_sed, wavelength=SSP.wavelength, filter_name=filter_name)
+        photo = pst.observables.luminosity(
+            flux=real_sed, wavelength=ssp.wavelength, filter_name=filter_name)
         L_Lsun.append(photo.integral_flux.to_value(u.Lsun))
-
-        if flags['SED'] & (show|save):
-            l_eff = photo.effective_wavelength()
-            norm = np.trapz(photo.filter_resp, photo.wl_filter)
-            ax.plot(l_eff, L[-1]*l_eff/norm, 'ro')
 
     observed_lumonosities[model_name] = np.array(L_Lsun)
 
@@ -183,7 +111,7 @@ for target in observed_lumonosities:
         polynomial_fits[target] = fit.fit(L_obs_Lsun)
 
 
-# %%
+# %% Plot MFH
 
             # plt.figure()
             # mean_sfr = (mfh_sorted[-1]-mfh_sorted[:-1]) / (t0-t_sorted[:-1])
