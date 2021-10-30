@@ -1,0 +1,12 @@
+
+SOME USEFFUL INFO ABOUT SDSS FILTERS DR7
+
+
+The columns of the table represent:
+
+    1. wavelength
+    2. on the sky sensitivity looking through 1.3 airmasses at APO for a point source. ***These define the survey's photometric system ***.
+    3. sensitivity under these conditions for very large sources (size greater than about 80 pixels) for which the infrared scattering is negligible (the infrared scattering only affects the thinned detectors used for ugri and among these, it is negligible for ug; hence this column is different from column 1 only for ri)
+    4. the response of the third column with no atmosphere
+    5. assumed atmospheric transparency at one airmass at Apache Point Observatory
+
