@@ -1,6 +1,7 @@
 import numpy as np
 #import pylab as plt
 from astropy import units as u
+from astropy.io import fits
 from math import erf
 from scipy import special
 
@@ -19,10 +20,6 @@ class Chemical_evolution_model:
     def integral_Z_SFR(self, time):
       return self.Z * self.integral_SFR(time)
 
-    # def set_current_state(self, galaxy):
-    #     galaxy.M_gas = self.M_gas*units.Msun
-    #     galaxy.Z = self.Z
-    #     galaxy.M_stars = self.integral_SFR( galaxy.today/units.Gyr ) #TODO: account for stellar death
 
     def compute_SED(self, SSP, t_obs, allow_negative=True ):
 
@@ -55,6 +52,7 @@ class Chemical_evolution_model:
                             + SSP.SED[index_Z_hi-1][i] * (1-weight_Z_hi))
         return SED
 
+
 #-------------------------------------------------------------------------------
 class Single_burst(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
@@ -64,6 +62,7 @@ class Single_burst(Chemical_evolution_model):
     self.t = kwargs['t_burst']
     Chemical_evolution_model.__init__(self, **kwargs)
 
+# TODO: do this using np.select(); actually, does tb exist at all?
   def integral_SFR(self, time):
     M_t = []
     if type(time)==float:
@@ -75,15 +74,6 @@ class Single_burst(Chemical_evolution_model):
           M_t.append( self.M_stars)
     return M_t
 
-  def integral_Z_SFR(self, time):
-    Z_t = []
-    time=time*units.Gyr
-    for t in time:
-      if t<=self.tb:
-          Z_t.append(0)
-      else:
-          Z_t.append( self.Z * self.M_stars)
-    return Z_t
 
 #-------------------------------------------------------------------------------
 class Gaussian_burst(Chemical_evolution_model):
@@ -92,7 +82,7 @@ class Gaussian_burst(Chemical_evolution_model):
   def __init__(self, **kwargs):
     self.M_inf = kwargs['M_stars']*units.Msun
     self.tb = kwargs['t']*units.Gyr             # Born time
-    self.c=kwargs['c']*units.Myr # En Myr
+    self.c = kwargs['c']*units.Myr # En Myr
     Chemical_evolution_model.__init__(self, **kwargs)
 
   def integral_SFR(self, time):
@@ -170,59 +160,6 @@ class Polynomial_MFH(Chemical_evolution_model):
         return M_hat*self.M_end
 
 #-------------------------------------------------------------------------------
-class Polynomial(Chemical_evolution_model):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, **kwargs):
-        self.M_0 = kwargs['M_0']*units.Msun
-        self.t_0 = kwargs['t_0']*units.Gyr
-        self.Z = kwargs['Z']
-        self.index=kwargs['index']
-        self.n_base=kwargs['n_base']
-        self.lbt_min = kwargs['lbt_min']*units.Gyr
-        self.lbt_max = kwargs['lbt_max']*units.Gyr
-        Chemical_evolution_model.__init__(self, **kwargs)
-
-    def integral_SFR(self,time):
-        time=time*units.Gyr
-        tp=(self.t_0-self.lbt_min-time)/(self.lbt_max-self.lbt_min)
-        M= self.M_0*(tp**self.index-tp**self.n_base)
-        return M
-
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-
-#-------------------------------------------------------------------------------
-class Parametric_SFR(Chemical_evolution_model):
-#-------------------------------------------------------------------------------
-
-  def __init__(self, **kwargs):
-    self.M_inf = kwargs['M_inf']*units.Msun
-    self.t_0 = kwargs['t_0']*units.Gyr
-    self.Z = kwargs['Z']
-    self.a=kwargs['a']
-    self.b=kwargs['b']
-    self.e=kwargs['e']
-    Chemical_evolution_model.__init__(self, **kwargs)
-
-  def integral_SFR(self, time):
-    self.time=time*units.Gyr
-    #SFR = (M0/t0)*( b*(1+a*tp*(1+e*tp/2)) - 4*K*tp**3 )
-    tp=1-self.time/self.t_0
-    K = self.b*(1+self.a/2*(1+self.e/3)) - 1
-    return self.M_inf*( 1-self.b*tp*(1+self.a*(tp/2)*(1+self.e*(tp/3))) + K*tp**4 )
-
-  def give_SFR(self, t):
-     tp=1-t/self.t_0
-     K = self.b*(1+self.a/2*(1+self.e/3)) - 1
-     return (self.M_inf/self.t0)*( self.b*(1+self.a*tp*(1+self.e*tp/2)) - 4*K*tp**3 )
-
-  def integral_Z_SFR(self, t):
-      tp=1-t/self.t_0
-      return self.Z * self.integral_SFR(tp)
-
-
-#-------------------------------------------------------------------------------
 class Tabular_MFH(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
 
@@ -230,6 +167,25 @@ class Tabular_MFH(Chemical_evolution_model):
         self.table_t = times
         self.table_M = masses
         Chemical_evolution_model.__init__(self, **kwargs)
+
+    def integral_SFR(self, times):
+        return np.interp(times, self.table_t, self.table_M)
+
+    def integral_Z_SFR(self, times):
+        return self.Z * self.integral_SFR(times)
+
+#-------------------------------------------------------------------------------
+class Tabular_Illustris(Tabular_MFH):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, filename, t0, **kwargs):
+        # TODO: get rid of t0 !
+        with fits.open(filename) as hdul:
+            lb_time = hdul[1].data['lookback_time'] * u.Gyr
+            mass_formed = np.sum(hdul[3].data, axis=1) *u.Msun # sum over metallicities
+            t_sorted = (t0-lb_time)[::-1]
+            mfh_sorted = np.cumsum(mass_formed[::-1])
+            Tabular_MFH.__init__(self, t_sorted, mfh_sorted, **kwargs)
 
     def integral_SFR(self, times):
         return np.interp(times, self.table_t, self.table_M)

@@ -10,7 +10,6 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 from astropy import units as u
-from astropy.io import fits
 
 # You must install the pst package in ediatable/development form.
 # Go to the pst root folder an type:
@@ -42,10 +41,12 @@ for dataset in output_paths:
 
 # %% Stellar population synthesys
 
+
 # Observables
 
 t0 = 13.7 * u.Gyr  # time of observation
 obs_filters = ['u', 'g', 'r', 'i', 'z']
+
 
 # SSPs
 
@@ -62,23 +63,16 @@ for N in range(1, N_max+1):  # for every polynomial degree N up to N_max
     poly_fits.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
 
 
-# %% Read Illustris MFHs
+# %% Read Illustris models
 
 real_models = {}
 
 for filename in os.listdir(input_paths['Illustris']):
     if filename.endswith(".fits"):
-        with fits.open(os.path.join(input_paths['Illustris'], filename)) as hdul:
-            subhalo = filename[:-9]
-            print(subhalo)
-
-            lb_time = hdul[1].data['lookback_time'] * u.Gyr
-            mass_formed = np.sum(hdul[3].data, axis=1) *u.Msun # sum over metallicities
-            t_sorted = (t0-lb_time)[::-1]
-            mfh_sorted = np.cumsum(mass_formed[::-1])
-
-            model = pst.models.Tabular_MFH(t_sorted, mfh_sorted)
-            real_models[subhalo] = model
+        subhalo = filename[:-9]
+        print(subhalo)
+        real_models[subhalo] = pst.models.Tabular_Illustris(
+            os.path.join(input_paths['Illustris'], filename), t0)
     else:
         print('Skipping', filename)
 
