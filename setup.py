@@ -3,7 +3,6 @@ from setuptools import setup, find_packages
 
 setup(
     name="pst",
-    # packages = find_packages(),
     version='0.1',
     description='Population Synthesis Toolkit',
     long_description='This is a first test of the Python population synthesis package',
