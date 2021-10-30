@@ -31,12 +31,15 @@ for dataset in input_paths:
 
 output_paths = {}
 output_paths['root'] = os.path.join('.', 'results')
-output_paths['Illustris'] = os.path.join(output_paths['root'], 'Illustris')
-for dataset in output_paths:
-    path = output_paths[dataset]
-    if os.path.isdir(path) is False:
-        os.makedirs(path)
-        print('Created "{}" directory'.format(path))
+
+def output_subdir(parent, key):
+    subdir = os.path.join(output_paths[parent], key)
+    output_paths[key] = subdir
+    if os.path.isdir(subdir) is False:
+        os.makedirs(subdir)
+        print('Created "{}" directory'.format(subdir))
+
+output_subdir('root', 'Illustris')
 
 
 # %% Stellar population synthesys
@@ -58,9 +61,9 @@ ssp = pst.SSP.PopStar(IMF="sal_0.15_100")
 N_max = len(obs_filters)  # maximum polynomial degree
 # negative_corrected = False  # Apply the negative-SFR correction?
 
-poly_fits = []
+polynomial_bases = []
 for N in range(1, N_max+1):  # for every polynomial degree N up to N_max
-    poly_fits.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
+    polynomial_bases.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
 
 
 # %% Read Illustris models
@@ -101,54 +104,72 @@ polynomial_fits = {}
 for target in observed_lumonosities:
     L_obs_Lsun = observed_lumonosities[target]
 
-    for fit in poly_fits:
-        polynomial_fits[target] = fit.fit(L_obs_Lsun)
+    polynomial_fits[target] = []
+    for basis in polynomial_bases:
+        polynomial_fits[target].append(basis.fit(L_obs_Lsun))
 
 
-# %% Plot MFH
+# %% Plots
 
-            # plt.figure()
-            # mean_sfr = (mfh_sorted[-1]-mfh_sorted[:-1]) / (t0-t_sorted[:-1])
-            # plt.plot(t0-t_sorted[:-1], mean_sfr.to_value(u.Msun/u.yr), 'k-', label=subhalo)
-            # t = t0-np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 101)*u.Gyr
-            # # plt.plot(t, model.integral_SFR(t), 'y-', label='table')
-            # plt.xlabel('lookback time [Gyr]')
-            # # plt.xscale('log')
-            # plt.ylabel(r'$\langle\Psi\rangle$ [M$_\odot$/yr]')
-            # peak = np.max(mean_sfr.to_value(u.Msun/u.yr))
-            # plt.ylim(-.1*peak, 1.1*peak)
-            # # plt.ylim(1e-3*peak, 1.1*peak)
-            # # plt.yscale('log')
-            # # plt.legend()
-            # # plt.show()
+def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
+    output_subdir('Illustris', savename)
+    for model_name in real_models:
+        plt.figure()
+        plt.title(model_name)
+        model = real_models[model_name]
+        poly_fits = polynomial_fits[model_name]
 
-            # # plt.figure()
-            # # plt.plot(lb_time, (mfh_sorted[-1]-mfh_sorted)[::-1], 'k--')
-            # # plt.xlabel('lookback time [Gyr]')
-            # # plt.xscale('log')
-            # # plt.yscale('log')
-            # # plt.show()
+        lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 101)*u.Gyr
+        t = t0 - lookback_time
+        if lookback_x:
+            x = lookback_time
+            plt.xlabel('lookback time [Gyr]')
+            plt.xscale('log')
+        else:
+            x = t
+            plt.xlabel('t [Gyr]')
 
-            # # plt.figure()
-            # # plt.plot(lb_time, mass_formed, label=filename)
-            # # plt.plot(lb_time[:-1], np.diff(mfh_sorted)[::-1], label='model')
-            # # plt.xlabel('lookback time [Gyr]')
-            # # plt.xscale('log')
-            # # plt.yscale('log')
-            # # plt.legend()
-            # # plt.show()
+        y = result(model, t)
+        ymax = y.max().value
+        ymin = y.min().value
+        plt.plot(x, y, 'k-', label='model')
+        for i in range(N_max):
+            y = result(poly_fits[i], t)
+            plt.plot(x, y,
+                     'b', alpha=(i+1.)/N_max, ls=(1+(i&1))*'-',
+                     label='N={}'.format(i+1))
+
+        plt.ylabel(ylabel)
+        if logy:
+            plt.ylim(max(1e-3*ymax, ymin), 1.1*ymax)
+            plt.yscale('log')
+        else:
+            margin = .1*(ymax-ymin)
+            plt.ylim(ymin-margin, ymax+margin)
+        plt.legend()
+        plt.savefig(os.path.join(
+            output_paths[savename], '{}.png'.format(model_name)))
+        plt.show()
+        plt.close()
 
 
+# %%
+plot_result('mass', lambda model, t: model.integral_SFR(t),
+            r'M [M$_\odot$]', logy=False, lookback_x=False)
 
-            # L_obs_Lsun =  dtype=u.Quantity)
+# %%
+plot_result('mean_SFR', lambda model, t:
+            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 -t),
+            r'<SFR> [M$_\odot$/Gyr]')
 
-        # mean_sfr_poly = (polynomial_fit.integral_SFR(t0)
-                          # -polynomial_fit.integral_SFR(t)) / (t0-t)
-        # plt.plot(t0-t, mean_sfr_poly.to_value(u.Msun/u.yr), ls='--',
-                  # label='N = {}'.format(len(polynomial_fit.coeffs)-1))
+# %%
+plot_result('SFR', lambda model, t: model.SFR(t),
+            r'SFR [M$_\odot$/Gyr]', logy=False) #, lookback_x=False)
 
-            # plt.legend()
-            # plt.show()
+# %%
+plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),
+            r'd(SFR)/dt [M$_\odot$/Gyr^2]', logy=False) #, lookback_x=False)
+
 
 
 # %%                                                    ... Paranoy@ Rulz! ;^D

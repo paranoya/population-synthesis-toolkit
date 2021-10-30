@@ -89,25 +89,21 @@ class Gaussian_burst(Chemical_evolution_model):
     time=time*units.Gyr
     return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
 
-  def give_SFR(self, time):
+  def SFR(self, time):
     time=time*units.Gyr
     a = self.M_inf/(2*self.c*np.sqrt(np.pi/2))
     return a * np.exp(-(time-self.tb)**2/(2*self.c**2))
 
-  def give_der_SFR(self,time):
+  def dot_SFR(self,time):
     time=time*units.Gyr
     a = self.M_inf/(self.c*np.sqrt(np.pi/2))
     return -a/self.c**2 * (time-self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
 
-
-  def give_2der_SFR(self,time):
+  def ddot_SFR(self,time):
     time=time*units.Gyr
     a = self.M_inf/(self.c*np.sqrt(np.pi/2))
     return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
 
-
-  def integral_Z_SFR(self, time):
-    return self.Z * self.integral_SFR(time)
 
 #-------------------------------------------------------------------------------
 class Exponential_SFR(Chemical_evolution_model):
@@ -159,6 +155,22 @@ class Polynomial_MFH(Chemical_evolution_model):
             M_hat += c*t_hat**n
         return M_hat*self.M_end
 
+    def SFR(self, time):
+        t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
+        dot_M_hat = 0
+        for n, c in enumerate(self.coeffs):
+            if n>0:
+                dot_M_hat -= c*n*t_hat**(n-1)
+        return dot_M_hat * self.M_end/(self.t_end-self.t_start)
+
+    def dot_SFR(self, time):
+        t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
+        ddot_M_hat = 0*u.Gyr/time
+        for n, c in enumerate(self.coeffs):
+            if n>1:
+                ddot_M_hat -= c*n*(n-1)*t_hat**(n-2)
+        return ddot_M_hat * self.M_end/(self.t_end-self.t_start)**2
+
 #-------------------------------------------------------------------------------
 class Tabular_MFH(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
@@ -166,13 +178,18 @@ class Tabular_MFH(Chemical_evolution_model):
     def __init__(self, times, masses, **kwargs):
         self.table_t = times
         self.table_M = masses
+        self.table_SFR = np.gradient(masses, times)
+        self.table_dot_SFR = np.gradient(self.table_SFR, times)
         Chemical_evolution_model.__init__(self, **kwargs)
 
     def integral_SFR(self, times):
         return np.interp(times, self.table_t, self.table_M)
 
-    def integral_Z_SFR(self, times):
-        return self.Z * self.integral_SFR(times)
+    def SFR(self, times):
+        return np.interp(times, self.table_t, self.table_SFR)
+
+    def dot_SFR(self, times):
+        return np.interp(times, self.table_t, self.table_dot_SFR)
 
 #-------------------------------------------------------------------------------
 class Tabular_Illustris(Tabular_MFH):
@@ -186,12 +203,6 @@ class Tabular_Illustris(Tabular_MFH):
             t_sorted = (t0-lb_time)[::-1]
             mfh_sorted = np.cumsum(mass_formed[::-1])
             Tabular_MFH.__init__(self, t_sorted, mfh_sorted, **kwargs)
-
-    def integral_SFR(self, times):
-        return np.interp(times, self.table_t, self.table_M)
-
-    def integral_Z_SFR(self, times):
-        return self.Z * self.integral_SFR(times)
 
 
 #-------------------------------------------------------------------------------
