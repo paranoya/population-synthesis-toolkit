@@ -106,3 +106,7 @@ venv.bak/
 
 # results directory
 exmples/results
+
+# external dependencies
+data/PopStar
+
