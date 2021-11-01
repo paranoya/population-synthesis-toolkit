@@ -12,6 +12,46 @@ from astropy import units as u
 from scipy import interpolate
 from pst import root_path
 
+from specutils.manipulation import FluxConservingResampler
+
+# =============================================================================
+class Observable(object):
+# =============================================================================
+    pass
+
+# =============================================================================
+class Spectrum(Observable):
+# =============================================================================
+    """
+    
+    """
+    def __init__(self, central_wavelenghts):
+        self.wavelengths = central_wavelenghts
+        # self.wavelength_bins = np.array([
+        #     (3*self.wavelengths[0]-self.wavelengths[1])/2,
+        #     (self.wavelengths[1:]+self.wavelengths[:-1])/2,
+        #     (3*self.wavelengths[-1]-self.wavelengths[-2])/2
+        #     ])
+        #TODO: Different resamplers
+        self.resampler = FluxConservingResampler()
+    
+    def from_Spectrum1D(self, spectrum):
+        return self.resampler(spectrum, self.wavelengths)        
+        
+# =============================================================================
+class Luminosity(Observable):
+# =============================================================================
+    pass
+
+# =============================================================================
+class Magnitude(Observable):
+# =============================================================================
+    pass
+
+# =============================================================================
+class Photons(Observable):
+# =============================================================================
+    pass
 
 # =============================================================================
 class Filter(object):
@@ -273,3 +313,26 @@ class magnitude(Filter):
         m=-2.5* np.log10(integral_flux/integral_flux_vega) +0.58
 
         return m
+
+if __name__ == '__main__':
+    from astropy.modeling import models
+    import astropy.constants as c
+    from astropy.modeling.physical_models import BlackBody
+    from specutils import Spectrum1D
+
+    bb = models.BlackBody(temperature=5700*u.K)
+    wl = np.logspace(1, 5, 141) * u.angstrom    
+    spec = Spectrum1D(bb(wl), wl)    
+    
+    blue_wavelength = np.linspace(4000, 6000, 10)*u.angstrom
+    
+    
+    blue_arm = Spectrum(blue_wavelength)
+    resampled_spec = blue_arm.from_Spectrum1D(spec)
+    
+    from matplotlib import pyplot as plt
+    
+    plt.figure()
+    plt.plot(spec.spectral_axis, spec.flux*c.c/wl**2, '-+')
+    plt.plot(resampled_spec.spectral_axis, resampled_spec.flux*c.c/blue_wavelength**2, '-o')
+    plt.xlim(3000, 10000)    
