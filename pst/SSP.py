@@ -317,8 +317,8 @@ class Granada(SSP):
 #         self.ages = self.ages*1e9
 #         self.metallicities = 10**self.metallicities *0.02
 
-# if __name__ =='__main__':
-#     ssp = PopStar(IMF='cha_0.15_100')
+if __name__ =='__main__':
+    ssp = PopStar(IMF='cha_0.15_100')
 
 
 # %%                                                    ... Paranoy@ Rulz! ;^D
