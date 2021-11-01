@@ -108,5 +108,5 @@ venv.bak/
 exmples/results
 
 # external dependencies
-data/PopStar
+pst/data/PopStar
 
