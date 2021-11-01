@@ -153,13 +153,12 @@ def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
                      'b', alpha=N/N_max, ls=(2-(N&1))*'-',
                      label='N={}'.format(N))
             if correct_negative_SFR:
-                t_bins = sfr_bins[target][i]
-                print(target, t_bins)
+                t_bins = sfr_bins[model_name][i]
                 if lookback_x:
                     x_bins = t0 - t_bins
                 else:
                     x_bins = t_bins
-                y_bins = result(poly_fit, t_bins)
+                y_bins = result(poly_fits[i], t_bins)
                 plt.plot(x_bins, y_bins, 'b+', alpha=N/N_max)
 
         plt.ylabel(ylabel)
@@ -183,7 +182,9 @@ plot_result('mass', lambda model, t: model.integral_SFR(t),
 # %%
 plot_result('mean_SFR', lambda model, t:
             (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 -t),
-            r'<SFR> [M$_\odot$/Gyr]')
+            r'<SFR> [M$_\odot$/Gyr]',
+            lookback_x=False,
+            )
 
 # %%
 plot_result('SFR', lambda model, t: model.SFR(t),
