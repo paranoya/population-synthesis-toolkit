@@ -10,9 +10,10 @@ import pst
 
 class Polynomial_MFH_fit:
 
-    def __init__(self, N, SSP, obs_filters, t_end, t_start=0):
+    def __init__(self, N, SSP, obs_filters, t_obs, t_end=t_obs, t_start=0):
         self.t_start = t_start
         self.t_end = t_end
+        self.t_obs = t_obs
         primordial_coeffs = []
         primordial_L = []
         for n in range(N):
@@ -24,7 +25,7 @@ class Polynomial_MFH_fit:
 
             L = []
             p = pst.models.Polynomial_MFH(t_start=t_start, t_end=t_end, coeffs=c)
-            sed = p.compute_SED(SSP, t_end)
+            sed = p.compute_SED(SSP, t_obs)
             for filter_name in obs_filters:
                 photo = pst.observables.luminosity(
                     flux=sed, wavelength=SSP.wavelength, filter_name=filter_name)

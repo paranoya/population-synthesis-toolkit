@@ -125,8 +125,8 @@ for target in observed_lumonosities:
 
 # %% Plots
 
-def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
-    output_subdir('Illustris', savename)
+def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
+    output_subdir('Illustris', save_dir)  # create directory to save files
     for model_name in real_models:
         plt.figure()
         plt.title(model_name)
@@ -170,7 +170,7 @@ def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
             plt.ylim(ymin-margin, ymax+margin)
         plt.legend()
         plt.savefig(os.path.join(
-            output_paths[savename], '{}.png'.format(model_name)))
+            output_paths[save_dir], '{}.png'.format(model_name)))
         plt.show()
         plt.close()
 
@@ -181,14 +181,18 @@ plot_result('mass', lambda model, t: model.integral_SFR(t),
 
 # %%
 plot_result('mean_SFR', lambda model, t:
-            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 -t),
+            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
             r'<SFR> [M$_\odot$/Gyr]',
-            lookback_x=False,
+            logy=False,
+            # lookback_x=False,
             )
 
 # %%
 plot_result('SFR', lambda model, t: model.SFR(t),
-            r'SFR [M$_\odot$/Gyr]', logy=False) #, lookback_x=False)
+            r'SFR [M$_\odot$/Gyr]',
+            # logy=False,
+            lookback_x=False,
+            )
 
 # %%
 # plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),
