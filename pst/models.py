@@ -18,7 +18,7 @@ class Chemical_evolution_model:
         return self.Z
 
     def integral_Z_SFR(self, time):
-      return self.Z * self.integral_SFR(time)
+        return self.Z * self.integral_SFR(time)
 
 
     def compute_SED(self, SSP, t_obs, allow_negative=True ):
@@ -48,8 +48,9 @@ class Chemical_evolution_model:
                     Z/SSP.metallicities[index_Z_hi-1]
                     ) / np.log(SSP.metallicities[index_Z_hi]
                                / SSP.metallicities[index_Z_hi-1])
-                SED += m * (SSP.SED[index_Z_hi][i] * weight_Z_hi
-                            + SSP.SED[index_Z_hi-1][i] * (1-weight_Z_hi))
+                print(index_Z_hi, weight_Z_hi)
+                SED += m * (SSP.spectrum[index_Z_hi][i].flux * weight_Z_hi
+                            + SSP.spectrum[index_Z_hi-1][i].flux * (1-weight_Z_hi))
         return SED
 
 

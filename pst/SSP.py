@@ -129,12 +129,13 @@ class PopStar(SSP):
                             10.08, 10.11, 10.12, 10.13, 10.14, 10.15, 10.18])
     self.ages = 10**self.log_ages_yr * u.yr
     # isochrone age in delta [log(tau)]=0.01
-    wavelength = np.loadtxt( os.path.join(self.path,'SED','spneb_kro_0.15_100_z0500_t9.95'),
+    self.wavelength = np.loadtxt( os.path.join(self.path,'SED','spneb_kro_0.15_100_z0500_t9.95'),
   			  dtype=float, skiprows=0, usecols=(0,), unpack=True
   			  ) *u.angstrom
     print("> Initialising Popstar models (IMF='"+IMF+"')")
-    self.spectrum = np.empty( shape=(self.metallicities.size,self.log_ages_yr.size),
-                             dtype=Spectrum1D)
+    self.spectrum = np.empty(
+        shape=(self.metallicities.size, self.log_ages_yr.size),
+        dtype=Spectrum1D)
     if nebular:
         column=3
         print('--> Including NEBULAR emission')
@@ -149,9 +150,10 @@ class PopStar(SSP):
                 'spneb_{0}_z{1:04.0f}_t{2:.2f}'.format(IMF, Z*1e4, age) )
             spec = np.loadtxt(
                 file, dtype=float, skiprows=0, usecols=(column),
-                unpack=True) * u.Lsun/u.angstrom * wavelength
+                unpack=True) * u.Lsun/u.Angstrom/u.Msun  # * self.wavelength
+            # TODO: Decide Flam, Fnu, or nuFnu
             self.spectrum[i][j] = Spectrum1D(flux=spec,
-                                             spectral_axis=wavelength)
+                                             spectral_axis=self.wavelength)
 
 #-------------------------------------------------------------------------------
 class PyPopStar(SSP):
