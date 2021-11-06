@@ -102,3 +102,11 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+
+# results directory
+**/results/**
+
+# external dependencies
+pst/data/PopStar
+

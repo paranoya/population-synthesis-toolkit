@@ -56,14 +56,12 @@ obs_filters = ['u', 'g', 'r', 'i', 'z']
 ssp = pst.SSP.PopStar(IMF="sal_0.15_100")
 
 
-# %% Primordial polynomia
+# Primordial polynomia
 
-N_max = len(obs_filters)  # maximum polynomial degree
-# negative_corrected = False  # Apply the negative-SFR correction?
-
-polynomial_bases = []
-for N in range(1, N_max+1):  # for every polynomial degree N up to N_max
-    polynomial_bases.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
+N_min = 4
+N_max = len(obs_filters)
+N_poly = np.arange(N_min, N_max+1)  # polynomial degree
+correct_negative_SFR = True
 
 
 # %% Read Illustris models
@@ -99,20 +97,36 @@ for model_name in real_models:
 
 # %% Polynomial fit
 
+polynomial_bases = []
+for N in N_poly:  # for every polynomial degree N
+    polynomial_bases.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
+
 polynomial_fits = {}
+if correct_negative_SFR:
+    sfr_bins = {}
 
 for target in observed_lumonosities:
     L_obs_Lsun = observed_lumonosities[target]
 
     polynomial_fits[target] = []
+    if correct_negative_SFR:
+        sfr_bins[target] = []
     for basis in polynomial_bases:
-        polynomial_fits[target].append(basis.fit(L_obs_Lsun))
+        poly_fit = basis.fit(L_obs_Lsun)
+        polynomial_fits[target].append(poly_fit)
+        if correct_negative_SFR:
+            lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 101)*u.Gyr
+            t = t0 - lookback_time
+            sfr = poly_fit.SFR(t)
+            zeros = np.where(sfr[:-1]*sfr[1:] < 0)[0]
+            sfr_bins[target].append(np.r_[
+                t0, np.sqrt(t[zeros]*t[zeros+1]), 0*u.Gyr])
 
 
 # %% Plots
 
-def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
-    output_subdir('Illustris', savename)
+def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
+    output_subdir('Illustris', save_dir)  # create directory to save files
     for model_name in real_models:
         plt.figure()
         plt.title(model_name)
@@ -133,11 +147,19 @@ def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
         ymax = y.max().value
         ymin = y.min().value
         plt.plot(x, y, 'k-', label='model')
-        for i in range(N_max):
+        for i, N in enumerate(N_poly):
             y = result(poly_fits[i], t)
             plt.plot(x, y,
-                     'b', alpha=(i+1.)/N_max, ls=(1+(i&1))*'-',
-                     label='N={}'.format(i+1))
+                     'b', alpha=N/N_max, ls=(2-(N&1))*'-',
+                     label='N={}'.format(N))
+            if correct_negative_SFR:
+                t_bins = sfr_bins[model_name][i]
+                if lookback_x:
+                    x_bins = t0 - t_bins
+                else:
+                    x_bins = t_bins
+                y_bins = result(poly_fits[i], t_bins)
+                plt.plot(x_bins, y_bins, 'b+', alpha=N/N_max)
 
         plt.ylabel(ylabel)
         if logy:
@@ -148,7 +170,7 @@ def plot_result(savename, result, ylabel, logy=True, lookback_x=True):
             plt.ylim(ymin-margin, ymax+margin)
         plt.legend()
         plt.savefig(os.path.join(
-            output_paths[savename], '{}.png'.format(model_name)))
+            output_paths[save_dir], '{}.png'.format(model_name)))
         plt.show()
         plt.close()
 
@@ -159,16 +181,22 @@ plot_result('mass', lambda model, t: model.integral_SFR(t),
 
 # %%
 plot_result('mean_SFR', lambda model, t:
-            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 -t),
-            r'<SFR> [M$_\odot$/Gyr]')
+            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
+            r'<SFR> [M$_\odot$/Gyr]',
+            logy=False,
+            # lookback_x=False,
+            )
 
 # %%
 plot_result('SFR', lambda model, t: model.SFR(t),
-            r'SFR [M$_\odot$/Gyr]', logy=False) #, lookback_x=False)
+            r'SFR [M$_\odot$/Gyr]',
+            # logy=False,
+            lookback_x=False,
+            )
 
 # %%
-plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),
-            r'd(SFR)/dt [M$_\odot$/Gyr^2]', logy=False) #, lookback_x=False)
+# plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),
+#             r'd(SFR)/dt [M$_\odot$/Gyr^2]', logy=False) #, lookback_x=False)
 
 
 
