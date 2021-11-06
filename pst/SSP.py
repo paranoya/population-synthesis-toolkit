@@ -39,13 +39,13 @@ class SSP(object):
         # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)    
         Z_i.clip( self.metallicities[0], self.metallicities[-1], out=Z_i ) # to prevent extrapolation
         
-        extinction = np.ones((M_i.size, self.wavelength.size))
+        extinction = np.ones((M_i.size, self.spectrum[0][0].spectral_axis.size))
         if dust_model:
             log_t_mid = (np.log10(t_i[:-1])+np.log10(t_i[1:]))/2
             for ii, log_t_i in enumerate(log_t_mid):
-                extinction[ii, :] = dust_model(10**log_t_i/u.yr, self.wavelength) 
+                extinction[ii, :] = dust_model(10**log_t_i/u.yr, self.wavelength)
 
-        SED=np.zeros( self.wavelength.size ) 
+        SED=np.zeros( self.spectrum[0][0].spectral_axis.size ) 
         weights = np.zeros((t_i.size, self.metallicities.size))
         for i, mass_i in enumerate(M_i):
             #print(t_i[i]/u.Gyr, self.log_ages_yr[i],'\t', m/u.Msun, Z_i[i])
@@ -53,10 +53,12 @@ class SSP(object):
                 index_Z_hi = self.metallicities.searchsorted( Z_i[i] ).clip( 1, len(self.metallicities)-1 )                                                
                 weight_Z_hi = np.log( Z_i[i]/self.metallicities[index_Z_hi-1] 
                                      ) / np.log( self.metallicities[index_Z_hi]/self.metallicities[index_Z_hi-1] ) # log interpolation in Z                
-                SED = SED + extinction[i, :]*mass_i*( self.SED[index_Z_hi][i]*weight_Z_hi + self.SED[index_Z_hi-1][i]*(1-weight_Z_hi) )
-                weights[i, index_Z_hi] = weight_Z_hi * mass_i
-                weights[i, index_Z_hi-1] = (1-weight_Z_hi) * mass_i
-        weights /= np.sum(M_i)
+                SED = SED + extinction[i, :] * mass_i * (
+                    self.spectrum[index_Z_hi][i].flux*weight_Z_hi + 
+                    self.spectrum[index_Z_hi-1][i].flux*(1-weight_Z_hi))                
+                weights[i, index_Z_hi] = weight_Z_hi * mass_i.value
+                weights[i, index_Z_hi-1] = (1-weight_Z_hi) * mass_i.value
+        weights /= np.sum(M_i.value)
         
         if plot_interpolation:
             from matplotlib import pyplot as plt
@@ -149,7 +151,7 @@ class PopStar(SSP):
                 'spneb_{0}_z{1:04.0f}_t{2:.2f}'.format(IMF, Z*1e4, age) )
             spec = np.loadtxt(
                 file, dtype=float, skiprows=0, usecols=(column),
-                unpack=True) * u.Lsun/u.angstrom * wavelength
+                unpack=True) * u.Lsun/(u.angstrom*u.Msun) * wavelength
             self.spectrum[i][j] = Spectrum1D(flux=spec,
                                              spectral_axis=wavelength)
 
