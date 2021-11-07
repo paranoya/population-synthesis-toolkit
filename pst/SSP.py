@@ -252,7 +252,7 @@ class PyPopStar(SSP):
 #                                                      ) * u.Lsun/u.Angstrom/u.Msun
 
 
-class Granada(SSP):
+class BaseGM(SSP):
 
     def __init__(self):
         self.path = os.path.join(os.path.dirname(__file__),
