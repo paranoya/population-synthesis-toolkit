@@ -53,10 +53,12 @@ class SSP(object):
             if mass_i > 0:
                 index_Z_hi = self.metallicities.searchsorted(Z_i[i]).clip(
                     1, len(self.metallicities)-1)
-                # log interpolation in Z
+                # log interpolation in Z --> Crashes when there is only 1 met?
                 weight_Z_hi = (np.log(Z_i[i]/self.metallicities[index_Z_hi-1])
                                / np.log(self.metallicities[index_Z_hi]
                                         / self.metallicities[index_Z_hi-1]))
+                if np.isnan(weight_Z_hi):
+                    weight_Z_hi = 0
                 SED = SED + extinction[i, :] * mass_i * (
                     self.L_lambda[index_Z_hi][i].flux * weight_Z_hi +
                     self.L_lambda[index_Z_hi-1][i].flux * (1-weight_Z_hi))
