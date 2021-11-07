@@ -109,4 +109,5 @@ venv.bak/
 
 # external dependencies
 pst/data/PopStar
+pst/data/BaseGM
 
