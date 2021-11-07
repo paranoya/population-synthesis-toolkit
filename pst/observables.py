@@ -14,17 +14,17 @@ from pst import root_path
 
 from specutils.manipulation import FluxConservingResampler
 
-# =============================================================================
+
 class Observable(object):
-# =============================================================================
+
     pass
 
-# =============================================================================
+
 class Spectrum(Observable):
-# =============================================================================
     """
-    
+    This class computes a spectrum given the spectral axis points.
     """
+
     def __init__(self, central_wavelenghts):
         self.wavelengths = central_wavelenghts
         # self.wavelength_bins = np.array([
@@ -32,16 +32,24 @@ class Spectrum(Observable):
         #     (self.wavelengths[1:]+self.wavelengths[:-1])/2,
         #     (3*self.wavelengths[-1]-self.wavelengths[-2])/2
         #     ])
-        #TODO: Different resamplers
+        # TODO: Different resamplers
         self.resampler = FluxConservingResampler()
-    
+
     def from_Spectrum1D(self, spectrum):
-        return self.resampler(spectrum, self.wavelengths)        
-        
-# =============================================================================
+        return self.resampler(spectrum, self.wavelengths)
+
+
 class Luminosity(Observable):
-# =============================================================================
-    pass
+
+    """This module computes the photometric luminosity (power) on a given band
+    for a given specific flux (per unit wavelength)."""
+
+    def __init__(self, **kwargs):
+
+        band = Filter(**kwargs)
+        self.flux = kwargs['flux']
+        self.integral_flux = np.trapz(self.flux*band.filter, self.wavelength)
+        self.central_wavelength = band.effective_wavelength()
 
 # =============================================================================
 class Magnitude(Observable):
@@ -53,50 +61,45 @@ class Photons(Observable):
 # =============================================================================
     pass
 
-# =============================================================================
+
 class Filter(object):
-# =============================================================================
 
     def __init__(self, **kwargs):
-
-        """This class provides a filter (SDSS, WISE, GALEX, 2MASS photometry) with the same
-        number of points as the given wavelength array.
-
+        """This class provides a filter (SDSS, WISE, GALEX, 2MASS photometry)
+        with the same number of points as the given wavelength array.
         The wavelength UNITS are by default expressed in AA"""
         self.wavelength = kwargs['wavelength']
         filter_name = kwargs['filter_name']
 
-        if self.wavelength[5]>self.wavelength[6]:
+        if self.wavelength[5] > self.wavelength[6]:
             raise NameError('Wavelength array must be crescent')
-
 
         self.filter_resp, self.wl_filter = Filter.get_filt(filter_name)
         self.filter = Filter.new_filter(self.wl_filter,
                                         self.filter_resp,
                                         self.wavelength)
 
-
     def get_filt(filter_name):
         absolute_path = os.path.join(root_path, 'data', 'Filters')
-        filters_path = {'u':os.path.join(absolute_path, 'SDSS','u.dat'),
-                       'g':os.path.join(absolute_path, 'SDSS','g.dat'),
-                       'r':os.path.join(absolute_path, 'SDSS','r.dat'),
-                       'i':os.path.join(absolute_path, 'SDSS','i.dat'),
-                       'z':os.path.join(absolute_path, 'SDSS','z.dat'),
-                       'W1':os.path.join(absolute_path, 'WISE','W1.dat'),
-                       'W2':os.path.join(absolute_path, 'WISE','W2.dat'),
-                       'W3':os.path.join(absolute_path, 'WISE','W3.dat'),
-                       'W4':os.path.join(absolute_path, 'WISE','W4.dat'),
-                   'GFUV':os.path.join(absolute_path, 'GALEX','GALEX_FUV.dat'),
-                   'GNUV':os.path.join(absolute_path, 'GALEX','GALEX_NUV.dat'),
-                   '2MASS_J':os.path.join(absolute_path, '2MASS','2MASS_J.dat'),
-                   '2MASS_H':os.path.join(absolute_path, '2MASS','2MASS_H.dat'),
-                   '2MASS_Ks':os.path.join(absolute_path, '2MASS','2MASS_Ks.dat')}
-        w_l, filt= np.loadtxt(filters_path[filter_name],
-                              usecols=(0, 1), unpack=True)
+        filters_path = {
+            'u': os.path.join(absolute_path, 'SDSS', 'u.dat'),
+            'g': os.path.join(absolute_path, 'SDSS', 'g.dat'),
+            'r': os.path.join(absolute_path, 'SDSS', 'r.dat'),
+            'i': os.path.join(absolute_path, 'SDSS', 'i.dat'),
+            'z': os.path.join(absolute_path, 'SDSS', 'z.dat'),
+            'W1': os.path.join(absolute_path, 'WISE', 'W1.dat'),
+            'W2': os.path.join(absolute_path, 'WISE', 'W2.dat'),
+            'W3': os.path.join(absolute_path, 'WISE', 'W3.dat'),
+            'W4': os.path.join(absolute_path, 'WISE', 'W4.dat'),
+            'GFUV': os.path.join(absolute_path, 'GALEX', 'GALEX_FUV.dat'),
+            'GNUV': os.path.join(absolute_path, 'GALEX', 'GALEX_NUV.dat'),
+            '2MASS_J': os.path.join(absolute_path, '2MASS', '2MASS_J.dat'),
+            '2MASS_H': os.path.join(absolute_path, '2MASS', '2MASS_H.dat'),
+            '2MASS_Ks': os.path.join(absolute_path, '2MASS', '2MASS_Ks.dat')}
+        w_l, filt = np.loadtxt(filters_path[filter_name], usecols=(0, 1),
+                               unpack=True)
         w_l = w_l*u.Angstrom
         return filt, w_l
-
 
     def effective_wavelength(self):
         return np.sum(self.wl_filter*self.filter_resp)/np.sum(self.filter_resp)
@@ -109,16 +112,16 @@ class Filter(object):
     def effective_transmission(self):
         return np.sum(self.filter_resp**2)/np.sum(self.filter_resp)
 
+    def new_filter(wl, fil, new_wl, *name, save=False):
+        """ This function recieve the filter response and wavelength extension
+        in order to interpolate it to a new set wavelengths.
+        First, it is checked if the filter starts or ends on the edges of the
+        data, if this occurs an array of zeros is added to limit the effective
+        area. Then, the filter response is differenciated seeking the limits
+        of the curve to prevent wrong extrapolation. """
 
-    def new_filter( wl, fil, new_wl,*name, save=False):
-        """ This function recieve the filter response and wavelength extension in order to interpolate it to a new set
-         wavelengths.  First, it is checked if the filter starts or ends on the edges of the data,
-         if this occurs an array of zeros is added to limit the effective area.
-         Then, the filter response is differenciated seeking the limits of the curve to prevent wrong extrapolation. """
-
-        f=interpolate.interp1d( wl, fil , fill_value= 'extrapolate' )
-
-        new_filt=f(new_wl)
+        f = interpolate.interp1d(wl, fil, fill_value='extrapolate')
+        new_filt = f(new_wl)
 
         bad_filter = False
 
@@ -214,10 +217,9 @@ class Filter(object):
          return s_filt
 
 
-# =============================================================================
 class luminosity(Filter):
-# =============================================================================
-    """This module computes the photmetric luminosity (power) on a given band
+    
+    """This module computes the photometric luminosity (power) on a given band
     for a given specific flux (per unit wavelength)."""
 
     def __init__(self, **kwargs):
