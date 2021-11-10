@@ -7,6 +7,7 @@ from astropy import units as u
 from astropy import constants as c
 from specutils import Spectrum1D
 
+import h5py
 
 class SSP(object):
 
@@ -22,8 +23,7 @@ class SSP(object):
                 the Universe
             -- mass: Cumulative s tellar mass for each time step
             -- metallicity: Average metallicity corresponding to each time step
-        """
-
+        """        
         # SSP time steps to interpolate (i.e. lookback time)
         t_i = self.log_ages_yr - np.ediff1d(self.log_ages_yr, to_begin=0)/2
         t_i = np.append(t_i, 12)  # 1000 Gyr
@@ -34,6 +34,7 @@ class SSP(object):
         t_i.clip(time.min(), today, out=t_i)
         interp_M_i = np.interp(t_i, time, mass)
         M_i = -np.ediff1d(interp_M_i)
+        print(M_i)
         Z_i = np.interp(t_i, time, np.log10(metallicity))
         Z_i = 10**Z_i
         # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)
@@ -48,7 +49,7 @@ class SSP(object):
                                                self.wavelength)
         SED = np.zeros(self.L_lambda[0][0].spectral_axis.size)
         weights = np.zeros((t_i.size, self.metallicities.size))
-        for i, mass_i in enumerate(M_i):
+        for i, mass_i in enumerate(M_i):            
             # print(t_i[i]/u.Gyr, self.log_ages_yr[i],'\t', m/u.Msun, Z_i[i])
             if mass_i > 0:
                 index_Z_hi = self.metallicities.searchsorted(Z_i[i]).clip(
@@ -306,55 +307,61 @@ class BaseGM(SSP):
 
 class FSPS(SSP):
 
-    def __init__(self, **kwargs):
-        import fsps  # FIXME: Only available when FSPS is installed
+    def __init__(self):
         print("> Initialising FSPS models")
-        self.metallicities = kwargs['metallicities']
-        fsps_metallicities = np.log10(self.metallicities/0.02)
-        self.ages = kwargs['ages'] * u.yr
-        fsps_ages = self.ages.to(u.Gyr).value
-        self.log_ages_yr = np.log10(self.ages.value)
-        print(
-            " > Creating model grid with {} metallicities and {} ages".format(
-                self.metallicities.size, self.ages.size))
-        # FSPS parameters and first initialization
-        params = {}
-        params['compute_vega_mags'] = kwargs.get('compute_vega_mags', False)
-        params['zcontinuous'] = kwargs.get('zcontinuous', 1)
-        params['sfh'] = kwargs.get('sfh', 0)
-        params['dust_type'] = kwargs.get('dust_type', 0)
-        params['dust_tesc'] = kwargs.get('dust_tesc', 7)
-        params['dust1'] = kwargs.get('dust1', 0)
-        params['dust2'] = kwargs.get('dust2', 0)
-        params['dust_index'] = kwargs.get('dust_index', -0.7)
-        params['dust1_index'] = kwargs.get('dust1_index', -0.7)
-        params['imf_type'] = kwargs.get('imf_type', 1)
-        params['mwr'] = kwargs.get('mwr', 3.1)
-        params['add_neb_emission'] = kwargs.get('add_neb_emission', False)
-        params['add_dust_emission'] = kwargs.get('add_dust_emission', False)
-        params['add_neb_continuum'] = kwargs.get('add_neb_continuum', False)
-        # There are MANY more params...
-        sp = fsps.StellarPopulation(**params)
-        print(sp.libraries)
-        print('  > Isochrones: {}\n  > SSP: {}'.format(sp.libraries[0],
-                                                       sp.libraries[1]))
+        file = h5py.File('data/FSPS/fsps_ssp_models.hdf5', 'r')
+        elements = list(file.keys())
+        log_ages = []
+        metallicities = []
+        for elem_i in elements:
+            if elem_i.find('log_age') >= 0:
+                init = 'log_age_'
+                end = '_Z_'
+                log_ages.append(elem_i[elem_i.find(init)+len(init):
+                                       elem_i.find(end)])
+                metallicities.append(elem_i[elem_i.find(end)+len(end):])
+        metallicities = np.sort(np.unique(metallicities))
+        log_ages = np.unique(log_ages)
+        wavelength_unit = u.Unit(file['wavelength_units'][()])
+        self.wavelength = file['wavelength'][()] * wavelength_unit
+        l_lambda_unit = u.Unit(file['L_lambda_units'][()])
+
+        self.metallicities = np.array(metallicities, dtype=float)
+        self.log_ages_yr = np.sort(np.array(log_ages, dtype=float))
+        self.ages = 10**self.log_ages_yr * u.yr
+        
+
         self.L_lambda = np.empty(shape=(self.metallicities.size,
                                         self.log_ages_yr.size),
                                  dtype=Spectrum1D)
-        for i, met_i in enumerate(fsps_metallicities):
-            sp.params['logzsol'] = met_i
-            # FIXME: Gas metallicity is fixed to Z(SSP) (recommended by FSPS)
-            sp.params['gas_logz'] = met_i
-            for j, age_j in enumerate(fsps_ages):
-                wave, spec = sp.get_spectrum(tage=age_j, peraa=True)
-                # alive_mass = sp.stellar_mass
-                self.L_lambda[i, j] = Spectrum1D(
-                    flux=spec * u.Lsun/u.Angstrom/u.Msun,
-                    spectral_axis=wave * u.angstrom)
-        self.wavelength = wave
+        for i, met in enumerate(metallicities):
+            for j, log_age in enumerate(log_ages):
+                name = 'log_age_{}_Z_{}'.format(log_age, met)
+                l_lambda = file[name]['L_lambda'][()]
+                self.L_lambda[i][j] = Spectrum1D(flux=l_lambda * l_lambda_unit,
+                                                 spectral_axis=self.wavelength)
+        file.close()
 
-if __name__ =='__main__':
+
+if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
-    ssp = FSPS(ages=np.array([1e6, 1e8]), metallicities=np.array([0.02]))
-
+    from matplotlib import pyplot as plt
+    ssp = FSPS()
+    
+    plt.figure()
+    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 10].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
+                                                                              ssp.log_ages_yr[10]))
+    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 10].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
+                                                                              ssp.log_ages_yr[10]))
+    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 50].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
+                                                                              ssp.log_ages_yr[50]))
+    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 50].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
+                                                                              ssp.log_ages_yr[50]))
+    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 80].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
+                                                                              ssp.log_ages_yr[80]))
+    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 80].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
+                                                                              ssp.log_ages_yr[80]))
+    plt.xlim(2000, 9000)
+    plt.ylim(1e-4, 1e-1)
+    plt.legend()
 # %%                                                    ... Paranoy@ Rulz! ;^D
