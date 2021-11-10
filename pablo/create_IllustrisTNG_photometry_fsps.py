@@ -7,12 +7,13 @@ Created on Sun Nov  7 20:38:43 2021
 """
 
 from astropy.io import fits
+from astropy.table import Table
 import numpy as np
 from glob import glob
 
+
 import sys
-sys.path.append('/home/pablo/population-synthesis-toolkit/pst/')
-import SSP
+from pst import SSP
 from astropy import units as u
 import pyphot
 lib = pyphot.get_library()
@@ -21,8 +22,8 @@ import random
 filters = [lib[filter_i] for filter_i in ['SDSS_u', 'SDSS_g', 'SDSS_r',
                                           'SDSS_i', 'SDSS_z']]
 
-ssp_model = SSP.PopStar(IMF='kro_0.15_100')
-ssp_model = SSP.FSPS(ages=ssp_model.ages.value, metallicities = np.array([0.02]))
+# ssp_model = SSP.PopStar(IMF='kro_0.15_100')
+ssp_model = SSP.FSPS()
 model_wl = ssp_model.L_lambda[0, 0].spectral_axis
 # %%
 tng = '/home/pablo/ageing_diagram_models/IllustrisTNG-Galaxies/TNG100-1/SFHs/*'
@@ -43,10 +44,11 @@ sdss_photometry = []
 sfhs = []
 galaxy_classification = []
 subhalos_ID = []
+
 for file in files:
     subhalo_id = file[file.find('subhalo_')+8:file.find('_sfh')]
     subhalo_id = int(subhalo_id)
-    print(subhalo_id)
+    print('SubhaloID: ', subhalo_id)
 
     hdul = fits.open(file)
     cat_info = hdul[0].header
@@ -90,18 +92,24 @@ for file in files:
     mean_met = np.sum(mass_formed*met_bins[np.newaxis, :], axis=1)/mass
     mean_met[np.isnan(mean_met)] = 0
     mean_met[:] = 0.02
-    cum_mass = np.cumsum(mass)
+    cum_mass = np.cumsum(mass[::-1])
 
     sfhs.append(cum_mass)
 
-    sed, weights = ssp_model.compute_SED(time=lookback_time*u.Gyr,
-                                         mass=cum_mass*u.Msun,
-                                         metallicity=mean_met)
+    timesteps = (lookback_time.max()-lookback_time)*u.Gyr
+    timesteps = timesteps[::-1]
+
+    sed, weights = ssp_model.compute_SED(
+        time=timesteps.to('yr'),
+        mass=cum_mass*u.Msun,
+        metallicity=mean_met)
     illustris_mags = []
 
     dist = 4 * np.pi * (10*u.pc)**2
+    
     for _filter in filters:
-        luminosity = _filter.get_flux(model_wl.value, sed.to(u.erg/u.s/u.angstrom).value).value
+        luminosity = _filter.get_flux(model_wl.value,
+                                      sed.to(u.erg/u.s/u.angstrom).value).value
         # Absolute magnitude
         flux = luminosity * u.erg/(u.s * u.angstrom) / dist
         flux = flux.to(u.erg/(u.s * u.angstrom * u.cm**2))
@@ -110,10 +118,12 @@ for file in files:
     sdss_photometry.append(illustris_mags)
 
 sdss_photometry = np.array(sdss_photometry)
-sfhs.append(lookback_time)
+sfhs.append(timesteps)
 sfhs = np.array(sfhs)
 galaxy_classification = np.array(galaxy_classification)
 subhalos_ID = np.array(subhalos_ID, dtype=str)
+
+# Save fotometry
 
 data = np.vstack((subhalos_ID, galaxy_classification[:, 0],
                   galaxy_classification[:, 1],
@@ -167,11 +177,23 @@ selected_subsample_idx = np.concatenate((selected_subsample_idx,
                                          draw_random(pos)))
 
 selected_subsample_idx = np.array(selected_subsample_idx)
-np.savetxt('IllustrisTNG100_galaxy_bin_classification_subsample_fsps.dat',
+np.savetxt('IllustrisTNG100_galaxy_bin_classification_subsample_fsps',
            data[:, selected_subsample_idx].T,
            header='SubhaloID   MASS_BIN_CLASS   SSFR_BIN_CLASS' +
            '   u_mag   g_mag   r_mag   i_mag   z_mag',
            fmt=('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s'))
+
+# Save sfhs
+
+all_entries = np.hstack((np.array(subhalos_ID[selected_subsample_idx],
+                                  dtype=str), 'time'))
+header = ''
+for i in range(all_entries.size):
+    header += ' '+all_entries[i]
+np.savetxt('all_TNG_mass_histories',
+           np.vstack((sfhs[selected_subsample_idx, :], sfhs[-1, :])).T,
+           header=header)
+
 
 # np.savetxt('data/IllustrisTNG100_sdss_photo', sdss_photometry,
 #            fmt=['%d', '%.2f', '%.2f', '%.2f', '%.2f', '%.2f'],
