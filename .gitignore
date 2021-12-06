@@ -111,3 +111,8 @@ venv.bak/
 pst/data/PopStar
 pst/data/BaseGM
 
+# Prospector
+pablo/prospector_fits
+pablo/*.hdf5
+pablo/**/*.hdf5
+
