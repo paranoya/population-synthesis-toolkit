@@ -58,7 +58,7 @@ ssp = pst.SSP.PopStar(IMF="sal_0.15_100")
 
 # Primordial polynomia
 
-N_min = 4
+N_min = 1
 N_max = len(obs_filters)
 N_poly = np.arange(N_min, N_max+1)  # polynomial degree
 correct_negative_SFR = True
@@ -102,25 +102,63 @@ for N in N_poly:  # for every polynomial degree N
     polynomial_bases.append(pst.fit.Polynomial_MFH_fit(N, ssp, obs_filters, t0))
 
 polynomial_fits = {}
-if correct_negative_SFR:
-    sfr_bins = {}
+# if correct_negative_SFR:
+    # sfr_bins = {}
 
 for target in observed_lumonosities:
     L_obs_Lsun = observed_lumonosities[target]
 
     polynomial_fits[target] = []
-    if correct_negative_SFR:
-        sfr_bins[target] = []
+    # if correct_negative_SFR:
+        # sfr_bins[target] = []
     for basis in polynomial_bases:
         poly_fit = basis.fit(L_obs_Lsun)
         polynomial_fits[target].append(poly_fit)
-        if correct_negative_SFR:
-            lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 101)*u.Gyr
-            t = t0 - lookback_time
-            sfr = poly_fit.SFR(t)
+
+
+# %% Correct negative SFR
+
+corrected_fits = {}
+if correct_negative_SFR:
+    for target in real_models:
+        print('----', target, '---- t_start, t_end, norm, distance ----')
+        L_obs = observed_lumonosities[target]
+        poly_fits = polynomial_fits[target]
+        best_dist = 1e30
+        lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 1001)*u.Gyr
+        t = t0 - lookback_time
+
+        for n in range(len(N_poly)):
+            uncorrected = poly_fits[n]
+            sfr = uncorrected.SFR(t)
             zeros = np.where(sfr[:-1]*sfr[1:] < 0)[0]
-            sfr_bins[target].append(np.r_[
-                t0, np.sqrt(t[zeros]*t[zeros+1]), 0*u.Gyr])
+            t_zeros = np.r_[t0,
+                            np.sqrt(t[zeros]*t[zeros+1]),
+                            0*u.Gyr]
+            # sfr_bins[target].append(t_zeros)
+            for t_end, t_start in zip(t_zeros[:-1], t_zeros[1:]):
+                p = pst.models.Polynomial_MFH(
+                    coeffs=uncorrected.coeffs,
+                    t_hat_start=1-t_start/t0, t_hat_end=1-t_end/t0)
+                sed = p.compute_SED(ssp, t0)
+                L = []
+                for filter_name in obs_filters:
+                    photo = pst.observables.luminosity(
+                        flux=sed, wavelength=ssp.wavelength, filter_name=filter_name)
+                    L.append(photo.integral_flux.to_value(u.Lsun))  # linalg complains about units
+                L = np.array(L)
+                norm = np.sum(L_obs*L) / np.sum(L**2)
+                dist = np.sqrt(np.sum((L_obs-L*norm)**2) / np.sum(L_obs**2))
+                if(dist < best_dist):
+                    corrected_fits[target] = pst.models.Polynomial_MFH(
+                        coeffs=uncorrected.coeffs * norm,
+                        t_hat_start=1-t_start/t0, t_hat_end=1-t_end/t0)
+                    best_norm = norm
+                    best_dist = dist
+
+        print(t0*(1-corrected_fits[target].t_hat_start),
+              t0*(1-corrected_fits[target].t_hat_end),
+              best_norm, best_dist)
 
 
 # %% Plots
@@ -133,7 +171,7 @@ def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
         model = real_models[model_name]
         poly_fits = polynomial_fits[model_name]
 
-        lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 101)*u.Gyr
+        lookback_time = np.logspace(-3, np.log10(t0.to_value(u.Gyr)), 1001)*u.Gyr
         t = t0 - lookback_time
         if lookback_x:
             x = lookback_time
@@ -152,14 +190,19 @@ def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
             plt.plot(x, y,
                      'b', alpha=N/N_max, ls=(2-(N&1))*'-',
                      label='N={}'.format(N))
-            if correct_negative_SFR:
-                t_bins = sfr_bins[model_name][i]
-                if lookback_x:
-                    x_bins = t0 - t_bins
-                else:
-                    x_bins = t_bins
-                y_bins = result(poly_fits[i], t_bins)
-                plt.plot(x_bins, y_bins, 'b+', alpha=N/N_max)
+            # if correct_negative_SFR:
+            #     t_bins = sfr_bins[model_name][i]
+            #     if lookback_x:
+            #         x_bins = t0 - t_bins
+            #     else:
+            #         x_bins = t_bins
+            #     y_bins = result(poly_fits[i], t_bins)
+            #     plt.plot(x_bins, y_bins, 'bo', alpha=N/N_max)
+            #     for xx in x_bins.to_value(u.Gyr):
+            #         plt.axvline(xx, ls=':', c='k', alpha=.5)
+        if correct_negative_SFR:
+            y = result(corrected_fits[model_name], t)
+            plt.plot(x, y, 'r-', label='corrected')
 
         plt.ylabel(ylabel)
         if logy:
@@ -175,24 +218,23 @@ def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
         plt.close()
 
 
-# %%
-plot_result('mass', lambda model, t: model.integral_SFR(t),
-            r'M [M$_\odot$]', logy=False, lookback_x=False)
-
-# %%
-plot_result('mean_SFR', lambda model, t:
-            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
-            r'<SFR> [M$_\odot$/Gyr]',
-            logy=False,
-            # lookback_x=False,
-            )
-
-# %%
 plot_result('SFR', lambda model, t: model.SFR(t),
             r'SFR [M$_\odot$/Gyr]',
             # logy=False,
             lookback_x=False,
             )
+
+# %%
+plot_result('mass', lambda model, t: model.integral_SFR(t),
+            r'M [M$_\odot$]', logy=False, lookback_x=False)
+
+# %%
+# plot_result('mean_SFR', lambda model, t:
+#             (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
+#             r'<SFR> [M$_\odot$/Gyr]',
+#             logy=False,
+#             # lookback_x=False,
+#             )
 
 # %%
 # plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),

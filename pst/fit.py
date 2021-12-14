@@ -12,8 +12,8 @@ class Polynomial_MFH_fit:
 
     def __init__(self, N, SSP, obs_filters, t_obs, **kwargs):
         self.t_obs = t_obs
-        self.t_start = kwargs.get('t_start', 0*u.Gyr)
-        self.t_end = kwargs.get('t_end', t_obs)
+        # self.t_start = kwargs.get('t_start', 0*u.Gyr)
+        # self.t_end = kwargs.get('t_end', t_obs)
         primordial_coeffs = []
         primordial_L = []
         for n in range(N):
@@ -25,7 +25,8 @@ class Polynomial_MFH_fit:
 
             L = []
             p = pst.models.Polynomial_MFH(
-                t_start=self.t_start, t_end=self.t_end, coeffs=c)
+                # t_start=self.t_start, t_end=self.t_end,
+                coeffs=c)
             sed = p.compute_SED(SSP, t_obs)
             for filter_name in obs_filters:
                 photo = pst.observables.luminosity(
@@ -54,7 +55,8 @@ class Polynomial_MFH_fit:
         solution = np.matmul(self.lstsq_solution, L_obs_Lsun)
         c = np.matmul(solution, self.primordial_coeffs)
         return pst.models.Polynomial_MFH(
-            t_start=self.t_start, t_end=self.t_end, coeffs=c)
+            # t_start=self.t_start, t_end=self.t_end,
+            coeffs=c)
 
 
 # %%
