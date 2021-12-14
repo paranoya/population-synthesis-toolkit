@@ -202,7 +202,7 @@ def plot_result(save_dir, result, ylabel, logy=True, lookback_x=True):
             #         plt.axvline(xx, ls=':', c='k', alpha=.5)
         if correct_negative_SFR:
             y = result(corrected_fits[model_name], t)
-            plt.plot(x, y, 'r-', label='corrected')
+            plt.plot(x, y, 'b+', label='corrected')
 
         plt.ylabel(ylabel)
         if logy:
@@ -229,12 +229,12 @@ plot_result('mass', lambda model, t: model.integral_SFR(t),
             r'M [M$_\odot$]', logy=False, lookback_x=False)
 
 # %%
-# plot_result('mean_SFR', lambda model, t:
-#             (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
-#             r'<SFR> [M$_\odot$/Gyr]',
-#             logy=False,
-#             # lookback_x=False,
-#             )
+plot_result('mean_SFR', lambda model, t:
+            (model.integral_SFR(t0) - model.integral_SFR(t)) / (t0 - t),
+            r'<SFR> [M$_\odot$/Gyr]',
+            # logy=False,
+            # lookback_x=False,
+            )
 
 # %%
 # plot_result('dot_SFR', lambda model, t: model.dot_SFR(t),
