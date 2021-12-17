@@ -171,7 +171,7 @@ class PopStar(SSP):
 class PyPopStar(SSP):
 
     def __init__(self, IMF, nebular=False):
-        self.path = os.path.join(os.path.dirname(__file__), 'data/NPopStar')
+        self.path = os.path.join(os.path.dirname(__file__), 'data/PyPopStar')
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05])
         self.log_ages_yr = np.array([5.00, 5.48, 5.70, 5.85, 6.00, 6.10, 6.18,
                                      6.24, 6.30, 6.35, 6.40, 6.44, 6.48, 6.51,
@@ -190,10 +190,10 @@ class PyPopStar(SSP):
                                      10.12, 10.13, 10.14, 10.15, 10.18])
         self.ages = 10**self.log_ages_yr * u.yr
         # isochrone age in delta [log(tau)]=0.01
-        self.wavelength = np.loadtxt(os.path.join(self.path, 'KRO', 'sp',
-                                                  'sp_z004_logt05.00.dat'),
-                                     dtype=float, usecols=(0,), unpack=True
-                                     ) * u.Angstrom
+        # self.wavelength = np.loadtxt(os.path.join(self.path, 'KRO', 'sp',
+        #                                           'sp_z0.004_logt05.00.dat'),
+        #                              dtype=float, usecols=(0,), unpack=True
+        #                              ) * u.Angstrom
         if nebular:
             print("> Initialising Popstar models (neb em) (IMF='"
                   + IMF + "')")
@@ -201,24 +201,23 @@ class PyPopStar(SSP):
         else:
             print("> Initialising Popstar models (no neb em) (IMF='"
                   + IMF + "')")
-            header = 'sp'
+            header = 'SSP-{}-stellar'.format(IMF)
         self.L_lambda = np.empty(shape=(self.metallicities.size,
                                         self.log_ages_yr.size),
                                  dtype=Spectrum1D)
 
         for i, Z in enumerate(self.metallicities):
             for j, age in enumerate(self.log_ages_yr):
-                print(Z, age)
-                print(header+'_z{:03.0f}_logt{:05.2f}.dat'.format(Z*1e3, age))
-                file = os.path.join(self.path, IMF, header,
-                                    header
-                                    + '_z{:03.0f}_logt{:05.2f}.dat'.format(
-                                        Z * 1e3, age))
-                spec = np.loadtxt(file, dtype=float,
-                                  usecols=(1),
-                                  unpack=True
-                                  ) * u.Lsun/u.Angstrom/u.Msun
-                Spectrum1D(flux=spec, spectral_axis=self.wavelength)
+                filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
+                print(filename)
+                file = os.path.join(self.path, IMF, filename)
+                with fits.open(file) as hdul:
+                    spec = hdul[1].data['flux'] * u.Lsun/u.angstrom/u.Msun
+                    self.wavelength = hdul[1].data['wavelength'] * u.angstrom
+                    print()
+                    hdul.close()
+                self.L_lambda[i][j] = Spectrum1D(flux=spec,
+                                                 spectral_axis=self.wavelength)
 
 # class BC03_Padova94(SSP): # TODO: CHANGE METHODS
 
@@ -346,22 +345,6 @@ class FSPS(SSP):
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
-    ssp = FSPS()
+    ssp = PyPopStar(IMF='KRO')
     
-    plt.figure()
-    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 10].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
-                                                                              ssp.log_ages_yr[10]))
-    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 10].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
-                                                                              ssp.log_ages_yr[10]))
-    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 50].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
-                                                                              ssp.log_ages_yr[50]))
-    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 50].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
-                                                                              ssp.log_ages_yr[50]))
-    plt.loglog(ssp.wavelength, ssp.L_lambda[0, 80].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[0],
-                                                                              ssp.log_ages_yr[80]))
-    plt.loglog(ssp.wavelength, ssp.L_lambda[2, 80].flux, label='Z={}, log(age)={}'.format(ssp.metallicities[2],
-                                                                              ssp.log_ages_yr[80]))
-    plt.xlim(2000, 9000)
-    plt.ylim(1e-4, 1e-1)
-    plt.legend()
 # %%                                                    ... Paranoy@ Rulz! ;^D
