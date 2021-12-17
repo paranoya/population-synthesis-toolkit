@@ -48,8 +48,8 @@ class Chemical_evolution_model:
                     Z/SSP.metallicities[index_Z_hi-1]
                     ) / np.log(SSP.metallicities[index_Z_hi]
                                / SSP.metallicities[index_Z_hi-1])
-                SED += m * (SSP.spectrum[index_Z_hi][i].flux * weight_Z_hi
-                            + SSP.spectrum[index_Z_hi-1][i].flux * (1-weight_Z_hi))
+                SED += m * (SSP.L_lambda[index_Z_hi][i].flux * weight_Z_hi
+                            + SSP.L_lambda[index_Z_hi-1][i].flux * (1-weight_Z_hi))
         return SED
 
 
@@ -142,34 +142,43 @@ class Polynomial_MFH(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
 
     def __init__(self, **kwargs):
-        self.t_start = kwargs.get('t_start', 0*u.Gyr)
-        self.t_end = kwargs['t_end']
-        self.M_end = kwargs.get('M_end', 1*u.Msun)
+        self.t0 = kwargs.get('t0', 13.7*u.Gyr)
+        self.M0 = kwargs.get('M_end', 1*u.Msun)
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
         self.coeffs = kwargs['coeffs']
+
         Chemical_evolution_model.__init__(self, **kwargs)
 
+        self.M_hat_start = 0.
+        for n, c in enumerate(self.coeffs):
+            self.M_hat_start += c*self.t_hat_start**n
+
+
     def integral_SFR(self, time):
-        t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
+        t_hat = (1 - time/self.t0).clip(self.t_hat_end, self.t_hat_start)
         M_hat = 0
         for n, c in enumerate(self.coeffs):
             M_hat += c*t_hat**n
-        return M_hat*self.M_end
+        return self.M0 * (M_hat - self.M_hat_start)
 
     def SFR(self, time):
-        t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
+        t_hat = 1 - time/self.t0
         dot_M_hat = 0
         for n, c in enumerate(self.coeffs):
             if n>0:
                 dot_M_hat -= c*n*t_hat**(n-1)
-        return dot_M_hat * self.M_end/(self.t_end-self.t_start)
+        dot_M_hat[t_hat < self.t_hat_end] = 0.
+        dot_M_hat[t_hat > self.t_hat_start] = 0.
+        return dot_M_hat * self.M0/self.t0
 
-    def dot_SFR(self, time):
-        t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
-        ddot_M_hat = 0*u.Gyr/time
-        for n, c in enumerate(self.coeffs):
-            if n>1:
-                ddot_M_hat -= c*n*(n-1)*t_hat**(n-2)
-        return ddot_M_hat * self.M_end/(self.t_end-self.t_start)**2
+    # def dot_SFR(self, time):
+    #     t_hat = ((self.t_end-time) / (self.t_end-self.t_start)).clip(0, 1)
+    #     ddot_M_hat = 0*u.Gyr/time
+    #     for n, c in enumerate(self.coeffs):
+    #         if n>1:
+    #             ddot_M_hat -= c*n*(n-1)*t_hat**(n-2)
+    #     return ddot_M_hat * self.M_end/(self.t_end-self.t_start)**2
 
 #-------------------------------------------------------------------------------
 class Tabular_MFH(Chemical_evolution_model):
