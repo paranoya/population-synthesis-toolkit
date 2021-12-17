@@ -58,7 +58,8 @@ prospector_sfhs = []
 f = h5py.File('prospector_fits_illustris_tng.hdf5', 'w')
 
 for galaxy in results:
-    galaxy = 'prospector_fits/illustris_subhaloID_168390_continuity_sfh.h5'
+    print(galaxy)
+    # galaxy = 'prospector_fits/illustris_subhaloID_168390_continuity_sfh.h5'
     res, obs, model = reader.results_from(galaxy)
     entry = obs['entry']
     subhalo_id = obs['SubhaloID']
@@ -216,7 +217,6 @@ for galaxy in results:
     ax.legend()
     fig.subplots_adjust(hspace=0.35)
     fig.savefig('prospector_fits/plots/{}.png'.format(subhalo_id))
-    plt.show()
     plt.close()
 
 f.close()

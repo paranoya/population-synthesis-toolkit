@@ -185,12 +185,21 @@ np.savetxt('IllustrisTNG100_galaxy_bin_classification_subsample_fsps',
 
 # Save sfhs
 
-all_entries = np.hstack((np.array(subhalos_ID[selected_subsample_idx],
+all_entries = np.hstack((np.array(subhalos_ID,
                                   dtype=str), 'time'))
 header = ''
 for i in range(all_entries.size):
     header += ' '+all_entries[i]
 np.savetxt('all_TNG_mass_histories',
+           np.vstack((sfhs[:], sfhs[-1, :])).T,
+           header=header)
+
+all_entries = np.hstack((np.array(subhalos_ID[selected_subsample_idx],
+                                  dtype=str), 'time'))
+header = ''
+for i in range(all_entries.size):
+    header += ' '+all_entries[i]
+np.savetxt('subsample_TNG_mass_histories',
            np.vstack((sfhs[selected_subsample_idx, :], sfhs[-1, :])).T,
            header=header)
 
