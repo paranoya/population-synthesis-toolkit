@@ -9,6 +9,7 @@ from specutils import Spectrum1D
 
 import h5py
 
+
 class SSP(object):
 
     def compute_SED(self, time, mass, metallicity,
@@ -23,7 +24,7 @@ class SSP(object):
                 the Universe
             -- mass: Cumulative s tellar mass for each time step
             -- metallicity: Average metallicity corresponding to each time step
-        """        
+        """
         # SSP time steps to interpolate (i.e. lookback time)
         t_i = self.log_ages_yr - np.ediff1d(self.log_ages_yr, to_begin=0)/2
         t_i = np.append(t_i, 12)  # 1000 Gyr
@@ -49,7 +50,7 @@ class SSP(object):
                                                self.wavelength)
         SED = np.zeros(self.L_lambda[0][0].spectral_axis.size)
         weights = np.zeros((t_i.size, self.metallicities.size))
-        for i, mass_i in enumerate(M_i):            
+        for i, mass_i in enumerate(M_i):
             # print(t_i[i]/u.Gyr, self.log_ages_yr[i],'\t', m/u.Msun, Z_i[i])
             if mass_i > 0:
                 index_Z_hi = self.metallicities.searchsorted(Z_i[i]).clip(
@@ -105,15 +106,27 @@ class SSP(object):
             return SED, weights
 
     def cut_models(self, wl_min, wl_max):
-        cut_pts = np.where((self.wavelength>=wl_min)&(self.wavelength<=wl_max))[0]
+        cut_pts = np.where((self.wavelength >= wl_min) &
+                           (self.wavelength <= wl_max))[0]
         if len(cut_pts) == 0:
-            raise NameError('Wavelength cuts {}, {} out of range for array with lims {} {}'.format(
-                wl_min, wl_max, self.wavelength.min(), self.wavelength.max())
+            raise NameError(
+                'Wavelength cuts {}, {} out of range for array with lims {} {}'
+                .format(wl_min, wl_max, self.wavelength.min(),
+                        self.wavelength.max())
                             )
         else:
             self.SED = self.SED[:, :, cut_pts]
             self.wavelength = self.wavelength[cut_pts]
             print('Models cut between {} {}'.format(wl_min, wl_max))
+
+    def get_mass_lum_ratio(self, wl_range):
+        pts = np.where((self.wavelength >= wl_range[0]) &
+                       (self.wavelength <= wl_range[1]))[0]
+        self.mass_to_lum = np.empty((self.metallicities.size,
+                                     self.ages.size))
+        for i in range(self.metallicities.size):
+            for j in range(self.ages.size):
+                self.mass_to_lum[i, j] = np.mean(self.L_lambda[i, j].flux[pts])
 
 
 class PopStar(SSP):
@@ -173,21 +186,18 @@ class PyPopStar(SSP):
     def __init__(self, IMF, nebular=False):
         self.path = os.path.join(os.path.dirname(__file__), 'data/PyPopStar')
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05])
-        self.log_ages_yr = np.array([5.00, 5.48, 5.70, 5.85, 6.00, 6.10, 6.18,
-                                     6.24, 6.30, 6.35, 6.40, 6.44, 6.48, 6.51,
-                                     6.54, 6.57, 6.60, 6.63, 6.65, 6.68, 6.70,
-                                     6.72, 6.74, 6.76, 6.78, 6.81, 6.85, 6.86,
-                                     6.88, 6.89, 6.90, 6.92, 6.93, 6.94, 6.95,
-                                     6.97, 6.98, 6.99, 7.00, 7.04, 7.08, 7.11,
-                                     7.15, 7.18, 7.20, 7.23, 7.26, 7.28, 7.30,
-                                     7.34, 7.38, 7.41, 7.45, 7.48, 7.51, 7.53,
-                                     7.56, 7.58, 7.60, 7.62, 7.64, 7.66, 7.68,
-                                     7.70, 7.74, 7.78, 7.81, 7.85, 7.87, 7.90,
-                                     7.93, 7.95, 7.98, 8.00, 8.30, 8.48, 8.60,
-                                     8.70, 8.78, 8.85, 8.90, 8.95, 9.00, 9.18,
-                                     9.30, 9.40, 9.48, 9.54, 9.60, 9.65, 9.70,
-                                     9.74, 9.78, 10.00, 10.04, 10.08, 10.11,
-                                     10.12, 10.13, 10.14, 10.15, 10.18])
+        self.log_ages_yr = np.array([5.  ,  5.48,  5.7 ,  5.85,  6.  ,  6.1 ,  6.18,  6.24,  6.3 ,
+        6.35,  6.4 ,  6.44,  6.48,  6.51,  6.54,  6.57,  6.6 ,  6.63,
+        6.65,  6.68,  6.7 ,  6.72,  6.74,  6.76,  6.78,  6.81,  6.85,
+        6.86,  6.88,  6.89,  6.9 ,  6.92,  6.93,  6.94,  6.95,  6.97,
+        6.98,  6.99,  7.  ,  7.04,  7.08,  7.11,  7.15,  7.18,  7.2 ,
+        7.23,  7.26,  7.28,  7.3 ,  7.34,  7.38,  7.41,  7.45,  7.48,
+        7.51,  7.53,  7.56,  7.58,  7.6 ,  7.62,  7.64,  7.66,  7.68,
+        7.7 ,  7.74,  7.78,  7.81,  7.85,  7.87,  7.9 ,  7.93,  7.95,
+        7.98,  8.  ,  8.3 ,  8.48,  8.6 ,  8.7 ,  8.78,  8.85,  8.9 ,
+        8.95,  9.  ,  9.18,  9.3 ,  9.4 ,  9.48,  9.54,  9.6 ,  9.65,
+        9.7 ,  9.74,  9.78,  9.81,  9.85,  9.9 ,  9.95, 10.  , 10.04,
+       10.08, 10.11, 10.12, 10.13, 10.14, 10.15, 10.18])
         self.ages = 10**self.log_ages_yr * u.yr
         # isochrone age in delta [log(tau)]=0.01
         # self.wavelength = np.loadtxt(os.path.join(self.path, 'KRO', 'sp',
@@ -209,12 +219,10 @@ class PyPopStar(SSP):
         for i, Z in enumerate(self.metallicities):
             for j, age in enumerate(self.log_ages_yr):
                 filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
-                print(filename)
                 file = os.path.join(self.path, IMF, filename)
                 with fits.open(file) as hdul:
                     spec = hdul[1].data['flux'] * u.Lsun/u.angstrom/u.Msun
                     self.wavelength = hdul[1].data['wavelength'] * u.angstrom
-                    print()
                     hdul.close()
                 self.L_lambda[i][j] = Spectrum1D(flux=spec,
                                                  spectral_axis=self.wavelength)
@@ -292,7 +300,7 @@ class BaseGM(SSP):
         ssp_fits.close()
 
         self.ages = np.unique(self.ages)
-        self.log_ages_yr = np.log10(self.ages)
+        self.log_ages_yr = np.log10(self.ages.value)
         self.metallicities = np.sort(np.unique(self.metallicities))
 
         self.L_lambda = np.empty(shape=(self.metallicities.size,
