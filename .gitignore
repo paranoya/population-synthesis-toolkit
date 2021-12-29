@@ -109,6 +109,8 @@ venv.bak/
 
 # external dependencies
 pst/data/PopStar
+pst/data/PyPopStar
+pst/data/PyPopStar/KRO
 pst/data/BaseGM
 
 # Prospector
