@@ -54,7 +54,7 @@ galaxy_classification = np.loadtxt(
     usecols=(0, 1, 2), dtype=str)
 
 prospector_sfhs = []
-
+5
 f = h5py.File('prospector_fits_illustris_tng.hdf5', 'w')
 
 for galaxy in results:
