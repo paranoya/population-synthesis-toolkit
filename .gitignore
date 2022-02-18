@@ -117,4 +117,5 @@ pst/data/BaseGM
 pablo/prospector_fits
 pablo/*.hdf5
 pablo/**/*.hdf5
-
+pablo/illustris_sfh
+pablo/illustris_sfh/*.gz
