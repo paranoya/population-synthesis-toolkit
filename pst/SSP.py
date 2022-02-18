@@ -123,10 +123,12 @@ class SSP(object):
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
         self.mass_to_lum = np.empty((self.metallicities.size,
-                                     self.ages.size))
+                                     self.ages.size)
+                                    ) * 1/self.L_lambda[0, 0].flux.unit
         for i in range(self.metallicities.size):
             for j in range(self.ages.size):
-                self.mass_to_lum[i, j] = np.mean(self.L_lambda[i, j].flux[pts])
+                self.mass_to_lum[i, j] = 1/np.mean(
+                    self.L_lambda[i, j].flux[pts])
 
 
 class PopStar(SSP):
@@ -186,7 +188,8 @@ class PyPopStar(SSP):
     def __init__(self, IMF, nebular=False):
         self.path = os.path.join(os.path.dirname(__file__), 'data/PyPopStar')
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05])
-        self.log_ages_yr = np.array([5.  ,  5.48,  5.7 ,  5.85,  6.  ,  6.1 ,  6.18,  6.24,  6.3 ,
+        self.log_ages_yr = np.array([
+        5.,  5.48,  5.7 ,  5.85,  6.  ,  6.1 ,  6.18,  6.24,  6.3 ,
         6.35,  6.4 ,  6.44,  6.48,  6.51,  6.54,  6.57,  6.6 ,  6.63,
         6.65,  6.68,  6.7 ,  6.72,  6.74,  6.76,  6.78,  6.81,  6.85,
         6.86,  6.88,  6.89,  6.9 ,  6.92,  6.93,  6.94,  6.95,  6.97,
@@ -204,14 +207,15 @@ class PyPopStar(SSP):
         #                                           'sp_z0.004_logt05.00.dat'),
         #                              dtype=float, usecols=(0,), unpack=True
         #                              ) * u.Angstrom
+        header = 'SSP-{}'.format(IMF)
         if nebular:
             print("> Initialising Popstar models (neb em) (IMF='"
                   + IMF + "')")
-            header = 'spneb'
+            column = 'flux_total'
         else:
             print("> Initialising Popstar models (no neb em) (IMF='"
                   + IMF + "')")
-            header = 'SSP-{}-stellar'.format(IMF)
+            column = 'flux_stellar'
         self.L_lambda = np.empty(shape=(self.metallicities.size,
                                         self.log_ages_yr.size),
                                  dtype=Spectrum1D)
@@ -221,7 +225,7 @@ class PyPopStar(SSP):
                 filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
                 file = os.path.join(self.path, IMF, filename)
                 with fits.open(file) as hdul:
-                    spec = hdul[1].data['flux'] * u.Lsun/u.angstrom/u.Msun
+                    spec = hdul[1].data[column] * u.Lsun/u.angstrom/u.Msun
                     self.wavelength = hdul[1].data['wavelength'] * u.angstrom
                     hdul.close()
                 self.L_lambda[i][j] = Spectrum1D(flux=spec,
