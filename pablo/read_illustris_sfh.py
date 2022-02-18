@@ -15,7 +15,9 @@ file = h5py.File('/home/pablo/population-synthesis-toolkit/pablo/illustris_sfh/I
 galaxies = list(file.keys())
 galaxies.pop(0)
 ages = file['age'][()]
-for galaxy in galaxies[:20]:
+for galaxy in galaxies[:]:
+    if len(file[galaxy]) == 0:
+        continue
     sfh = file[galaxy]['sfh'][()]
     np.savetxt('illustris_sfh/individual_sfhs/' + galaxy, np.array([ages, sfh]).T)
     print(np.log10(np.sum(sfh * 1e6)))
