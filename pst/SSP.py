@@ -6,7 +6,7 @@ from astropy.io import fits
 from astropy import units as u
 from astropy import constants as c
 from specutils import Spectrum1D
-
+from specutils.manipulation import FluxConservingResampler
 import h5py
 
 
@@ -118,6 +118,20 @@ class SSP(object):
             self.SED = self.SED[:, :, cut_pts]
             self.wavelength = self.wavelength[cut_pts]
             print('Models cut between {} {}'.format(wl_min, wl_max))
+
+    def interpolate_sed(self, new_wl_edges):
+        new_wl = (new_wl_edges[1:] + new_wl_edges[:-1]) / 2
+        dwl = np.diff(new_wl_edges)
+        ori_dwl = np.diff(self.L_lambda[0, 0].bin_edges)
+        print(' [SSP] Interpolating SSP SEDs')
+        for i in range(self.L_lambda.shape[0]):
+            for j in range(self.L_lambda.shape[1]):
+                f = np.interp(new_wl_edges, self.L_lambda[i, j].spectral_axis,
+                              np.cumsum(self.L_lambda[i, j].flux * ori_dwl))
+                new_flux = np.diff(f) / dwl
+                self.L_lambda[i, j] = Spectrum1D(flux=new_flux,
+                                                 spectral_axis=new_wl)
+        self.wavelength = new_wl
 
     def get_mass_lum_ratio(self, wl_range):
         pts = np.where((self.wavelength >= wl_range[0]) &
@@ -340,7 +354,6 @@ class FSPS(SSP):
         self.metallicities = np.array(metallicities, dtype=float)
         self.log_ages_yr = np.sort(np.array(log_ages, dtype=float))
         self.ages = 10**self.log_ages_yr * u.yr
-        
 
         self.L_lambda = np.empty(shape=(self.metallicities.size,
                                         self.log_ages_yr.size),
@@ -357,6 +370,10 @@ class FSPS(SSP):
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
+    unssp = PyPopStar(IMF='KRO')
+    
     ssp = PyPopStar(IMF='KRO')
+    new_wl = np.linspace(4500, 7000, 10000) * u.angstrom
+    ssp.interpolate_sed(new_wl)
     
 # %%                                                    ... Paranoy@ Rulz! ;^D
