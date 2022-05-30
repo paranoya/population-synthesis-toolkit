@@ -367,13 +367,70 @@ class FSPS(SSP):
         file.close()
 
 
+class XSL(SSP):
+    """
+    X-Shooter SSP empirical models.
+
+    Input:
+        - IMF: Initial mass function [KRO, SAL]
+        - ISOC: Set of isochrones to use [P00, PC]
+
+    Please cite Verro et al. (2022b), when using these data.
+
+    XSL SSP models are in cgs flux units F [erg cm s Å].
+    To convert them to L/Lsun/Msun/Å, multiply the flux array by C_{imf}
+    """
+    C_imf = dict(salpeter=9799552.50, kroupa=5567946.09)
+
+    def __init__(self, IMF, ISO, path_to_lib=None):
+        print("> Initialising X-Shooter (XSL) models (IMF={}, ISO={})".format(
+            IMF, ISO))
+        if (IMF != 'Kroupa') & (IMF != 'Salpeter'):
+            raise NameError('IMF not valid (use Kroupa | Salpeter)')
+        if (ISO != 'P00') & (ISO != 'PC'):
+            raise NameError('ISO not valid (use P00 for Padova2000 or PC for PARSEC/COLIBRI)')
+        if path_to_lib:
+            self.path = os.path.join(path_to_lib, '_'.join([IMF, ISO]))
+        else:
+            self.path = os.path.join(os.path.dirname(__file__), 'data/XSL',
+                                     '_'.join([IMF, ISO]))
+        files = os.listdir(self.path)
+        if len(files) == 0:
+            raise NameError('No files found at:\n {}'.format(self.path))
+        self.ages = []
+        self.metallicities = []
+        for file in files:
+            self.ages.append(float(file[file.find('T') + 1: file.find('_Z')]))
+            self.metallicities.append(
+                float(file[file.find('Z') + 1: file.find('_' + IMF)]))
+        self.ages = np.unique(self.ages) * u.yr
+        self.log_ages_yr = np.log10(self.ages / u.yr).value
+        self.metallicities = np.unique(self.metallicities)
+
+        self.L_lambda = np.empty(shape=(self.metallicities.size,
+                                        self.log_ages_yr.size),
+                                 dtype=Spectrum1D)
+
+        header = 'XSL_SSP_T'
+        c_solar = self.C_imf[IMF.lower()]  # Convert to solar units
+        for i, Z in enumerate(self.metallicities):
+            for j, age in enumerate(self.ages.value):
+                filename = header+'{:.2e}_Z{:}_{}_{}.fits'.format(age, Z, IMF, ISO)
+                file = os.path.join(self.path, filename)
+                with fits.open(file) as hdul:
+                    spec = hdul[0].data * c_solar * u.Lsun/u.angstrom/u.Msun
+                    self.wavelength = 10**(
+                        (np.arange(0, spec.size, 1) - hdul[0].header['CRPIX1'])
+                        * hdul[0].header['CDELT1'] + hdul[0].header['CRVAL1']
+                        + 1) * u.angstrom
+                    hdul.close()
+                self.L_lambda[i][j] = Spectrum1D(flux=spec,
+                                                 spectral_axis=self.wavelength)
+
+
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
-    unssp = PyPopStar(IMF='KRO')
-    
-    ssp = PyPopStar(IMF='KRO')
-    new_wl = np.linspace(4500, 7000, 10000) * u.angstrom
-    ssp.interpolate_sed(new_wl)
-    
+    ssp = XSL(IMF='Kroupa', ISO='P00', path_to_lib='/home/pablo/SSP_TEMPLATES/XSL')
+
 # %%                                                    ... Paranoy@ Rulz! ;^D
