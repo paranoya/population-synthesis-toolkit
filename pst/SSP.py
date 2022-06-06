@@ -7,8 +7,9 @@ from astropy import units as u
 # from astropy import constants as c
 from specutils import Spectrum1D
 # from specutils.manipulation import FluxConservingResampler
-from gaussian1d_conv import gaussian1d_conv
+from . import gaussian1d_conv
 import h5py
+from . import config
 
 
 class SSP(object):
@@ -107,6 +108,32 @@ class SSP(object):
         else:
             return SED, weights
 
+    def compute_burstSED(self, age, Z):
+        """Compute the SED of a stellar burst of age t and metallicity Z."""
+        log_age = np.log10(age / u.yr)
+        index_Z_hi = self.metallicities.searchsorted(Z).clip(
+            1, len(self.metallicities)-1)
+        weight_Z_hi = (np.log(Z/self.metallicities[index_Z_hi-1])
+                       / np.log(self.metallicities[index_Z_hi]
+                                / self.metallicities[index_Z_hi-1]))
+        index_tage_hi = self.log_ages_yr.searchsorted(log_age).clip(
+            1, len(self.log_ages_yr)-1)
+        weight_tage_hi = (log_age - self.log_ages_yr[index_tage_hi-1])/(
+            self.log_ages_yr[index_tage_hi]
+            - self.log_ages_yr[index_tage_hi-1])
+        
+        sed = (
+            self.L_lambda[index_Z_hi][index_tage_hi].flux
+            * weight_Z_hi * weight_tage_hi
+            + self.L_lambda[index_Z_hi][index_tage_hi - 1].flux
+            * weight_Z_hi * (1 - weight_tage_hi)
+            + self.L_lambda[index_Z_hi-1][index_tage_hi].flux
+            * (1 - weight_Z_hi) * weight_tage_hi
+            + self.L_lambda[index_Z_hi-1][index_tage_hi-1].flux
+            * (1 - weight_Z_hi) * (1 - weight_tage_hi)
+            )
+        return sed
+        
     def cut_models(self, wl_min, wl_max):
         """Cut model wavelength edges."""
         cut_pts = np.where((self.wavelength >= wl_min) &
@@ -118,8 +145,12 @@ class SSP(object):
                         self.wavelength.max())
                             )
         else:
-            self.SED = self.SED[:, :, cut_pts]
             self.wavelength = self.wavelength[cut_pts]
+            for i in range(self.L_lambda.shape[0]):
+                for j in range(self.L_lambda.shape[1]):
+                    f = self.L_lambda[i, j].flux[cut_pts]            
+                    self.L_lambda[i, j] = Spectrum1D(flux=f,
+                                                     spectral_axis=self.wavelength)
             print('Models cut between {} {}'.format(wl_min, wl_max))
 
     def interpolate_sed(self, new_wl_edges):
@@ -142,14 +173,14 @@ class SSP(object):
                                                  spectral_axis=new_wl)
         self.wavelength = new_wl
 
-    def convolve_sed(self, profile=gaussian1d_conv, **profile_params):
+    def convolve_sed(self, profile=gaussian1d_conv.gaussian1d_conv, **profile_params):
         """Convolve the SSP spectra with a given LSF."""
         print(' [SSP] Convolving SSP SEDs')
         for i in range(self.L_lambda.shape[0]):
             for j in range(self.L_lambda.shape[1]):
-                f = profile(self.L_lambda[i, j].flux, **profile_params)
+                f = profile(self.L_lambda[i, j].flux.value, **profile_params)
                 self.L_lambda[i, j] = Spectrum1D(
-                    flux=f,
+                    flux=f * self.L_lambda[i, j].flux.unit,
                     spectral_axis=self.wavelength)
 
     def get_mass_lum_ratio(self, wl_range):
@@ -169,11 +200,9 @@ class PopStar(SSP):
     """PopStar SSP models (Mollá+09)."""
 
     def __init__(self, IMF, nebular=False):
-        self.path = os.path.join(os.path.dirname(__file__),
-                                 'data', 'PopStar')
+        self.path = os.path.join(config.path_to_ssp_models, 'PopStar')
         self.metallicities = np.array([0.0001, 0.0004, 0.004, 0.008, 0.02,
                                        0.05])
-    # Z_sun=0.0134 # FIXME: Hardcoded!!!!
         self.log_ages_yr = np.array([5.00, 5.48, 5.70, 5.85, 6.00, 6.10, 6.18,
                                      6.24, 6.30, 6.35, 6.40, 6.44, 6.48, 6.51,
                                      6.54, 6.57, 6.60, 6.63, 6.65, 6.68, 6.70,
@@ -213,7 +242,6 @@ class PopStar(SSP):
                 spec = np.loadtxt(
                     file, dtype=float, skiprows=0, usecols=(column),
                     unpack=True) * u.Lsun/u.Angstrom/u.Msun
-                # TODO: Decide Flam, Fnu, or nuFnu
                 self.L_lambda[i][j] = Spectrum1D(flux=spec,
                                                  spectral_axis=self.wavelength)
 
@@ -222,7 +250,8 @@ class PyPopStar(SSP):
     """PyPopStar SSP models (Millán-Irigoyen+21)."""
 
     def __init__(self, IMF, nebular=False):
-        self.path = os.path.join(os.path.dirname(__file__), 'data/PyPopStar')
+        self.path = self.path = os.path.join(config.path_to_ssp_models,
+                                             'PyPopStar')
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05])
         self.log_ages_yr = np.array([
         5.,  5.48,  5.7 ,  5.85,  6.  ,  6.1 ,  6.18,  6.24,  6.3 ,
@@ -303,10 +332,11 @@ class PyPopStar(SSP):
 
 
 class BaseGM(SSP):
+    """Granada models..."""
 
     def __init__(self):
-        self.path = os.path.join(os.path.dirname(__file__),
-                                 'data/BaseGM/gsd01_156.fits')
+        self.path = self.path = os.path.join(config.path_to_ssp_models,
+                                             'BaseGM', 'gsd01_156.fits')
         self.ssp_properties_path = os.path.join(
             os.path.dirname(__file__), 'data/BaseGM/fits_like_properties.dat')
         self.metallicities = np.loadtxt(self.ssp_properties_path, usecols=(1))
@@ -353,10 +383,13 @@ class BaseGM(SSP):
 
 
 class FSPS(SSP):
+    """Fast Stellar Population Synthesis models..."""
 
     def __init__(self):
         print("> Initialising FSPS models")
-        file = h5py.File('data/FSPS/fsps_ssp_models.hdf5', 'r')
+        self.path = os.path.join(config.path_to_ssp_models, 'FSPS',
+                                 'fsps_ssp_models.hdf5')
+        file = h5py.File(self.path, 'r')
         elements = list(file.keys())
         log_ages = []
         metallicities = []
@@ -414,7 +447,7 @@ class XSL(SSP):
         if path_to_lib:
             self.path = os.path.join(path_to_lib, '_'.join([IMF, ISO]))
         else:
-            self.path = os.path.join(os.path.dirname(__file__), 'data/XSL',
+            self.path = os.path.join(config.path_to_ssp_models, 'XSL',
                                      '_'.join([IMF, ISO]))
         files = os.listdir(self.path)
         if len(files) == 0:
@@ -454,11 +487,5 @@ if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
     ssp = BaseGM()
-    sigma = ssp.wavelength.value / 1000
-    deltax = 1.0
-    plt.figure()
-    plt.plot(ssp.wavelength, ssp.L_lambda[1, 10].flux)
-    ssp.convolve_sed(**dict(sigma=sigma, deltax=deltax))
-    plt.plot(ssp.wavelength, ssp.L_lambda[1, 10].flux)
-    plt.xlim(4000, 4500)
+    
 # %%                                                    ... Paranoy@ Rulz! ;^D
