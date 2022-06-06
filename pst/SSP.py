@@ -1,28 +1,30 @@
-import os
 import numpy as np
 import sys
+import os
 
 from astropy.io import fits
 from astropy import units as u
-from astropy import constants as c
+# from astropy import constants as c
 from specutils import Spectrum1D
-from specutils.manipulation import FluxConservingResampler
+# from specutils.manipulation import FluxConservingResampler
+from gaussian1d_conv import gaussian1d_conv
 import h5py
 
 
 class SSP(object):
+    """Parent class representing an ensemble of SSP models."""
 
     def compute_SED(self, time, mass, metallicity,
                     dust_model=None,
                     plot_interpolation=False, plot_weights=False):
         """
-        This method computes the corresponding SED for a given star formation
-        history.
+        Compute the SED for a given star formation history.
+
         -----------------------------------------------------------------------
         params:
             -- time: Time steps expressed in Gyr corresponding to the age of
                 the Universe
-            -- mass: Cumulative s tellar mass for each time step
+            -- mass: Cumulative stellar mass on each time step.
             -- metallicity: Average metallicity corresponding to each time step
         """
         # SSP time steps to interpolate (i.e. lookback time)
@@ -106,6 +108,7 @@ class SSP(object):
             return SED, weights
 
     def cut_models(self, wl_min, wl_max):
+        """Cut model wavelength edges."""
         cut_pts = np.where((self.wavelength >= wl_min) &
                            (self.wavelength <= wl_max))[0]
         if len(cut_pts) == 0:
@@ -120,6 +123,12 @@ class SSP(object):
             print('Models cut between {} {}'.format(wl_min, wl_max))
 
     def interpolate_sed(self, new_wl_edges):
+        """Flux-conserving interpolation.
+
+        params
+        -----
+        - new_wl_edges: bin edges of the new interpolated points.
+        """
         new_wl = (new_wl_edges[1:] + new_wl_edges[:-1]) / 2
         dwl = np.diff(new_wl_edges)
         ori_dwl = np.diff(self.L_lambda[0, 0].bin_edges)
@@ -133,7 +142,18 @@ class SSP(object):
                                                  spectral_axis=new_wl)
         self.wavelength = new_wl
 
+    def convolve_sed(self, profile=gaussian1d_conv, **profile_params):
+        """Convolve the SSP spectra with a given LSF."""
+        print(' [SSP] Convolving SSP SEDs')
+        for i in range(self.L_lambda.shape[0]):
+            for j in range(self.L_lambda.shape[1]):
+                f = profile(self.L_lambda[i, j].flux, **profile_params)
+                self.L_lambda[i, j] = Spectrum1D(
+                    flux=f,
+                    spectral_axis=self.wavelength)
+
     def get_mass_lum_ratio(self, wl_range):
+        """Compute the mass-to-light ratio within a giveng wavelength range."""
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
         self.mass_to_lum = np.empty((self.metallicities.size,
@@ -146,6 +166,7 @@ class SSP(object):
 
 
 class PopStar(SSP):
+    """PopStar SSP models (Mollá+09)."""
 
     def __init__(self, IMF, nebular=False):
         self.path = os.path.join(os.path.dirname(__file__),
@@ -198,6 +219,7 @@ class PopStar(SSP):
 
 
 class PyPopStar(SSP):
+    """PyPopStar SSP models (Millán-Irigoyen+21)."""
 
     def __init__(self, IMF, nebular=False):
         self.path = os.path.join(os.path.dirname(__file__), 'data/PyPopStar')
@@ -431,6 +453,12 @@ class XSL(SSP):
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
-    ssp = XSL(IMF='Kroupa', ISO='P00', path_to_lib='/home/pablo/SSP_TEMPLATES/XSL')
-
+    ssp = BaseGM()
+    sigma = ssp.wavelength.value / 1000
+    deltax = 1.0
+    plt.figure()
+    plt.plot(ssp.wavelength, ssp.L_lambda[1, 10].flux)
+    ssp.convolve_sed(**dict(sigma=sigma, deltax=deltax))
+    plt.plot(ssp.wavelength, ssp.L_lambda[1, 10].flux)
+    plt.xlim(4000, 4500)
 # %%                                                    ... Paranoy@ Rulz! ;^D
