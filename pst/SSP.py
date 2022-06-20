@@ -121,7 +121,6 @@ class SSP(object):
         weight_tage_hi = (log_age - self.log_ages_yr[index_tage_hi-1])/(
             self.log_ages_yr[index_tage_hi]
             - self.log_ages_yr[index_tage_hi-1])
-        
         sed = (
             self.L_lambda[index_Z_hi][index_tage_hi].flux
             * weight_Z_hi * weight_tage_hi
@@ -133,7 +132,7 @@ class SSP(object):
             * (1 - weight_Z_hi) * (1 - weight_tage_hi)
             )
         return sed
-        
+
     def cut_models(self, wl_min, wl_max):
         """Cut model wavelength edges."""
         cut_pts = np.where((self.wavelength >= wl_min) &
@@ -338,7 +337,8 @@ class BaseGM(SSP):
         self.path = self.path = os.path.join(config.path_to_ssp_models,
                                              'BaseGM', 'gsd01_156.fits')
         self.ssp_properties_path = os.path.join(
-            os.path.dirname(__file__), 'data/BaseGM/fits_like_properties.dat')
+            config.path_to_ssp_models,
+            'BaseGM', 'fits_like_properties.dat')
         self.metallicities = np.loadtxt(self.ssp_properties_path, usecols=(1))
         self.ages = np.loadtxt(self.ssp_properties_path, usecols=(0)) * u.yr
         self.log_ages_yr = np.log10(self.ages.value)
