@@ -31,25 +31,24 @@ class SSP(object):
         t_i = np.append(t_i, 12)  # 1000 Gyr
         # Conversion to time since the onset of SF (i.e. age of the Universe)
         today = time.max()
-        t_i = today - (np.power(10, t_i))
+        t_i = today - 10**t_i
         t_i[0] = today
         t_i.clip(time.min(), today, out=t_i)
         interp_M_i = np.interp(t_i, time, mass)
         M_i = -np.ediff1d(interp_M_i)
-        print(M_i)
         Z_i = np.interp(t_i, time, np.log10(metallicity))
         Z_i = 10**Z_i
         # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)
         # to prevent extrapolation
         Z_i.clip(self.metallicities[0], self.metallicities[-1], out=Z_i)
         extinction = np.ones((M_i.size,
-                              self.L_lambda[0][0].spectral_axis.size))
+                              self.L_lambda[0][0].size))
         if dust_model:
             log_t_mid = (np.log10(t_i[:-1])+np.log10(t_i[1:]))/2
             for ii, log_t_i in enumerate(log_t_mid):
                 extinction[ii, :] = dust_model(10**log_t_i,
                                                self.wavelength)
-        SED = np.zeros(self.L_lambda[0][0].spectral_axis.size)
+        SED = np.zeros(self.L_lambda[0][0].size)
         weights = np.zeros((t_i.size, self.metallicities.size))
         for i, mass_i in enumerate(M_i):
             # print(t_i[i]/u.Gyr, self.log_ages_yr[i],'\t', m/u.Msun, Z_i[i])
@@ -111,7 +110,7 @@ class SSP(object):
         else:
             self.wavelength = self.wavelength[cut_pts]
             self.L_lambda = self.L_lambda[:, :, cut_pts]
-            print('Models cut between {} {}'.format(wl_min, wl_max))
+            print(' [SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
     def interpolate_sed(self, new_wl_edges):
         """Flux-conserving interpolation.
@@ -122,14 +121,20 @@ class SSP(object):
         """
         new_wl = (new_wl_edges[1:] + new_wl_edges[:-1]) / 2
         dwl = np.diff(new_wl_edges)
-        ori_dwl = np.diff(self.L_lambda[0, 0].bin_edges)
+        ori_dwl = np.hstack(
+            (np.diff(self.wavelength),
+             self.wavelength[-1] - self.wavelength[-2]))
         print(' [SSP] Interpolating SSP SEDs')
+        new_l_lambda = np.empty(
+            shape=(self.metallicities.size, self.log_ages_yr.size,
+                   new_wl.size), dtype=np.float32)
         for i in range(self.L_lambda.shape[0]):
             for j in range(self.L_lambda.shape[1]):
                 f = np.interp(new_wl_edges, self.wavelength,
                               np.cumsum(self.L_lambda[i, j] * ori_dwl))
                 new_flux = np.diff(f) / dwl
-                self.L_lambda[i, j] = new_flux
+                new_l_lambda[i, j] = new_flux
+        self.L_lambda = new_l_lambda
         self.wavelength = new_wl
 
     def convolve_sed(self, profile=gaussian1d_conv.gaussian1d_conv,
@@ -415,8 +420,9 @@ class XSL(SSP):
         header = 'XSL_SSP_T'
         c_solar = self.C_imf[IMF.lower()]  # Convert to solar units
 
-        with fits.open(header+'{:.2e}_Z{:}_{}_{}.fits'.format(
-                self.ages[0], self.metallicities[0], IMF, ISO)) as hdul:
+        with fits.open(os.path.join(self.path,
+                                     header+'{:.2e}_Z{:}_{}_{}.fits'.format(
+                self.ages[0], self.metallicities[0], IMF, ISO))) as hdul:
             self.wavelength = 10**(
                 (np.arange(0, hdul[0].data.size, 1) - hdul[0].header['CRPIX1'])
                 * hdul[0].header['CDELT1'] + hdul[0].header['CRVAL1'] + 1)
