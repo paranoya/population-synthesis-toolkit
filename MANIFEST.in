@@ -1,0 +1,23 @@
+include versioneer.py
+include src/pst/_version.py
+
+include *.toml
+include LICENSE
+include tox.ini
+recursive-include src *.dat
+recursive-include src *.fits
+recursive-include src *.ctio
+
+recursive-include docs *.bat
+recursive-include docs *.py
+recursive-include docs *.rst
+recursive-include docs Makefile
+recursive-include tests *.py
+include *.txt
+recursive-include * .empty
+
+recursive-exclude .circleci *
+exclude .circleci
+exclude codecov.yml
+recursive-exclude ci *
+exclude azure-pipelines.yml

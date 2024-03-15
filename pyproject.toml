@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools >= 61.0", "versioneer[toml]"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pst"
+dynamic = ["version"]
+authors = [
+  { name="Daniel Jiménez-López", email="daniel.jimenezl@uam.es" },
+  { name="Yago Ascasibar", email="yago.ascasibar@uam.es" },
+  { name="Pablo Corcho-Caballero", email="p.corcho.caballero@rug.nl" }
+]
+
+description = "Population Synthesis Toolkit"
+readme = "README.md"
+
+keywords = ["astronomy", "stellar populations synthesis", "SED fitting"]
+license = {file="LICENSE"}
+classifiers = [
+    'Development Status :: 3 - Alpha',
+        'License :: Free for non-commercial use',
+        'Intended Audience :: Education',
+        'Intended Audience :: Science/Research',
+        'Operating System :: POSIX :: Linux',
+        'Operating System :: Microsoft :: Windows',
+        'Operating System :: MacOS',
+        'Programming Language :: Python :: 3',
+        'Topic :: Scientific/Engineering :: Information Analysis',
+        'Topic :: Scientific/Engineering :: Mathematics',
+        'Topic :: Software Development :: Libraries :: Python Modules'
+]
+dependencies = [
+    "astropy>=5.0.0",
+    "numpy>=1.20",
+    "matplotlib>=3.7.0",
+]
+requires-python = ">=3.7"
+
+[project.urls]
+Repository = 'https://github.com/paranoya/population-synthesis-toolkit'
+Issues = 'https://github.com/paranoya/population-synthesis-toolkit/issues'
