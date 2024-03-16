@@ -50,8 +50,9 @@ def list_of_available_filters():
 def find_filt_from_name(name):
     filters = list_of_available_filters()
     for f in filters:
-        if name.lower() in f.lower():
-            return f
+        if name.lower() in f.strip(".dat").lower():
+            return os.path.join(os.path.dirname(__file__),
+                              "data", "filters", f)
     return None
 
 
@@ -79,11 +80,12 @@ class Filter(object):
         print("Initialising Filter variables")
 
         self.wavelength = kwargs.get('wavelength', None)
-        if not hasattr(self.wavelength, "unit"):
-            print("Assuming that input wavelength array is in angstrom")
-            self.wavelength *= u.angstrom
-        if not (self.wavelength[1:] > self.wavelength[:-1]).all():
-            raise NameError('Wavelength array must be crescent')
+        if self.wavelength is not None:
+            if not hasattr(self.wavelength, "unit"):
+                print("Assuming that input wavelength array is in angstrom")
+                self.wavelength *= u.angstrom
+            if not (self.wavelength[1:] > self.wavelength[:-1]).all():
+                raise NameError('Wavelength array must be crescent')
 
         self.filter_wavelength = kwargs.get('filter_wavelength', None)
         if self.filter_wavelength is not None and not hasattr(
@@ -233,7 +235,7 @@ class Magnitude(Observable, Filter):
     """Class to compute synthetic photometry from spectra."""
 
     def __init__(self, **kwargs):
-        super().__init__(self, **kwargs)
+        super().__init__(**kwargs)
 
         if self.wavelength is not None:
             self.nu = constants.c /( self.wavelength)
@@ -282,4 +284,4 @@ class Magnitude(Observable, Filter):
         return nu_f_nu, nu_f_nu_err
 
 if __name__ == '__main__':
-    pass
+    Magnitude(filter_name='r')
