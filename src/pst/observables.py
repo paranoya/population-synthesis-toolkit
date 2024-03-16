@@ -241,11 +241,10 @@ class Magnitude(Observable, Filter):
             self.nu = constants.c /( self.wavelength)
 
     def check_spectra(self, spectra):
-        if not hasattr(spectra, "unit"):
-            print("Assuming that input spectra is expressed in Lsun/AA")
-            spectra =  spectra.copy() * u.Lsun / u.angstrom
-        else:
-            return spectra
+        if spectra is not None and not hasattr(spectra, "unit"):
+            print("Assuming that input spectra is expressed in Lsun/cm2/AA")
+            spectra =  spectra.copy() * u.Lsun / u.angstrom / u.cm**2
+        return spectra
 
     def get_photons(self, spectra, spectra_err=None):
         spectra = self.check_spectra(spectra)
@@ -255,6 +254,7 @@ class Magnitude(Observable, Filter):
             spectra / (constants.h * constants.c / self.wavelength
                                    ) * self.response,
             x=self.wavelength)
+
         if spectra_err is not None:
             photon_flux_err = np.trapz(
                 spectra_err / (constants.h * constants.c / self.wavelength
@@ -267,7 +267,7 @@ class Magnitude(Observable, Filter):
     def get_ab(self, spectra, spectra_err=None):
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
-            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wave**2)
+            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
         m_ab = - 2.5 * np.log10(n_photons / norm_photons)
         if n_photons_err is None:
             m_ab_err = None
@@ -284,4 +284,18 @@ class Magnitude(Observable, Filter):
         return nu_f_nu, nu_f_nu_err
 
 if __name__ == '__main__':
-    Magnitude(filter_name='r')
+    from pst.SSP import BaseGM
+    import matplotlib.pyplot as plt
+    ssp = BaseGM()
+    
+    photometry = Magnitude(filter_name='r', wavelength=ssp.wavelength)
+
+    for sed in ssp.L_lambda.reshape((ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
+        mag, mag_err = photometry.get_ab(sed * u.Lsun / u.angstrom / 4 / np.pi / (10 * u.pc)**2)
+
+        print("SSP absolute magnitude: ", mag)
+    plt.figure()
+    plt.plot(ssp.wavelength, photometry.response)
+    plt.plot(ssp.wavelength, sed / np.mean(sed))
+    plt.yscale('log')
+    plt.show()
