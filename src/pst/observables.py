@@ -275,13 +275,12 @@ class Magnitude(Observable, Filter):
             m_ab_err = - 2.5 * np.log10(n_photons_err / norm_photons)
         return m_ab, m_ab_err
 
-    def get_flux(self, spectra, spectra_err):
+    def get_fnu(self, spectra, spectra_err):
+        """Compute the  specific flux per frequency unit from a spectra."""
         m_ab, m_ab_err = self.get_AB(spectra, spectra_err)
         f_nu = 10**(-0.4 * m_ab) * 3631 * u.Jy
         f_nu_err = 10**(-0.4 * m_ab_err) * u.Jy
-        nu_f_nu = f_nu * constants.c / self.effective_wavelength()
-        nu_f_nu_err = f_nu_err * constants.c / self.effective_wavelength()
-        return nu_f_nu, nu_f_nu_err
+        return f_nu, f_nu_err
 
 if __name__ == '__main__':
     from pst.SSP import BaseGM
