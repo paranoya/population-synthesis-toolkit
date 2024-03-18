@@ -13,34 +13,6 @@ from astropy import constants
 
 from scipy import interpolate
 
-from specutils.manipulation import FluxConservingResampler
-
-# =============================================================================
-class Observable(object):
-# =============================================================================
-    pass
-
-# =============================================================================
-class Spectrum(Observable):
-# =============================================================================
-    """
-    
-    """
-    def __init__(self, central_wavelenghts):
-        self.wavelengths = central_wavelenghts
-        # self.wavelength_bins = np.array([
-        #     (3*self.wavelengths[0]-self.wavelengths[1])/2,
-        #     (self.wavelengths[1:]+self.wavelengths[:-1])/2,
-        #     (3*self.wavelengths[-1]-self.wavelengths[-2])/2
-        #     ])
-        #TODO: Different resamplers
-        self.resampler = FluxConservingResampler()
-    
-    def from_Spectrum1D(self, spectrum):
-        return self.resampler(spectrum, self.wavelengths)        
-        
-# Helper functions for finding photometric filters.
-
 def list_of_available_filters():
     filter_dir = os.path.join(os.path.dirname(__file__),
                               "data", "filters")
@@ -104,6 +76,9 @@ class Filter(object):
 
         if self.wavelength is not None:
             self.interpolate(self.wavelength)
+
+        if self.wavelength is not None:
+            self.nu = constants.c /( self.wavelength)
 
     def load_filter(self, path=None, name=None):
         """Load a filter from a text file.
@@ -170,76 +145,6 @@ class Filter(object):
         print("Filter transmission curve interpolated to input wavelength array")
         return self.response
 
-
-class TopHatFilter(Filter):
-    """Top hat photometric filter"""
-    def __init__(self, central_wave, width, **kwargs):
-        if not hasattr(central_wave, 'unit'):
-            print("Assuming that input central wavelength is expressed in angstrom")
-            central_wave *= u.Angstrom
-        if not hasattr(width, 'unit'):
-            print("Assuming that input width is expressed in angstrom")
-            width *= u.Angstrom
-
-        self.wavelength = kwargs.get('wavelength', None)
-        if not hasattr(self.wavelength, "unit"):
-            print("Assuming that input wavelength array is in angstrom")
-            self.wavelength *= u.angstrom
-        if not (self.wavelength[1:] > self.wavelength[:-1]).all():
-            raise NameError('Wavelength array must be crescent')
-        
-        if self.wavelength is None:
-            self.filter_wavelength = np.linspace(central_wave - width,
-                                    central_wave + width,
-                                    50)
-        else:
-            self.filter_wavelength = self.wavelength.copy()
-
-        self.filter_resp = np.ones(self.filter_wavelength.size)
-        self.filter_resp[self.filter_wavelength < central_wave - width / 2] = 0
-        self.filter_resp[self.filter_wavelength > central_wave + width / 2] = 0
-        if self.wavelength is None:
-            self.response = self.filter_resp.copy()
-
-
-# =============================================================================
-class Luminosity(Observable, Filter):
-# =============================================================================
-    """This module computes the photmetric luminosity (power) on a given band
-    for a given specific flux (per unit wavelength)."""
-
-    def __init__(self, **kwargs):
-        '''
-        Filter.__init__(self, **kwargs)
-        ## Flux counts
-        self.flux = kwargs['flux']
-        self.flux = self.flux/(4*np.pi* (10*u.pc/u.cm)**2)   # flux at 10 pc.
-        self.nu = u.c/( self.wavelength)
-
-        diff_nu = - np.ediff1d(np.insert(self.nu, 0, 2*self.nu[0]-self.nu[1]))
-
-        self.integral_flux = np.nansum((self.flux/self.nu * self.filter * diff_nu) )
-        '''
-
-        Filter.__init__(self, **kwargs)
-        self.flux = kwargs['flux']
-
-        self.integral_flux = np.trapz(self.flux*self.filter, self.wavelength)
-        # self.integral_flux = np.trapz(self.flux*self.filter*self.wavelength,
-        #                               np.log(self.wavelength/u.Angstrom))
-
-
-# =============================================================================
-class Magnitude(Observable, Filter):
-# =============================================================================
-    """Class to compute synthetic photometry from spectra."""
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-        if self.wavelength is not None:
-            self.nu = constants.c /( self.wavelength)
-
     def check_spectra(self, spectra):
         if spectra is not None and not hasattr(spectra, "unit"):
             print("Assuming that input spectra is expressed in Lsun/cm2/AA")
@@ -282,12 +187,42 @@ class Magnitude(Observable, Filter):
         f_nu_err = 10**(-0.4 * m_ab_err) * u.Jy
         return f_nu, f_nu_err
 
+class TopHatFilter(Filter):
+    """Top hat photometric filter"""
+    def __init__(self, central_wave, width, **kwargs):
+        if not hasattr(central_wave, 'unit'):
+            print("Assuming that input central wavelength is expressed in angstrom")
+            central_wave *= u.Angstrom
+        if not hasattr(width, 'unit'):
+            print("Assuming that input width is expressed in angstrom")
+            width *= u.Angstrom
+
+        self.wavelength = kwargs.get('wavelength', None)
+        if not hasattr(self.wavelength, "unit"):
+            print("Assuming that input wavelength array is in angstrom")
+            self.wavelength *= u.angstrom
+        if not (self.wavelength[1:] > self.wavelength[:-1]).all():
+            raise NameError('Wavelength array must be crescent')
+        
+        if self.wavelength is None:
+            self.filter_wavelength = np.linspace(central_wave - width,
+                                    central_wave + width,
+                                    50)
+        else:
+            self.filter_wavelength = self.wavelength.copy()
+
+        self.filter_resp = np.ones(self.filter_wavelength.size)
+        self.filter_resp[self.filter_wavelength < central_wave - width / 2] = 0
+        self.filter_resp[self.filter_wavelength > central_wave + width / 2] = 0
+        if self.wavelength is None:
+            self.response = self.filter_resp.copy()
+
 if __name__ == '__main__':
     from pst.SSP import BaseGM
     import matplotlib.pyplot as plt
     ssp = BaseGM()
     
-    photometry = Magnitude(filter_name='r', wavelength=ssp.wavelength)
+    photometry = Filter(filter_name='r', wavelength=ssp.wavelength)
 
     for sed in ssp.L_lambda.reshape((ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
         mag, mag_err = photometry.get_ab(sed * u.Lsun / u.angstrom / 4 / np.pi / (10 * u.pc)**2)
