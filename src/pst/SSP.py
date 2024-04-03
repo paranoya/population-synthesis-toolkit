@@ -39,23 +39,23 @@ class SSPBase(object):
             If True, plot the weights of each SSP in a grid of ages and metallicity.
         
         """
-
         # SSP time steps to interpolate (i.e. lookback time)
-        t_i = self.log_ages_yr - np.ediff1d( self.log_ages_yr, to_begin=0 )/2
-        t_i = np.append( t_i, 12 ) # 1000 Gyr
+        t_i = self.log_ages_yr - np.ediff1d(self.log_ages_yr, to_begin=0)/2
+        t_i = np.append(t_i, 12)  # 1000 Gyr
         # Conversion to time since the onset of SF (i.e. age of the Universe)
         today = time.max()
-        t_i = today - ( np.power(10,t_i)*u.yr )
+        t_i = today - 10**t_i
         t_i[0] = today
-        t_i.clip( time.min(), today, out=t_i)
-        interp_M_i = np.interp( t_i, time, mass )
-        M_i = -np.ediff1d( interp_M_i )
-        Z_i = np.interp( t_i, time, np.log10(metallicity))
+        t_i.clip(time.min(), today, out=t_i)
+        interp_M_i = np.interp(t_i, time, mass)
+        M_i = -np.ediff1d(interp_M_i)
+        Z_i = np.interp(t_i, time, np.log10(metallicity))
         Z_i = 10**Z_i
+        # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)
         # to prevent extrapolation
-        Z_i.clip( self.metallicities[0], self.metallicities[-1], out=Z_i )
-
-        extinction = np.ones((M_i.size, self.wavelength.size))
+        Z_i.clip(self.metallicities[0], self.metallicities[-1], out=Z_i)
+        extinction = np.ones((M_i.size,
+                              self.L_lambda[0][0].size))
         if dust_model:
             log_t_mid = (np.log10(t_i[:-1])+np.log10(t_i[1:]))/2
             for ii, log_t_i in enumerate(log_t_mid):
@@ -76,7 +76,6 @@ class SSPBase(object):
                     self.L_lambda[index_Z_hi-1][i] * (1-weight_Z_hi))
                 weights[i, index_Z_hi] = weight_Z_hi * mass_i
                 weights[i, index_Z_hi-1] = (1 - weight_Z_hi) * mass_i
-                weights /= np.sum(M_i)
         weights /= np.sum(M_i)
 
         if plot_interpolation:
