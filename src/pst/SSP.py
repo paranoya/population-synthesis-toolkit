@@ -135,7 +135,37 @@ class SSPBase(object):
             )
         return sed
 
-    def cut_models(self, wl_min, wl_max):
+    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
+        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
+        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        lim = 1.5 * self.log_ages_yr[[0, -1]] - 0.5 * self.log_ages_yr[[1, -2]]
+        logage_bin_edges = np.hstack(
+                [lim[0], (self.log_ages_yr[1:] + self.log_ages_yr[:-1])/2, lim[1]])
+
+        log_met_bins = np.log10(self.metallicities)
+        lim = 1.5 * log_met_bins[[0, -1]] - 0.5 * log_met_bins[[1, -2]]
+        logmet_bin_edges = np.hstack(
+                [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
+        
+        ssp_age_idx = np.searchsorted(logage_bin_edges, n_logage_bin_edges)
+        age_bins = [slice(ssp_age_idx[i], ssp_age_idx[i+1]) for i in range(len(n_logage_bin_edges) - 1)]
+        ssp_met_idx = np.searchsorted(logmet_bin_edges, n_logmet_bin_edges)
+        met_bins = [slice(ssp_met_idx[i], ssp_met_idx[i+1]) for i in range(len(n_logmet_bin_edges) - 1)]
+
+        # Bin the SED of the SSPs
+        previous_sed = self.L_lambda.copy()
+        self.L_lambda = np.empty((len(met_bins), len(age_bins), previous_sed.shape[-1]), dtype=float)
+        print("[SSP] New SSP grid dimensions: ", self.L_lambda.shape)
+        for j, m_bin in enumerate(met_bins):
+            met_av_sed = np.mean(previous_sed[m_bin], axis=0)
+            for i, a_bin in enumerate(age_bins):
+                self.L_lambda[j, i, :] = np.mean(met_av_sed[a_bin], axis=0)
+
+        self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2)
+        self.log_ages_yr = (n_logage_bin_edges[:-1] + n_logage_bin_edges[1:]) / 2
+        self.ages = 10**self.log_ages_yr
+
+    def cut_wavelength(self, wl_min, wl_max):
         """Cut model wavelength edges."""
         cut_pts = np.where((self.wavelength >= wl_min) &
                            (self.wavelength <= wl_max))[0]
@@ -148,7 +178,7 @@ class SSPBase(object):
         else:
             self.wavelength = self.wavelength[cut_pts]
             self.L_lambda = self.L_lambda[:, :, cut_pts]
-            print(' [SSP] Models cut between {} {}'.format(wl_min, wl_max))
+            print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
     def interpolate_sed(self, new_wl_edges):
         """Flux-conserving interpolation.
@@ -161,7 +191,7 @@ class SSPBase(object):
         dwl = np.diff(new_wl_edges)
         ori_dwl = np.hstack((np.diff(self.wavelength),
                              self.wavelength[-1] - self.wavelength[-2]))
-        print(' [SSP] Interpolating SSP SEDs')
+        print('[SSP] Interpolating SSP SEDs')
         new_l_lambda = np.empty(
             shape=(self.metallicities.size, self.log_ages_yr.size,
                    new_wl.size), dtype=np.float32)
@@ -177,7 +207,7 @@ class SSPBase(object):
     def convolve_sed(self, profile=gaussian1d_conv,
                      **profile_params):
         """Convolve the SSP spectra with a given LSF."""
-        print(' [SSP] Convolving SSP SEDs')
+        print('[SSP] Convolving SSP SEDs')
         for i in range(self.L_lambda.shape[0]):
             for j in range(self.L_lambda.shape[1]):
                 self.L_lambda[i, j] = profile(self.L_lambda[i, j],
