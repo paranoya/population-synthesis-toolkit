@@ -9,6 +9,16 @@ Created on Sun Jun  5 16:18:39 2022
 import numpy as np
 from matplotlib import pyplot as plt
 
+def flux_conserving_interpolation(new_wave, wave, spectra):
+    """Interpolate a spectra to a new grid of wavelengths preserving the flux density."""
+    wave_limits = 1.5 * wave[[0, -1]] - 0.5 * wave[[1, -2]]
+    wave_edges = np.hstack([wave_limits[0], (wave[1:] + wave[:-1])/2, wave_limits[1]])
+
+    new_wave_limits = 1.5 * new_wave[[0, -1]] - 0.5 * new_wave[[1, -2]]
+    new_wave_edges = np.hstack([new_wave_limits[0], (new_wave[1:] + new_wave[:-1])/2, new_wave_limits[1]])
+    print(wave_edges, new_wave_edges)
+    interp_spectra = np.diff(np.interp(new_wave_edges, wave, np.cumsum(spectra * np.diff(wave_edges)))) / np.diff(new_wave_edges)
+    return interp_spectra
 
 def gaussian1d_conv(f, sigma, deltax):
     """Apply a gaussian convolution to a 1D array f(x).
