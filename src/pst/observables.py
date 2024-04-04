@@ -182,9 +182,11 @@ class Filter(object):
 
     def get_fnu(self, spectra, spectra_err):
         """Compute the  specific flux per frequency unit from a spectra."""
-        m_ab, m_ab_err = self.get_AB(spectra, spectra_err)
-        f_nu = 10**(-0.4 * m_ab) * 3631 * u.Jy
-        f_nu_err = 10**(-0.4 * m_ab_err) * u.Jy
+        n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
+        norm_photons, _ = self.get_photons(
+            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
+        f_nu = n_photons / norm_photons * 3631 * u.Jy
+        f_nu_err = n_photons_err / norm_photons * 3631 * u.Jy
         return f_nu, f_nu_err
 
 class TopHatFilter(Filter):
