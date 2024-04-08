@@ -151,20 +151,29 @@ class Filter(object):
             spectra =  spectra.copy() * u.Lsun / u.angstrom / u.cm**2
         return spectra
 
-    def get_photons(self, spectra, spectra_err=None):
+    def get_photons(self, spectra, spectra_err=None, mask_nan=True):
         spectra = self.check_spectra(spectra)
         spectra_err = self.check_spectra(spectra_err)
+        if mask_nan:
+            mask = np.isfinite(spectra)
+        else:
+            mask = np.ones_like(spectra, dtype=bool)
 
         photon_flux = np.trapz(
-            spectra / (constants.h * constants.c / self.wavelength
-                                   ) * self.response,
-            x=self.wavelength)
+            spectra[mask] / (constants.h * constants.c / self.wavelength[mask]
+                                   ) * self.response[mask],
+            x=self.wavelength[mask])
 
         if spectra_err is not None:
+            if mask_nan:
+                mask = mask & np.isfinite(spectra_err)
+            else:
+                mask = np.ones_like(spectra_err, dtype=bool)
+
             photon_flux_err = np.trapz(
-                spectra_err / (constants.h * constants.c / self.wavelength
-                                       ) * self.response,
-                x=self.wavelength)
+                spectra_err[mask] / (constants.h * constants.c / self.wavelength[mask]
+                                       ) * self.response[mask],
+                x=self.wavelength[mask])
         else:
             photon_flux_err = None
         return photon_flux, photon_flux_err
@@ -187,7 +196,7 @@ class Filter(object):
             3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
         f_nu = n_photons / norm_photons * 3631 * u.Jy
         f_nu_err = n_photons_err / norm_photons * 3631 * u.Jy
-        return f_nu, f_nu_err
+        return f_nu.to("Jy"), f_nu_err.to("Jy")
 
 class TopHatFilter(Filter):
     """Top hat photometric filter"""
