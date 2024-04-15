@@ -186,7 +186,7 @@ class Filter(object):
         if n_photons_err is None:
             m_ab_err = None
         else:
-            m_ab_err = - 2.5 * np.log10(n_photons_err / norm_photons)
+            m_ab_err = 2.5 / np.log(10) * n_photons_err / n_photons
         return m_ab, m_ab_err
 
     def get_fnu(self, spectra, spectra_err):
