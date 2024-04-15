@@ -80,7 +80,7 @@ class Filter(object):
         if self.wavelength is not None:
             self.nu = constants.c /( self.wavelength)
 
-    def load_filter(self, path=None, name=None):
+    def load_filter(self, path=None, name=None, wl_unit=u.angstrom):
         """Load a filter from a text file.
         
         Parameters
@@ -108,7 +108,7 @@ class Filter(object):
         else:
             raise NameError("No path, nor name provided")
         print(f"Filter loaded from: {path}")
-        self.filter_wavelength *= u.Angstrom
+        self.filter_wavelength *= wl_unit
         return self.filter_wavelength, self.filter_resp 
 
     def effective_wavelength(self):
