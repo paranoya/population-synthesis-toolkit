@@ -157,10 +157,9 @@ class SSPBase(object):
         self.L_lambda = np.empty((len(met_bins), len(age_bins), previous_sed.shape[-1]), dtype=float)
         print("[SSP] New SSP grid dimensions: ", self.L_lambda.shape)
         for j, m_bin in enumerate(met_bins):
-            met_av_sed = np.mean(previous_sed[m_bin], axis=0)
+            met_av_sed = np.exp(np.mean(np.log(previous_sed[m_bin]), axis=0))
             for i, a_bin in enumerate(age_bins):
-                self.L_lambda[j, i, :] = np.mean(met_av_sed[a_bin], axis=0)
-
+                self.L_lambda[j, i, :] = np.exp(np.mean(np.log(met_av_sed[a_bin]), axis=0))
         self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2)
         self.log_ages_yr = (n_logage_bin_edges[:-1] + n_logage_bin_edges[1:]) / 2
         self.ages = 10**self.log_ages_yr
@@ -284,7 +283,7 @@ class PyPopStar(SSPBase):
 
     def __init__(self, IMF, nebular=False, path=None):
         if path is None:
-            self.path = os.path.join(self.default_path, 'PyPopStar')
+            self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
         else:
             self.path = path
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05])
@@ -316,8 +315,8 @@ class PyPopStar(SSPBase):
             print("> Initialising Popstar models (no neb em) (IMF='"
                   + IMF + "')")
             column = 'flux_stellar'
-        with fits.open(header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(
-                self.metallicities[0], self.log_ages_yr[0])
+        with fits.open(os.path.join(self.path, header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(
+                self.metallicities[0], self.log_ages_yr[0]))
                        ) as hdul:
             self.wavelength = hdul[1].data['wavelength']  # Angstrom
 
@@ -328,10 +327,12 @@ class PyPopStar(SSPBase):
         for i, Z in enumerate(self.metallicities):
             for j, age in enumerate(self.log_ages_yr):
                 filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
-                file = os.path.join(self.path, IMF, filename)
+                file = os.path.join(self.path, filename)
                 with fits.open(file) as hdul:
                     self.L_lambda[i][j] = hdul[1].data[column]  # Lsun/AA/Msun
                     hdul.close()
+        # Avoid 0 flux
+        self.L_lambda[self.L_lambda <= 0] += self.L_lambda[self.L_lambda > 0].min()
         self.sed_unit = 'Lsun/Angstrom/Msun'
 
 # class BC03_Padova94(SSP): # TODO: CHANGE METHODS
