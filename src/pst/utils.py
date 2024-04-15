@@ -16,7 +16,6 @@ def flux_conserving_interpolation(new_wave, wave, spectra):
 
     new_wave_limits = 1.5 * new_wave[[0, -1]] - 0.5 * new_wave[[1, -2]]
     new_wave_edges = np.hstack([new_wave_limits[0], (new_wave[1:] + new_wave[:-1])/2, new_wave_limits[1]])
-    print(wave_edges, new_wave_edges)
     interp_spectra = np.diff(np.interp(new_wave_edges, wave, np.cumsum(spectra * np.diff(wave_edges)))) / np.diff(new_wave_edges)
     return interp_spectra
 
