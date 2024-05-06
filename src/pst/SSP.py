@@ -47,22 +47,22 @@ class SSPBase(object):
         t_i = today - 10**t_i
         t_i[0] = today
         t_i.clip(time.min(), today, out=t_i)
+        logt_bins = (np.log10(t_i[:-1]) + np.log10(t_i[1:])) / 2
         interp_M_i = np.interp(t_i, time, mass)
         M_i = -np.ediff1d(interp_M_i)
-        Z_i = np.interp(t_i, time, np.log10(metallicity))
+        Z_i = np.interp(10**logt_bins, time, np.log10(metallicity))
+        #Z_i = -np.ediff1d( Z_i ) / (M_i)
         Z_i = 10**Z_i
-        # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)
         # to prevent extrapolation
         Z_i.clip(self.metallicities[0], self.metallicities[-1], out=Z_i)
         extinction = np.ones((M_i.size,
                               self.L_lambda[0][0].size))
         if dust_model:
-            log_t_mid = (np.log10(t_i[:-1])+np.log10(t_i[1:]))/2
-            for ii, log_t_i in enumerate(log_t_mid):
+            for ii, log_t_i in enumerate(logt_bins):
                 extinction[ii, :] = dust_model(10**log_t_i/u.yr, self.wavelength)
 
         sed = np.zeros(self.wavelength.size)
-        weights = np.zeros((t_i.size, self.metallicities.size))
+        weights = np.zeros((logt_bins.size, self.metallicities.size))
         for i, mass_i in enumerate(M_i):
             if mass_i > 0:
                 index_Z_hi = self.metallicities.searchsorted(Z_i[i]).clip(
@@ -82,17 +82,17 @@ class SSPBase(object):
             from matplotlib import pyplot as plt
             fig = plt.figure()
             ax = fig.add_subplot(211)
-            ax.plot(np.log10(time/u.Gyr), np.log10(mass), 'k-o', label='input')
-            ax.plot(np.log10(t_i/u.Gyr), np.log10(interp_M_i), 'r-o', label='input')
+            ax.plot(np.log10(time), np.log10(mass), 'k-o', label='input')
+            ax.plot(np.log10(t_i), np.log10(interp_M_i), 'r-o', label='input')
             ax.set_ylabel(r'$\log_{10}(M_*)$')
-            ax.set_xlabel(r'$\log_{10}(t/Gyr)$')
+            ax.set_xlabel(r'$\log_{10}(t_{Univ}/yr)$')
 
-            ax = fig.add_subplot(212)
-            ax.plot(np.log10(time/u.Gyr), np.log10(metallicity/0.02),
+            ax = fig.add_subplot(212, sharex=ax)
+            ax.plot(np.log10(time), np.log10(metallicity/0.02),
                     'k-o', label='input')
-            ax.plot(np.log10(t_i/u.Gyr), np.log10(Z_i/0.02), 'r-o', label='interp')
+            ax.plot(logt_bins, np.log10(Z_i/0.02), 'r-o', label='interp')
             ax.set_ylabel(r'$\log_{10}(Z_*/Z_\odot)$')
-            ax.set_xlabel(r'$\log_{10}(t/Gyr)$')
+            ax.set_xlabel(r'$\log_{10}(t_{Univ}/yr)$')
             fig.subplots_adjust(hspace=0)
             plt.show()
 
@@ -135,9 +135,8 @@ class SSPBase(object):
             )
         return sed
 
-    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
-        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
-        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+    def get_ssp_logedges(self):
+        """Get the edges of the SSP metallicities and ages."""
         lim = 1.5 * self.log_ages_yr[[0, -1]] - 0.5 * self.log_ages_yr[[1, -2]]
         logage_bin_edges = np.hstack(
                 [lim[0], (self.log_ages_yr[1:] + self.log_ages_yr[:-1])/2, lim[1]])
@@ -146,6 +145,12 @@ class SSPBase(object):
         lim = 1.5 * log_met_bins[[0, -1]] - 0.5 * log_met_bins[[1, -2]]
         logmet_bin_edges = np.hstack(
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
+        return logmet_bin_edges, logage_bin_edges
+    
+    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
+        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
+        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        logmet_bin_edges, logage_bin_edges = self.get_ssp_logedges()
         
         ssp_age_idx = np.searchsorted(logage_bin_edges, n_logage_bin_edges)
         age_bins = [slice(ssp_age_idx[i], ssp_age_idx[i+1]) for i in range(len(n_logage_bin_edges) - 1)]
