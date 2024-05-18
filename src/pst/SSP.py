@@ -5,7 +5,7 @@ from astropy.io import fits
 from astropy import units as u
 from astropy import constants as c
 
-from utils import gaussian1d_conv
+from pst.utils import gaussian1d_conv
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations."""

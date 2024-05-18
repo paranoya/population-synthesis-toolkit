@@ -1,0 +1,472 @@
+import numpy as np
+#import pylab as plt
+from astropy import units as u
+from astropy.io import fits
+from scipy import special
+import pst
+
+#-------------------------------------------------------------------------------
+class Chemical_evolution_model:
+#-------------------------------------------------------------------------------
+
+    def __init__(self, **kwargs):
+        self.M_gas = kwargs.get('M_gas', 0*u.Msun)
+        self.Z = kwargs.get('Z', 0.02)
+
+    def get_Z(self, time):
+        return self.Z
+
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
+
+
+
+#-------------------------------------------------------------------------------
+class Single_burst(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+  def __init__(self, **kwargs):
+    self.M_stars = kwargs['M_stars']
+    self.t = kwargs['t_burst']
+    Chemical_evolution_model.__init__(self, **kwargs)
+
+# TODO: do this using np.select(); actually, does tb exist at all?
+  def integral_SFR(self, time):
+    M_t = []
+    if type(time)==float:
+        time=[time]
+    for  t in time:
+      if t<=self.tb:
+           M_t.append(0)
+      else:
+          M_t.append( self.M_stars)
+    return M_t
+
+#-------------------------------------------------------------------------------
+class Exponential_SFR(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, **kwargs):
+        self.M_inf = kwargs['M_inf']*u.Msun
+        self.tau = kwargs['tau']*u.Gyr
+        self.Z = kwargs['Z']
+        Chemical_evolution_model.__init__(self, **kwargs)
+
+    def integral_SFR(self, time):
+      return self.M_inf * ( 1 - np.exp(-time/self.tau) )
+
+    def SFR(self, time):
+      return self.M_inf*(np.exp(-time/self.tau))/self.tau
+
+    def dot_SFR(self,time):
+      return -self.M_inf*(np.exp(-time/self.tau))/(self.tau**2)
+
+
+    def ddot_SFR(self,time):
+      return self.M_inf*(np.exp(-time/self.tau))/(self.tau**3)
+
+
+    def integral_Z_SFR(self, time):
+      return self.Z * self.integral_SFR(time)
+
+
+#-------------------------------------------------------------------------------
+class Exponential_SFR_delayed(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+  def __init__(self, **kwargs):
+    self.M_inf = kwargs['M_inf']*u.Msun
+    self.tau = kwargs['tau']*u.Gyr
+    self.Z = kwargs['Z']
+    Chemical_evolution_model.__init__(self, **kwargs)
+
+  def integral_SFR(self, time):
+    return self.M_inf * ( 1 - np.exp(-time/self.tau)*(self.tau+time)/self.tau)
+
+  def SFR(self,time):
+      return self.M_inf*(time/self.tau**2)*np.exp(-time/self.tau)
+
+  def dot_SFR(self,time):
+      return -self.M_inf*((time-self.tau)/self.tau**3)*np.exp(-time/self.tau)
+
+  def ddot_SFR(self,time):
+      return self.M_inf*((time-2*self.tau)/self.tau**4)*np.exp(-time/self.tau)
+
+  def integral_Z_SFR(self, time):
+    return self.Z * self.integral_SFR(time)
+
+#-------------------------------------------------------------------------------
+class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
+#-------------------------------------------------------------------------------
+    def __init__(self, N, ssp, obs_filters, obs_filters_wl, t, t_obs, Z_i, dust_extinction, 
+                 error_Fnu_obs, **kwargs):
+        self.t_obs = t_obs.to_value()
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        
+        primordial_coeffs = []
+        primordial_Fnu = []
+        for n in range(N):
+            
+            c = np.zeros(N)
+            c[n] = 1
+            
+            primordial_coeffs.append(c)
+            
+            fnu = []
+            p = pst.models.Polynomial_MFH(Z=Z_i, t_hat_start = self.t_hat_start,
+                                          t_hat_end = self.t_hat_end,
+                                          coeffs=c)
+
+            cum_mass = np.cumsum(p.integral_SFR(t))
+            z_array = Z_i*np.ones(len(t))
+            sed, weights = ssp.compute_SED(t, cum_mass, z_array)
+
+            for i, filter_name in enumerate(obs_filters):
+                photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                fnu.append( fnu_Jy )
+
+            primordial_Fnu.append(u.Quantity(fnu))
+        primordial_Fnu = np.array(primordial_Fnu)*dust_extinction / error_Fnu_obs
+        
+        self.p = p
+        self.sed = sed
+        self.lstsq_solution = np.matmul(
+            np.linalg.pinv(np.matmul(primordial_Fnu, np.transpose(primordial_Fnu))),
+            primordial_Fnu)
+        self.primordial_coeffs = np.array(primordial_coeffs)
+        self.primordial_Fnu = np.array(primordial_Fnu)
+        self.primordial_Fnu = primordial_Fnu
+
+    def fit(self, Fnu_obs, **kwargs):
+
+        c = np.matmul(self.lstsq_solution,
+                      Fnu_obs)              
+        return c
+    
+#-------------------------------------------------------------------------------
+class Polynomial_MFH(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, **kwargs):
+        self.t0 = kwargs.get('t0', 13.7*u.Gyr)
+        self.M0 = kwargs.get('M_end', 1*u.Msun)
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        self.coeffs = kwargs['coeffs']
+        self.S = kwargs.get('S', False)
+        
+        Chemical_evolution_model.__init__(self, **kwargs)
+    
+    #If you want the raw components: model.xxxx(t, get_components=True)
+    #If you want the observable + error: model.xxxx(t, get_sigma=True)
+    #If you want only the observable: model.xxxx(t)
+    def mass_formed_since(self, cosmic_time, **kwargs):
+        t_hat_present_time = (1 - self.t0/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        t_hat_since = (1 - cosmic_time/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        self.get_sigma = kwargs.get('get_sigma', False)
+        self.get_components = kwargs.get('get_components', False)
+        self.fit_components = kwargs.get('fit_components', None)
+        
+        if self.fit_components is None:  
+            M=[]
+            N = len(self.coeffs)
+            for n in range(1, N+1):
+                M.append(t_hat_since**n - t_hat_present_time**n)
+
+            self.M = u.Quantity(M)
+        else:
+            c, M, S = self.fit_components
+            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
+        
+        if self.get_components: #if you want the raw components c, M, S
+            return self.coeffs, self.M0 *self.M, self.S
+        elif self.get_sigma: #If you want the observable + sigma
+            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
+        else: #If you just want the observable
+            return self.M0 * np.matmul(self.coeffs, self.M)
+        
+    def integral_SFR(self, time, **kwargs):
+        self.get_sigma = kwargs.get('get_sigma', False)
+        self.get_components = kwargs.get('get_components', False)
+        self.fit_components = kwargs.get('fit_components', None)
+        t_hat = (1 - time/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        
+        if self.fit_components is None:              
+            M=[]
+            N = len(self.coeffs)
+            for n in range(1, N+1):
+                M.append(self.t_hat_start**n - t_hat**n)
+            self.M = u.Quantity(M)
+        
+        else:
+            c, M, S = self.fit_components
+            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
+        
+        if self.get_components: #if you want the raw components c, M, S
+            return self.coeffs, self.M0 *self.M, self.S
+        elif self.get_sigma: #If you want the observable + sigma
+            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
+        else: #If you just want the observable
+            return self.M0 * np.matmul(self.coeffs, self.M)
+        
+       
+    def SFR(self, time, **kwargs):       
+        t_hat = (1 - time/self.t0)
+        self.get_sigma = kwargs.get('get_sigma', False)
+        self.get_components = kwargs.get('get_components', False)
+        self.fit_components = kwargs.get('fit_components', None)
+        
+        if self.fit_components is None:   
+            M=[]
+            N = len(self.coeffs)
+            for n in range(1, N+1):      
+                m=(n*t_hat**(n-1))/self.t0
+                
+                m[t_hat > self.t_hat_start] = 0.
+                m[t_hat < self.t_hat_end] = 0.
+                M.append(m)
+            self.M = u.Quantity(M)
+        else:
+            c, M, S = self.fit_components
+            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
+        
+        if self.get_components: #if you want the raw components c, M, S
+            return self.coeffs, self.M0 *self.M, self.S
+        elif self.get_sigma: #If you want the observable + sigma
+            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
+        else: #If you just want the observable
+            return self.M0 * np.matmul(self.coeffs, self.M)
+        
+    #The derivatives are not up to date
+    def dot_SFR(self, time):
+        t_hat = (1 - time/self.t0)
+        
+        M=[]
+        N = len(self.coeffs)
+        
+        for n in range(0, N):
+            m =(n*(n-1)*t_hat**(n-2))/self.t0**2
+            m[t_hat > self.t_hat_start] = 0.
+            m[t_hat < self.t_hat_end] = 0.
+            M.append(m)
+      
+        if self.compute_sigma:
+            
+            return self.M0*self.coeffs, M, self.S
+        else:
+            return self.M0 * np.matmul(self.coeffs, M)
+    
+    def ddot_SFR(self, time):
+        t_hat = (1 - time/self.t0)
+        
+        M=[]
+        N = len(self.coeffs)
+        for n in range(0, N):
+            m=-(n*(n-1)*(n-2)*t_hat**(n-3))/self.t0**3
+            m[t_hat > self.t_hat_start] = 0.
+            m[t_hat < self.t_hat_end] = 0.
+            M.append(m)
+
+        if self.compute_sigma:
+            return self.M0*self.coeffs, M, self.S
+        else:
+            return self.M0 * np.matmul(self.coeffs, M)
+
+
+#-------------------------------------------------------------------------------
+class Gaussian_burst(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+  def __init__(self, **kwargs):
+    self.M_inf = kwargs['M_stars']*u.Msun
+    self.tb = kwargs['t']*u.Gyr             # Born time
+    self.c = kwargs['c']*u.Gyr # En Myr
+    Chemical_evolution_model.__init__(self, **kwargs)
+
+  def integral_SFR(self, time):
+    return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
+
+  def SFR(self, time):
+    a = self.M_inf/(2*self.c*np.sqrt(np.pi/2))
+    return a * np.exp(-(time-self.tb)**2/(2*self.c**2))
+
+  def dot_SFR(self,time):
+    a = self.M_inf/(self.c*np.sqrt(np.pi/2))
+    return -a/self.c**2 * (time-self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
+
+  def ddot_SFR(self,time):
+    a = self.M_inf/(self.c*np.sqrt(np.pi/2))
+    return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
+
+#-------------------------------------------------------------------------------
+class Tabular_MFH(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, times, masses, **kwargs):
+        self.table_t = times
+        self.table_M = masses
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        self.table_SFR = np.gradient(masses, times)
+        self.table_dot_SFR = np.gradient(self.table_SFR, times)
+        self.table_ddot_SFR = np.gradient(self.table_dot_SFR, times)
+        Chemical_evolution_model.__init__(self, **kwargs)
+
+    def integral_SFR(self, times):
+        return np.interp(times, self.table_t, self.table_M)
+
+    def SFR(self, times):
+        return np.interp(times, self.table_t, self.table_SFR, left=0, right=0)
+
+    def dot_SFR(self, times):
+        return np.interp(times, self.table_t, self.table_dot_SFR, left=0, right=0)
+    
+    def ddot_SFR(self, times):
+        return np.interp(times, self.table_t, self.table_ddot_SFR, left=0, right=0)
+
+#-------------------------------------------------------------------------------
+class Tabular_Illustris(Tabular_MFH):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, filename, t0, **kwargs):
+        # TODO: get rid of t0 !
+        with fits.open(filename) as hdul:
+            lb_time = hdul[1].data['lookback_time'] * u.Gyr
+            mass_formed = np.sum(hdul[3].data, axis=1) *u.Msun # sum over metallicities
+            t_sorted = (t0-lb_time)[::-1]
+            mfh_sorted = np.cumsum(mass_formed[::-1])
+            #print('aqui', t_sorted, mfh_sorted)
+            Tabular_MFH.__init__(self, t_sorted, mfh_sorted, **kwargs) # t [Gyr], M[Msun]
+
+#-------------------------------------------------------------------------------
+class Tabular_CIGALE(Tabular_MFH):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, filename, t0, **kwargs):
+        f=open(filename,"r")
+        lines=f.readlines()
+        time=[]
+        mass=[]
+        for x in lines:
+            time.append(float(x.strip().split(' ')[0])*1e-3) #Myr -> Gyr
+            mass.append(float(x.strip().split(' ')[1])*1e6) #Msun/year -> Msun/Myr
+        f.close()
+        time = 13.7*u.Gyr-time*u.Gyr
+        cum_mass = np.cumsum(mass[::-1])*u.Msun #Msun/Myr -> Msun
+        Tabular_MFH.__init__(self, time[::-1], cum_mass, **kwargs)
+        
+
+#-------------------------------------------------------------------------------
+class Tabular_CIGALE_models(Tabular_MFH):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, hdul, factor, best_sfh_age, t0, free_age, **kwargs):
+        
+        if free_age:
+            age_start = 13699- best_sfh_age
+        else:
+            age_start = 0
+            
+        #print('a',age_start)
+        time = age_start*1e-3*u.Gyr +hdul[1].data['time']*1e-3*u.Gyr
+        cum_mass = np.cumsum(factor*hdul[1].data['SFR'])*1e6*u.Msun #Msun/Myr -> Msun
+        Tabular_MFH.__init__(self, time, cum_mass, **kwargs)
+
+            
+#-------------------------------------------------------------------------------
+class Tabular_Prospector(Tabular_MFH):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, prospector_model, t0, **kwargs):
+        # TODO: get rid of t0 !
+        x_bins_prospector = np.power(10, prospector_model['agebins'][()]).flatten()*1e-9 #Gyrs
+            
+        y_prospector=prospector_model['best_log_mass'][()]
+        y_prospector = 10**y_prospector #Pasamos a mass = Msun
+        y_prospector = np.cumsum(y_prospector[::-1]) #Masa acumulada
+        y_prospector=np.vstack((y_prospector,y_prospector)).T.flatten() #Msun // Msun/year // Se añade lbt = 0 (ojo con el log)
+        #print('prospector', x_bins_prospector*u.Gyr, y_prospector*u.Msun)
+        Tabular_MFH.__init__(self, x_bins_prospector*u.Gyr, y_prospector*u.Msun, **kwargs)
+            
+#-------------------------------------------------------------------------------
+class Exponential_quenched_SFR(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+  def __init__(self, **kwargs):
+    self.M_inf = kwargs['M_inf']*u.Msun
+    self.tau = kwargs['tau']*u.Gyr
+    self.Z = kwargs['Z']
+    self.t_q = kwargs['t_quench']*u.Gyr
+    Chemical_evolution_model.__init__(self, **kwargs)
+
+
+  def integral_SFR(self, time):
+     if type(time) is float:
+        if time<self.t_q:
+              M_stars=self.M_inf * ( 1 - np.exp(-time/self.tau) )
+                #M _inf is the mass for large t ;  M(t)=M_inf[1-exp(-t/tau)
+        else:
+            M_stars=self.M_inf * ( 1 - np.exp(-self.t_q/self.tau) )
+
+     else:
+         M_stars=[]
+         for t in time:
+             if t<self.t_q:
+                 M=self.M_inf * ( 1 - np.exp(-t/self.tau) )
+                #M _inf is the mass for large t ;  M(t)=M_inf[1-exp(-t/tau)
+             else:
+                 M=self.M_inf * ( 1 - np.exp(-self.t_q/self.tau) )
+             M_stars.append(M)
+         M_stars=np.array(M_stars)
+
+     return M_stars
+
+  def integral_Z_SFR(self, time):
+    return self.Z * self.integral_SFR(time)
+
+
+#-------------------------------------------------------------------------------
+class ASCII_file(Chemical_evolution_model):
+#-------------------------------------------------------------------------------
+
+  def __init__(self, file,
+           time_column = 0,
+           Z_column    = 1,
+           SFR_column  = 2,
+           time_units  = u.Gyr,
+           SFR_units   = u.Msun/u.yr ):
+    print("> Reading SFR file: '"+ file +"'")
+    t, Z, SFR = np.loadtxt( file, dtype=np.float, usecols=(time_column,Z_column,SFR_column), unpack=True)
+    self.t_table   = np.append( [0], t*time_units )
+    self.Z_table   = np.append( [0], Z )
+
+    dt = np.ediff1d( self.t_table, to_begin=0 )
+    dm = np.append( [0], SFR*SFR_units )*dt
+    self.integral_SFR_table = np.cumsum( dm )
+    self.integral_Z_SFR_table = np.cumsum( self.Z_table*dm )
+
+  def set_current_state(self, galaxy):
+    galaxy.M_stars = self.integral_SFR( galaxy.today ) #TODO: account for stellar death
+    Z = np.interp( galaxy.today, self.t_table, self.Z_table )
+    galaxy.M_gas = galaxy.M_stars*max(.03/(Z+1e-6)-1,1e-6) # TODO: read from files
+    galaxy.Z = Z
+
+  def integral_SFR(self, time):
+    return np.interp( time, self.t_table, self.integral_SFR_table )
+
+  def integral_Z_SFR(self, time):
+    return np.interp( time, self.t_table, self.integral_Z_SFR_table )
+
+  #def plot(self):
+    #plt.semilogy( self.t_table/units.Gyr, self.SFR_table/(units.Msun/units.yr) )
+    #plt.semilogy( self.t_table/units.Gyr, self.integral_SFR_table/units.Msun )
+    #plt.semilogy( self.t_table/units.Gyr, self.Z_table )
+    #plt.show()
+
+
+# %%
+# -----------------------------------------------------------------------------
+#                                                    ... Paranoy@ Rulz! ;^D
+# -----------------------------------------------------------------------------
