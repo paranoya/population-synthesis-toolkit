@@ -71,18 +71,18 @@ def compute_polynomial_models(input_type):
     max_per_folder = 100 #Max amount per folder
     current_run = 0 #Current run (0 --> n_runs-1)   
     
-    #NEED read the lines [subhalo_name [Fnu] [Fnu_error]]
-    real_models = {}
+    #NEED read the lines [target_ID_name [Fnu] [Fnu_error]]
+    input_photo = {}
     input_file = os.path.join(os.getcwd(),'input', '{}_input.txt'.format(input_type))
     
     content = open(input_file, "r").readlines()
     
     for line in content:
         data = line.split(' ')
-        subhalo = data[0]
-        real_models[subhalo] = {}
-        real_models[subhalo]['Fnu_obs'] = [float(string) for string in data[1:len(obs_filters)+1]]
-        real_models[subhalo]['error_Fnu_obs'] = [float(string) for string in data[-len(obs_filters):]]
+        target_ID = data[0]
+        input_photo[target_ID] = {}
+        input_photo[target_ID]['Fnu_obs'] = [float(string) for string in data[1:len(obs_filters)+1]]
+        input_photo[target_ID]['error_Fnu_obs'] = [float(string) for string in data[-len(obs_filters):]]
     
     
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
@@ -109,13 +109,13 @@ def compute_polynomial_models(input_type):
     if not os.path.exists(output_path):
         os.makedirs(output_path)
         
-    #Saving the t in Gyrs
+    #Saving t in Gyrs
     with open(os.path.join(output_path, 't_Gyr.txt'), 'w+') as f_MFH:
         if os.stat(os.path.join(output_path, 't_Gyr.txt')).st_size == 0:
             f_MFH.write(" ".join(str(x) for x in t.to_value()) + "\n")
          
-    for number_model, subhalo in enumerate(real_models):
-        print('Computing Model #{} of {}'.format(number_model+1, len(real_models)))
+    for number_model, target_ID in enumerate(input_photo):
+        print('Computing Model #{} of {}'.format(number_model+1, len(input_photo)))
         
         #Dividing the output into files    
         if number_model % max_per_folder == 0:
@@ -124,14 +124,14 @@ def compute_polynomial_models(input_type):
             else:
                 min_ID+=1
         
-        run_folder = 'models_{}_{}'.format(current_run*len(real_models)+min_ID*max_per_folder, 
-                             current_run*len(real_models)+min((min_ID+1)*max_per_folder-1, len(real_models)-1))
+        run_folder = 'models_{}_{}'.format(current_run*len(input_photo)+min_ID*max_per_folder, 
+                             current_run*len(input_photo)+min((min_ID+1)*max_per_folder-1, len(input_photo)-1))
                             
         run_path = os.path.join(output_path, run_folder)
         if not os.path.exists(run_path):
             os.makedirs(run_path)
         
-        target = real_models[subhalo]
+        target = input_photo[target_ID]
         
         model_poly = []
         chi2_poly = []
@@ -288,12 +288,12 @@ def compute_polynomial_models(input_type):
         
         #%%  
         #Saving results def
-        file_ID = subhalo[8:]
+        file_ID = target_ID[8:]
         with open(os.path.join(run_path, 'met_dust_model_{}.txt'.format(file_ID)), 'w+') as f:
             f.write('model_Z std_Z model_dust_extinction model_dust_extinction_std'+'\n')
             f.write('{} {} {} {} {}'.format(file_ID, 
                            np.round(weighted_z[0], 5), np.round(std_weighted_z[0], 5), 
-                           str(np.round(weighted_d, 3))[1:-1], str(np.round(std_weighted_d, 3))[1:-1]+'\n'))
+                           str(np.round(weighted_d, 3))[1:], str(np.round(std_weighted_d, 3))[1:]+'\n'))
         with open(os.path.join(run_path, 'mass_fraction_model_{}.txt'.format(file_ID)), 'w+') as f:
             f.write('M(t) delta_M(t) M0'+'\n')
             f.write(" ".join(str(x) for x in mass_fraction) + "\n")
@@ -306,12 +306,12 @@ def compute_polynomial_models(input_type):
             f.write(" ".join(str(x) for x in age_of_fraction_std) + "\n")
         
         keys_array = []
-        for key, value in real_models[subhalo].items():
+        for key, value in input_photo[target_ID].items():
             keys_array.append(key)
             
         with open(os.path.join(run_path, 'real_parameters_model_{}.txt'.format(file_ID)), 'w+') as f:
-            f.write(" ".join([key for key in real_models[subhalo].keys()]) + "\n")
-            for key, value in real_models[subhalo].items():
+            f.write(" ".join([key for key in input_photo[target_ID].keys()]) + "\n")
+            for key, value in input_photo[target_ID].items():
                 f.write("{}".format(value) + "\n")
         
      #%%
