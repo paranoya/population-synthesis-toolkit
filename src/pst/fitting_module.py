@@ -22,13 +22,11 @@ def compute_polynomial_models(input_type):
     
     # SSPs
     ssp_pop = pst.SSP.PopStar(IMF="sal")
-    #ssp_pypop = pst.SSP.PyPopStar(IMF="KRO")
     ssp = ssp_pop
     
     #%%    
     #MODEL PARAMETERS
     allow_negative_sfr = False #Allows negative SFRs
-    free_time = True #ti and tf as variables
     
     print('Initiating code')
     print()
@@ -39,9 +37,7 @@ def compute_polynomial_models(input_type):
     t_start_values = [0]*u.Gyr
     #t_end_values = [1, 2, 3, 4, 7, 10, 11, 12, 12.7, 13, 13.2, 13.5, 13.6, 13.62, 13.65, 13.67, 13.7]*u.Gyr
     t_end_values =  [13.7]*u.Gyr
-    if free_time == False:
-        t_end_values = [1]*t0
-        t_start_values = [0]*t0
+
     t_grid = [(b, c) for b in t_start_values for c in t_end_values
                   if b.to_value()<c.to_value()]
     
