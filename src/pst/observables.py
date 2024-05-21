@@ -189,14 +189,19 @@ class Filter(object):
             m_ab_err = 2.5 / np.log(10) * n_photons_err / n_photons
         return m_ab, m_ab_err
 
-    def get_fnu(self, spectra, spectra_err):
+    def get_fnu(self, spectra, spectra_err=None):
         """Compute the  specific flux per frequency unit from a spectra."""
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
             3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
         f_nu = n_photons / norm_photons * 3631 * u.Jy
-        f_nu_err = n_photons_err / norm_photons * 3631 * u.Jy
-        return f_nu.to("Jy"), f_nu_err.to("Jy")
+        f_nu = f_nu.to('Jy')
+        if spectra_err is None:
+            f_nu_err = None
+        else:
+            f_nu_err = n_photons_err / norm_photons * 3631 * u.Jy
+            f_nu_err = f_nu_err.to('Jy')
+        return f_nu, f_nu_err
 
 class TopHatFilter(Filter):
     """Top hat photometric filter"""
