@@ -522,15 +522,15 @@ class XSL(SSPBase):
         files = os.listdir(self.path)
         if len(files) == 0:
             raise NameError('No files found at:\n {}'.format(self.path))
-        self.ages = []
-        self.metallicities = []
+        ages = []
+        metallicities = []
         for file in files:
-            self.ages.append(float(file[file.find('T') + 1: file.find('_Z')]))
-            self.metallicities.append(
+            ages.append(float(file[file.find('T') + 1: file.find('_Z')]))
+            metallicities.append(
                 float(file[file.find('Z') + 1: file.find('_' + IMF)]))
-        self.ages = np.unique(self.ages) * units.yr
+        self.ages = np.unique(np.array(ages)) * units.yr
         self.log_ages_yr = np.log10(self.ages / units.yr)
-        self.metallicities = np.unique(self.metallicities
+        self.metallicities = np.unique(np.array(metallicities)
                                        ) * units.dimensionless_unscaled
 
         header = 'XSL_SSP_T'
