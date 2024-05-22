@@ -4,6 +4,42 @@ from astropy import units as u
 from astropy.io import fits
 from scipy import special
 import pst
+
+from scipy import interpolate
+
+from abc import ABC, abstractmethod
+
+#################### PROOF OF CONCEPT ############################
+class Model(ABC):
+   
+   @property
+   @abstractmethod
+   def free_parameters(self):
+      pass
+
+   @abstractmethod
+   def evaluate(self, *args, **kwargs):
+      pass
+
+
+class PowerLaw(Model):
+   """
+   f = a * (x + x_0) / x_0)**alpha
+   """
+   free_parameters = {}
+
+   def __init__(self):
+      pass
+
+   @property
+   def free_parameters(self):
+      return ('a', 'x0', 'alpha')
+
+   def evaluate(self, x, a, x0, alpha):
+      return a * np.power((x + x0)/ x0, alpha)
+
+################################################
+
 #-------------------------------------------------------------------------------
 class Chemical_evolution_model:
 #-------------------------------------------------------------------------------
@@ -22,7 +58,7 @@ class Chemical_evolution_model:
     def compute_SED(self, SSP, t_obs, allow_negative=True ):
 
         age_bins = np.hstack(
-            [0*u.yr, np.sqrt(SSP.ages[1:]*SSP.ages[:-1]), 1e12*u.yr])
+            [0 * u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 * u.yr])
 
         '''
         age_bins = np.hstack(
@@ -41,30 +77,28 @@ class Chemical_evolution_model:
         '''
         t_bins = t_obs - age_bins
         t_bins = t_bins[t_bins > 0]
-
         M_t = self.integral_SFR(t_bins)
         M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
-
         MZ_t = self.integral_Z_SFR(t_bins)
         MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
         iZ_max = len(SSP.metallicities)-1
 
-        SED = np.zeros(SSP.wavelength.size)*u.Lsun/u.Angstrom
+        SED = np.zeros(SSP.wavelength.size) * u.Lsun / u.Angstrom
 
         # Sum over the SSP ages
         for i, m in enumerate(M_bin):
             if m > 0 or (allow_negative and m<0):
                 Z = np.clip(MZ_bin[i] / m,
                             SSP.metallicities[0], SSP.metallicities[-1])
-                #print('Z=', Z)
                 index_Z_hi = SSP.metallicities.searchsorted(Z).clip(1, iZ_max)
                 # log interpolation in Z
-                weight_Z_hi = np.log(
-                    Z/SSP.metallicities[index_Z_hi-1]
+                weight_Z_hi = u.dimensionless_unscaled * np.log(
+                    Z / SSP.metallicities[index_Z_hi-1]
                     ) / np.log(SSP.metallicities[index_Z_hi]
-                               / SSP.metallicities[index_Z_hi-1])
-                SED += m * (SSP.spectrum[index_Z_hi][i].flux * weight_Z_hi
-                            + SSP.spectrum[index_Z_hi-1][i].flux * (1-weight_Z_hi))
+                               / SSP.metallicities[index_Z_hi-1]
+                               ) 
+                SED += m * (SSP.L_lambda[index_Z_hi][i] * weight_Z_hi
+                            + SSP.L_lambda[index_Z_hi-1][i] * (1-weight_Z_hi))
         return SED
 
 
@@ -96,8 +130,15 @@ class Exponential_SFR(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
 
     def __init__(self, **kwargs):
-        self.M_inf = kwargs['M_inf']*u.Msun
-        self.tau = kwargs['tau']*u.Gyr
+        self.M_inf = kwargs['M_inf']
+        if not isinstance(self.M_inf, u.Quantity):
+           print("Assuming that input M_inf is in Msun")
+           self.M_inf *= u.Msun
+        self.tau = kwargs['tau']
+        if not isinstance(self.tau, u.Quantity):
+            print("Assuming that input tau is in Gyr")
+            self.tau *= u.Gyr
+
         self.Z = kwargs['Z']
         Chemical_evolution_model.__init__(self, **kwargs)
 
@@ -348,17 +389,58 @@ class Tabular_MFH(Chemical_evolution_model):
 #-------------------------------------------------------------------------------
 
     def __init__(self, times, masses, **kwargs):
+        super().__init__(**kwargs)
         self.table_t = times
-        self.table_M = masses
+        # Make sure that time is cresscent
+        sort_times = np.argsort(self.table_t)
+        self.table_t = self.table_t[sort_times]
+        self.table_M = masses[sort_times]
+        self.Z = self.Z[sort_times]
+        # Unused variables
         self.t_hat_start = kwargs.get('t_hat_start', 1.)
         self.t_hat_end = kwargs.get('t_hat_end', 0.)
         self.table_SFR = np.gradient(masses, times)
         self.table_dot_SFR = np.gradient(self.table_SFR, times)
         self.table_ddot_SFR = np.gradient(self.table_dot_SFR, times)
-        Chemical_evolution_model.__init__(self, **kwargs)
+        
 
     def integral_SFR(self, times):
-        return np.interp(times, self.table_t, self.table_M)
+        # interpolator = interpolate.interp1d(self.table_t.value, self.table_M.value,
+        #                                     kind='cubic',
+        #                                     bounds_error=False,
+        #                                     fill_value=(0, self.table_M.value[-1])
+        #                                     )
+        interpolator = interpolate.Akima1DInterpolator(
+           self.table_t.value, self.table_M.value)
+
+        integral = interpolator(times.to(self.table_t.unit).value) * self.table_M.unit
+        integral[times > self.table_t[-1]] = self.table_M[-1]
+        integral[times < self.table_t[0]] = 0
+        return integral
+    
+    def integral_Z_SFR(self, times):
+        times_edges = np.hstack(
+                [0, np.sqrt((self.table_t[1:] * self.table_t[:-1])
+                            ), (10**12 * u.yr).to(self.table_t.unit)])
+        Mt = self.integral_SFR(times_edges)
+        m_formed = Mt[1:] - Mt[:-1]
+        m_formed = m_formed.clip(0, m_formed.max())
+        mz = np.cumsum(m_formed.value * self.Z.value)
+        interpolator = interpolate.Akima1DInterpolator(
+           self.table_t.value, mz)
+        Z_Mt = interpolator(times.value) * m_formed.unit * self.Z.unit
+        Z_Mt[times > self.table_t[-1]] = mz[-1] * m_formed.unit * self.Z.unit
+        Z_Mt[times < self.table_t[0]] = 0
+        return Z_Mt
+
+    def interpolate_Z(self, times):
+       interpolator = interpolate.Akima1DInterpolator(
+           self.table_t.value, self.Z.value)
+       integral = interpolator(times.to(self.table_t.unit).value) * self.Z.unit
+    #    interpolator = interpolate.interp1d(
+    #     self.table_t.value, self.Z.value, kind='cubic',
+    #     bounds_error=False, fill_value=(self.Z.value[0], self.Z.value[-1]))
+       return integral
 
     def SFR(self, times):
         return np.interp(times, self.table_t, self.table_SFR, left=0, right=0)
