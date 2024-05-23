@@ -7,39 +7,6 @@ import pst
 
 from scipy import interpolate
 
-from abc import ABC, abstractmethod
-
-#################### PROOF OF CONCEPT ############################
-class Model(ABC):
-   
-   @property
-   @abstractmethod
-   def free_parameters(self):
-      pass
-
-   @abstractmethod
-   def evaluate(self, *args, **kwargs):
-      pass
-
-
-class PowerLaw(Model):
-   """
-   f = a * (x + x_0) / x_0)**alpha
-   """
-   free_parameters = {}
-
-   def __init__(self):
-      pass
-
-   @property
-   def free_parameters(self):
-      return ('a', 'x0', 'alpha')
-
-   def evaluate(self, x, a, x0, alpha):
-      return a * np.power((x + x0)/ x0, alpha)
-
-################################################
-
 #-------------------------------------------------------------------------------
 class Chemical_evolution_model:
 #-------------------------------------------------------------------------------
@@ -54,27 +21,23 @@ class Chemical_evolution_model:
     def integral_Z_SFR(self, time):
         return self.Z * self.integral_SFR(time)
 
+    def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity, allow_negative=True ):
+        """Compute the SED of a given model observed at a given time.
+        
+        Description
+        -----------
+        This method computes the spectra energy distribution resulting from the
+        chemical evolution model observed at a given time.
 
-    def compute_SED(self, SSP, t_obs, allow_negative=True ):
+        Parameters
+        ----------
+        - SSP: pst.SSP.SSP
+            The SSP model to used for synthezising the SED.
+        - t_obs: astropy.Quantity
 
+        """
         age_bins = np.hstack(
             [0 * u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 * u.yr])
-
-        '''
-        age_bins = np.hstack(
-            [t_obs*(1-self.t_hat_start), np.sqrt(SSP.ages[1:]*SSP.ages[:-1]), t_obs*(1-self.t_hat_end)])
-        
-        prev_value=age_bins[0]
-        new_age_bins=[]
-        new_age_bins.append(prev_value.to_value())
-        for i in age_bins[1:]:
-            if i>prev_value:
-                new_age_bins.append(i.to_value())
-                prev_value = i
-                
-        age_bins = new_age_bins*u.Gyr
-        print('agebins', age_bins)
-        '''
         t_bins = t_obs - age_bins
         t_bins = t_bins[t_bins > 0]
         M_t = self.integral_SFR(t_bins)
@@ -386,8 +349,7 @@ class Gaussian_burst(Chemical_evolution_model):
 
 #-------------------------------------------------------------------------------
 class Tabular_MFH(Chemical_evolution_model):
-#-------------------------------------------------------------------------------
-
+    """Chemical evolution model based on an arbitrary grid of times and metallicities."""
     def __init__(self, times, masses, **kwargs):
         super().__init__(**kwargs)
         self.table_t = times
@@ -395,6 +357,7 @@ class Tabular_MFH(Chemical_evolution_model):
         sort_times = np.argsort(self.table_t)
         self.table_t = self.table_t[sort_times]
         self.table_M = masses[sort_times]
+        # 
         self.Z = self.Z[sort_times]
         # Unused variables
         self.t_hat_start = kwargs.get('t_hat_start', 1.)
@@ -412,35 +375,22 @@ class Tabular_MFH(Chemical_evolution_model):
         #                                     )
         interpolator = interpolate.Akima1DInterpolator(
            self.table_t.value, self.table_M.value)
-
         integral = interpolator(times.to(self.table_t.unit).value) * self.table_M.unit
         integral[times > self.table_t[-1]] = self.table_M[-1]
         integral[times < self.table_t[0]] = 0
         return integral
     
     def integral_Z_SFR(self, times):
-        times_edges = np.hstack(
-                [0, np.sqrt((self.table_t[1:] * self.table_t[:-1])
-                            ), (10**12 * u.yr).to(self.table_t.unit)])
-        Mt = self.integral_SFR(times_edges)
-        m_formed = Mt[1:] - Mt[:-1]
-        m_formed = m_formed.clip(0, m_formed.max())
-        mz = np.cumsum(m_formed.value * self.Z.value)
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t.value, mz)
-        Z_Mt = interpolator(times.value) * m_formed.unit * self.Z.unit
-        Z_Mt[times > self.table_t[-1]] = mz[-1] * m_formed.unit * self.Z.unit
-        Z_Mt[times < self.table_t[0]] = 0
-        return Z_Mt
-
-    def interpolate_Z(self, times):
-       interpolator = interpolate.Akima1DInterpolator(
-           self.table_t.value, self.Z.value)
-       integral = interpolator(times.to(self.table_t.unit).value) * self.Z.unit
-    #    interpolator = interpolate.interp1d(
-    #     self.table_t.value, self.Z.value, kind='cubic',
-    #     bounds_error=False, fill_value=(self.Z.value[0], self.Z.value[-1]))
-       return integral
+           self.table_t.value, self.table_M.value * self.Z.value)
+        integral = interpolator(times.to(self.table_t.unit).value
+                                ) * self.table_M.unit * self.Z.unit
+        integral[times > self.table_t[-1]] = self.table_M[-1] * self.Z[-1].value
+        integral[times < self.table_t[0]] = 0
+        idx = np.where((times > self.table_t[0]) & (times < self.table_t[1]))
+        integral[idx] *= np.sqrt((
+           times[idx] - self.table_t[0]) / (self.table_t[1] - self.table_t[0]))
+        return integral
 
     def SFR(self, times):
         return np.interp(times, self.table_t, self.table_SFR, left=0, right=0)
