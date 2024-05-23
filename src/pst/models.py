@@ -6,11 +6,21 @@ from scipy import special
 import pst
 
 from scipy import interpolate
+from abc import ABC, abstractmethod
 
-#-------------------------------------------------------------------------------
-class Chemical_evolution_model:
-#-------------------------------------------------------------------------------
+class ChemicalEvolutionModel(ABC):
+    """TODO
 
+    Description
+    -----------
+
+    Attributes
+    ----------
+
+    Methods
+    -------
+
+    """
     def __init__(self, **kwargs):
         self.M_gas = kwargs.get('M_gas', 0*u.Msun)
         self.Z = kwargs.get('Z', 0.02)
@@ -18,10 +28,8 @@ class Chemical_evolution_model:
     def get_Z(self, time):
         return self.Z
 
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-
-    def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity, allow_negative=True ):
+    def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
+                    allow_negative=True):
         """Compute the SED of a given model observed at a given time.
         
         Description
@@ -34,7 +42,16 @@ class Chemical_evolution_model:
         - SSP: pst.SSP.SSP
             The SSP model to used for synthezising the SED.
         - t_obs: astropy.Quantity
-
+            Cosmic time at which the galaxy is observed. This will prevent the
+            use the SSP with ages older than `t_obs`.
+        - allow_negative: bool, default=True
+            Allow for some SSPs to have negative masses during the computation
+            of the resulting SED.
+        
+        Returns
+        -------
+        - sed: astropy.Quantity
+            Spectral energy distribution in the same units as `SSP.L_lambda`.
         """
         age_bins = np.hstack(
             [0 * u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 * u.yr])
@@ -46,33 +63,39 @@ class Chemical_evolution_model:
         MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
         iZ_max = len(SSP.metallicities)-1
 
-        SED = np.zeros(SSP.wavelength.size) * u.Lsun / u.Angstrom
+        sed = np.zeros(SSP.wavelength.size) * u.Lsun / u.Angstrom
 
         # Sum over the SSP ages
         for i, m in enumerate(M_bin):
             if m > 0 or (allow_negative and m<0):
-                Z = np.clip(MZ_bin[i] / m,
+                z = np.clip(MZ_bin[i] / m,
                             SSP.metallicities[0], SSP.metallicities[-1])
-                index_Z_hi = SSP.metallicities.searchsorted(Z).clip(1, iZ_max)
+                index_Z_hi = SSP.metallicities.searchsorted(z).clip(1, iZ_max)
                 # log interpolation in Z
                 weight_Z_hi = u.dimensionless_unscaled * np.log(
-                    Z / SSP.metallicities[index_Z_hi-1]
+                    z / SSP.metallicities[index_Z_hi-1]
                     ) / np.log(SSP.metallicities[index_Z_hi]
                                / SSP.metallicities[index_Z_hi-1]
                                ) 
-                SED += m * (SSP.L_lambda[index_Z_hi][i] * weight_Z_hi
+                sed += m * (SSP.L_lambda[index_Z_hi][i] * weight_Z_hi
                             + SSP.L_lambda[index_Z_hi-1][i] * (1-weight_Z_hi))
-        return SED
+        return sed
 
+    @abstractmethod
+    def integral_SFR(self):
+       pass
 
+    @abstractmethod
+    def integral_Z_SFR(self):
+       pass
 #-------------------------------------------------------------------------------
-class Single_burst(Chemical_evolution_model):
+class Single_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
   def __init__(self, **kwargs):
     self.M_stars = kwargs['M_stars']
     self.t = kwargs['t_burst']
-    Chemical_evolution_model.__init__(self, **kwargs)
+    ChemicalEvolutionModel.__init__(self, **kwargs)
 
 # TODO: do this using np.select(); actually, does tb exist at all?
   def integral_SFR(self, time):
@@ -87,9 +110,8 @@ class Single_burst(Chemical_evolution_model):
     return M_t
 
 
-
 #-------------------------------------------------------------------------------
-class Exponential_SFR(Chemical_evolution_model):
+class Exponential_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
     def __init__(self, **kwargs):
@@ -103,7 +125,7 @@ class Exponential_SFR(Chemical_evolution_model):
             self.tau *= u.Gyr
 
         self.Z = kwargs['Z']
-        Chemical_evolution_model.__init__(self, **kwargs)
+        ChemicalEvolutionModel.__init__(self, **kwargs)
 
     def integral_SFR(self, time):
       return self.M_inf * ( 1 - np.exp(-time/self.tau) )
@@ -124,14 +146,14 @@ class Exponential_SFR(Chemical_evolution_model):
 
 
 #-------------------------------------------------------------------------------
-class Exponential_SFR_delayed(Chemical_evolution_model):
+class Exponential_SFR_delayed(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
   def __init__(self, **kwargs):
     self.M_inf = kwargs['M_inf']*u.Msun
     self.tau = kwargs['tau']*u.Gyr
     self.Z = kwargs['Z']
-    Chemical_evolution_model.__init__(self, **kwargs)
+    ChemicalEvolutionModel.__init__(self, **kwargs)
 
   def integral_SFR(self, time):
     return self.M_inf * ( 1 - np.exp(-time/self.tau)*(self.tau+time)/self.tau)
@@ -147,6 +169,7 @@ class Exponential_SFR_delayed(Chemical_evolution_model):
 
   def integral_Z_SFR(self, time):
     return self.Z * self.integral_SFR(time)
+
 
 #-------------------------------------------------------------------------------
 class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
@@ -194,9 +217,10 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
         c = np.matmul(self.lstsq_solution,
                       L_obs_Lsun)              
         return c
-    
+
+
 #-------------------------------------------------------------------------------
-class Polynomial_MFH(Chemical_evolution_model):
+class Polynomial_MFH(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
     def __init__(self, **kwargs):
@@ -207,7 +231,7 @@ class Polynomial_MFH(Chemical_evolution_model):
         self.coeffs = kwargs['coeffs']
         self.S = kwargs.get('S', False)
         
-        Chemical_evolution_model.__init__(self, **kwargs)
+        ChemicalEvolutionModel.__init__(self, **kwargs)
     
     #If you want the raw components: model.xxxx(t, get_components=True)
     #If you want the observable + error: model.xxxx(t, get_sigma=True)
@@ -323,14 +347,14 @@ class Polynomial_MFH(Chemical_evolution_model):
 
 
 #-------------------------------------------------------------------------------
-class Gaussian_burst(Chemical_evolution_model):
+class Gaussian_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
   def __init__(self, **kwargs):
     self.M_inf = kwargs['M_stars']*u.Msun
     self.tb = kwargs['t']*u.Gyr             # Born time
     self.c = kwargs['c']*u.Gyr # En Myr
-    Chemical_evolution_model.__init__(self, **kwargs)
+    ChemicalEvolutionModel.__init__(self, **kwargs)
 
   def integral_SFR(self, time):
     return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
@@ -347,9 +371,30 @@ class Gaussian_burst(Chemical_evolution_model):
     a = self.M_inf/(self.c*np.sqrt(np.pi/2))
     return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
 
+
 #-------------------------------------------------------------------------------
-class Tabular_MFH(Chemical_evolution_model):
-    """Chemical evolution model based on an arbitrary grid of times and metallicities."""
+class Tabular_MFH(ChemicalEvolutionModel):
+    """Chemical evolution model based on a grid of times and metallicities.
+    
+    Description
+    -----------
+    This model represents the chemical evolution of a galaxy by means of a
+    discrete grid of ages and metallicities
+
+    Attributes
+    ----------
+    - table_t: astropy.Quantity
+        Tabulated cosmic time.
+    - table_M: astropy.Quantity
+        Total stellar mass at each cosmic time step.
+    - Z: astropy.Quantity
+        Average stellar metallicity at each cosmic time step.
+
+    Methods
+    -------
+    See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
+
+    """
     def __init__(self, times, masses, **kwargs):
         super().__init__(**kwargs)
         self.table_t = times
@@ -359,20 +404,35 @@ class Tabular_MFH(Chemical_evolution_model):
         self.table_M = masses[sort_times]
         # 
         self.Z = self.Z[sort_times]
-        # Unused variables
+        # FIXME: this variables should not be declared here
         self.t_hat_start = kwargs.get('t_hat_start', 1.)
         self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        # FIXME: are we using this quantities?
         self.table_SFR = np.gradient(masses, times)
         self.table_dot_SFR = np.gradient(self.table_SFR, times)
         self.table_ddot_SFR = np.gradient(self.table_dot_SFR, times)
-        
 
-    def integral_SFR(self, times):
-        # interpolator = interpolate.interp1d(self.table_t.value, self.table_M.value,
-        #                                     kind='cubic',
-        #                                     bounds_error=False,
-        #                                     fill_value=(0, self.table_M.value[-1])
-        #                                     )
+
+    def integral_SFR(self, times: u.Quantity):
+        """Evaluate the integral of the SFR over a given set of times.
+        
+        Description
+        -----------
+        This method evaluates the integral:
+            math::
+            \int_{0}^{t} SFR(t') dt'
+        at each time input time :math:`t`.
+        ``
+        Parameters
+        ----------
+        - times: astropy.units.Quantity
+            Cosmic times at which the integral will be evaluated.
+
+        Returns
+        -------
+        - integral: astropy.units.Quantity
+            Integral evaluated at each input time.
+        """
         interpolator = interpolate.Akima1DInterpolator(
            self.table_t.value, self.table_M.value)
         integral = interpolator(times.to(self.table_t.unit).value) * self.table_M.unit
@@ -381,6 +441,25 @@ class Tabular_MFH(Chemical_evolution_model):
         return integral
     
     def integral_Z_SFR(self, times):
+        """Evaluate the integral of the average metallicity over a given set of times.
+        
+        Description
+        -----------
+        This method evaluates the integral:
+            math::
+            \int_{0}^{t} Z(t') SFR(t') dt'
+        at each time input time :math:`t`.
+        ``
+        Parameters
+        ----------
+        - times: astropy.units.Quantity
+            Cosmic times at which the integral will be evaluated.
+
+        Returns
+        -------
+        - integral: astropy.units.Quantity
+            Integral evaluated at each input time.
+        """
         interpolator = interpolate.Akima1DInterpolator(
            self.table_t.value, self.table_M.value * self.Z.value)
         integral = interpolator(times.to(self.table_t.unit).value
@@ -466,7 +545,7 @@ class Tabular_Prospector(Tabular_MFH):
         Tabular_MFH.__init__(self, x_bins_prospector*u.Gyr, y_prospector*u.Msun, **kwargs)
             
 #-------------------------------------------------------------------------------
-class Exponential_quenched_SFR(Chemical_evolution_model):
+class Exponential_quenched_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
   def __init__(self, **kwargs):
@@ -474,7 +553,7 @@ class Exponential_quenched_SFR(Chemical_evolution_model):
     self.tau = kwargs['tau']*u.Gyr
     self.Z = kwargs['Z']
     self.t_q = kwargs['t_quench']*u.Gyr
-    Chemical_evolution_model.__init__(self, **kwargs)
+    ChemicalEvolutionModel.__init__(self, **kwargs)
 
 
   def integral_SFR(self, time):
@@ -503,7 +582,7 @@ class Exponential_quenched_SFR(Chemical_evolution_model):
 
 
 #-------------------------------------------------------------------------------
-class ASCII_file(Chemical_evolution_model):
+class ASCII_file(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
   def __init__(self, file,
