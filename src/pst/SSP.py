@@ -9,7 +9,30 @@ from astropy import units
 from scipy import interpolate
 
 class SSPBase(object):
-    """Base class that represents a model of Simple Stellar Populations."""
+    """Base class that represents a model of Simple Stellar Populations.
+    
+    Description
+    -----------
+    This class is meant for representing a model of Simple Stellar Populations
+    that is mainly composed by a discreted grid of ages and metallicities and
+    their associated spectral energy distributions.
+
+    Attributes
+    ----------
+    - ages: astropy.units.Quantity
+        Ages of the SSPs.
+    - metallicities: astropy.units.Quantity
+        Metallicities of the SSPs.
+    - L_lambda: astropy.units.Quantity
+        Spectral energy distribution of each SSP. Each dimension correspond to
+        (metallicity, ages, wavelength).
+    - wavelength: astroy.units.Quantity
+        Wavelength array associated to the SED of the SSPs.
+    
+    Methods
+    -------
+    #TODO
+    """
     default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
 
     @property
@@ -75,35 +98,40 @@ class SSPBase(object):
             [0 * u.yr, np.sqrt(self.ages[1:] * self.ages[:-1]), 1e12 * u.yr])
         t_i = t_obs - age_bins
         t_i = t_i[t_i > 0]
-
         mass_interpolator = interpolate.Akima1DInterpolator(
             time.value, mass.value)
         mass_history = mass_interpolator(t_i.to(time.unit)) * mass.unit
         mass_history[t_i > time[-1]] = mass[-1]
         mass_history[t_i < time[0]] = 0
-        mass_formed = mass_history[:-1] - mass_history[1:]
+        mass_bins = np.hstack([mass_history[:-1] - mass_history[1:],
+                                 mass_history[-1]])
 
-        metal_interpolator = interpolate.Akima1DInterpolator(
-            time.value, metallicity.value)
-        metal_history = metal_interpolator(t_i.to(time.unit)) * metallicity.unit
-        metal_history[t_i > time[-1]] = metallicity[-1]
-        metal_history[t_i < time[-1]] = metallicity[0]
-        metal_history.clip(self.metallicities[0], self.metallicities[-1],
-                           out=metal_history)
+        mass_z_interpolator = interpolate.Akima1DInterpolator(
+            time.value, mass.value * metallicity.value)
+        mass_z_history = mass_z_interpolator(
+            t_i.to(time.unit)) * metallicity.unit * mass.unit
+        mass_z_history[t_i > time[-1]] = metallicity[-1] * mass[-1]
+        mass_z_history[t_i < time[-1]] = 0
+        mass_z_bins = np.hstack([mass_z_history[:-1] - mass_z_history[1:],
+                                 mass_z_history[-1]])
+        z_history = np.clip(mass_z_bins / mass_bins,
+                            self.metallicities[0], self.metallicities[-1])
 
         sed = np.zeros(self.wavelength.size)
-        weights = np.zeros(self.L_lambda.shape[:-1])
+        weights = np.zeros((self.metallicities.size, t_i.size)) * mass.unit
         
-        z_indices = np.searchsorted(self.metallicities, metal_history).clip(
+        z_indices = np.searchsorted(
+            self.metallicities, z_history).clip(
             min=1, max=self.metallicities.size - 1)
         t_indices = np.arange(0, weights.shape[1], dtype=int)
 
         weight_Z = np.log(
-                    metal_history / self.metallicities[z_indices - 1]) / np.log(
-                    self.metallicities[z_indices] / self.metallicities[z_indices-1])
+                    z_history / self.metallicities[z_indices - 1]) / np.log(
+                    self.metallicities[z_indices] / self.metallicities[z_indices-1]
+                    ) * mass.unit
         weights[z_indices, t_indices] = weight_Z
-        weights[z_indices - 1, t_indices] = 1 - weight_Z
-        weights *=  mass_formed[np.newaxis, :]
+        weights[z_indices - 1, t_indices] = 1 * mass.unit - weight_Z
+        weights *=  mass_bins[np.newaxis, :]
         mask = (weights > 0) & np.isfinite(weights)
         sed = np.nansum(
             weights[mask, np.newaxis] * self.L_lambda[mask, :], axis=(0))
