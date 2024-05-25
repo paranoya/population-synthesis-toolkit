@@ -262,6 +262,9 @@ class SSPBase(object):
 
     def get_mass_lum_ratio(self, wl_range):
         """Compute the mass-to-light ratio within a wavelength range."""
+        if not isinstance(wl_range, u.Quantity):
+            print("Assuming that input wavelength range has same units as wavelength")
+            wl_range = np.array(wl_range) * self.wavelength.unit
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
         mass_to_lum = np.empty(
@@ -275,6 +278,9 @@ class SSPBase(object):
     
     def get_specific_mass_lum_ratio(self, wl_range):
         """Compute the mass-to-light ratio per wavelength unit within a wavelength range."""
+        if not isinstance(wl_range, u.Quantity):
+            print("Assuming that input wavelength range has same units as wavelength")
+            wl_range = np.array(wl_range) * self.wavelength.unit
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
         mass_to_lum = np.empty(
