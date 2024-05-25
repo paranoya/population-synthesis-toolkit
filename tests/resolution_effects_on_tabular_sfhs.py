@@ -19,7 +19,7 @@ lbtime = np.geomspace(1e-3, 13.7, 300)
 time = 13.7 - lbtime[::-1]
 time[-1] = 13.7
 
-lbtime2 = np.geomspace(1e-3, 13.7, 35)
+lbtime2 = np.geomspace(1e-3, 13.7, 10)
 # lbtime2 = np.linspace(0, 1, 15)**2 * 13.7
 time2 = 13.7 - lbtime2[::-1]
 time2[-1] = 13.7
