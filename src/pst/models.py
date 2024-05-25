@@ -54,31 +54,35 @@ class ChemicalEvolutionModel(ABC):
             Spectral energy distribution in the same units as `SSP.L_lambda`.
         """
         age_bins = np.hstack(
-            [0 * u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 * u.yr])
+            [0 << u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 << u.yr])
         t_bins = t_obs - age_bins
-        t_bins = t_bins[t_bins > 0]
+        t_bins = t_bins[t_bins >= 0]
         M_t = self.integral_SFR(t_bins)
         M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
         MZ_t = self.integral_Z_SFR(t_bins)
         MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
-        iZ_max = len(SSP.metallicities)-1
-
-        sed = np.zeros(SSP.wavelength.size) * u.Lsun / u.Angstrom
-
-        # Sum over the SSP ages
-        for i, m in enumerate(M_bin):
-            if m > 0 or (allow_negative and m<0):
-                z = np.clip(MZ_bin[i] / m,
-                            SSP.metallicities[0], SSP.metallicities[-1])
-                index_Z_hi = SSP.metallicities.searchsorted(z).clip(1, iZ_max)
-                # log interpolation in Z
-                weight_Z_hi = u.dimensionless_unscaled * np.log(
-                    z / SSP.metallicities[index_Z_hi-1]
-                    ) / np.log(SSP.metallicities[index_Z_hi]
-                               / SSP.metallicities[index_Z_hi-1]
-                               ) 
-                sed += m * (SSP.L_lambda[index_Z_hi][i] * weight_Z_hi
-                            + SSP.L_lambda[index_Z_hi-1][i] * (1-weight_Z_hi))
+        z_bin = np.clip(MZ_bin / M_bin,
+                        SSP.metallicities[0],
+                        SSP.metallicities[-1]) << u.dimensionless_unscaled
+        sed = np.zeros(SSP.wavelength.size) << u.Lsun / u.Angstrom
+        weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
+        z_indices = np.searchsorted(
+            SSP.metallicities, z_bin).clip(
+            min=1, max=SSP.metallicities.size - 1)
+        t_indices = np.arange(0, M_bin.size, dtype=int)
+        weight_Z = np.log(
+                    z_bin / SSP.metallicities[z_indices - 1]) / np.log(
+                    SSP.metallicities[z_indices] / SSP.metallicities[z_indices-1]
+                    )
+        weights[z_indices, t_indices] = weight_Z
+        weights[z_indices - 1, t_indices] = 1 - weight_Z
+        weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
+        if not allow_negative:
+            mask = (weights > 0)
+        else:
+            mask = np.ones_like(weights, dtype=bool)
+        sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
+                    axis=(0))
         return sed
 
     @abstractmethod
@@ -434,10 +438,14 @@ class Tabular_MFH(ChemicalEvolutionModel):
             Integral evaluated at each input time.
         """
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t.value, self.table_M.value)
-        integral = interpolator(times.to(self.table_t.unit).value) * self.table_M.unit
+           self.table_t, self.table_M)
+        integral = interpolator(times) << self.table_M.unit
         integral[times > self.table_t[-1]] = self.table_M[-1]
         integral[times < self.table_t[0]] = 0
+
+        # integral = np.interp(times.to(self.table_t.unit).value,
+        #                      self.table_t.value, self.table_M.value,
+        #                      left=0, right=self.table_M[-1].value) * self.table_M.unit
         return integral
     
     def integral_Z_SFR(self, times):
@@ -461,9 +469,8 @@ class Tabular_MFH(ChemicalEvolutionModel):
             Integral evaluated at each input time.
         """
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t.value, self.table_M.value * self.Z.value)
-        integral = interpolator(times.to(self.table_t.unit).value
-                                ) * self.table_M.unit * self.Z.unit
+           self.table_t, self.table_M * self.Z)
+        integral = interpolator(times) << self.table_M.unit * self.Z.unit
         integral[times > self.table_t[-1]] = self.table_M[-1] * self.Z[-1].value
         integral[times < self.table_t[0]] = 0
         idx = np.where((times > self.table_t[0]) & (times < self.table_t[1]))
@@ -479,6 +486,43 @@ class Tabular_MFH(ChemicalEvolutionModel):
     
     def ddot_SFR(self, times):
         return np.interp(times, self.table_t, self.table_ddot_SFR, left=0, right=0)
+
+
+class Tabular_ZPowerLaw(Tabular_MFH):
+    """Chemical evolution model based on a grid of times and metallicities.
+    
+    Description
+    -----------
+    This model represents the chemical evolution of a galaxy by means of a
+    discrete grid of ages and metallicities
+
+    Attributes
+    ----------
+    - table_t: astropy.Quantity
+        Tabulated cosmic time.
+    - table_M: astropy.Quantity
+        Total stellar mass at each cosmic time step.
+    - Z: astropy.Quantity
+        Average stellar metallicity at each cosmic time step.
+
+    Methods
+    -------
+    See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
+
+    """
+    def __init__(self, times, masses, alpha, z_today, **kwargs):
+        self.z_today = z_today
+        self.alpha = alpha
+        super().__init__(times, masses, **kwargs)
+        
+
+    @property
+    def Z(self):
+        return self.z_today * np.power(self.table_M / self.table_M[-1], self.alpha)
+
+    @Z.setter
+    def Z(self, z):
+        pass
 
 #-------------------------------------------------------------------------------
 class Tabular_Illustris(Tabular_MFH):
