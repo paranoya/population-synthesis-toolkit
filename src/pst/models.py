@@ -4,6 +4,13 @@ from astropy import units as u
 from astropy.io import fits
 from scipy import special
 import pst
+<<<<<<< HEAD
+=======
+
+#-------------------------------------------------------------------------------
+class Chemical_evolution_model:
+#-------------------------------------------------------------------------------
+>>>>>>> pst_refactoring
 
 from scipy import interpolate
 from abc import ABC, abstractmethod
@@ -25,6 +32,7 @@ class ChemicalEvolutionModel(ABC):
         self.M_gas = kwargs.get('M_gas', 0*u.Msun)
         self.Z = kwargs.get('Z', 0.02)
 
+<<<<<<< HEAD
     def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
@@ -90,6 +98,15 @@ class ChemicalEvolutionModel(ABC):
     @abstractmethod
     def integral_Z_SFR(self):
        pass
+=======
+    def get_Z(self, time):
+        return self.Z
+
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
+
+
+>>>>>>> pst_refactoring
 
 #-------------------------------------------------------------------------------
 class Single_burst(ChemicalEvolutionModel):
@@ -112,7 +129,10 @@ class Single_burst(ChemicalEvolutionModel):
           M_t.append( self.M_stars)
     return M_t
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> pst_refactoring
 #-------------------------------------------------------------------------------
 class Exponential_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
@@ -177,14 +197,14 @@ class Exponential_SFR_delayed(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
 #-------------------------------------------------------------------------------
-    def __init__(self, N, SSP, obs_filters, t_obs, Z_i, dust_extinction, 
-                 error_L_obs, **kwargs):
+    def __init__(self, N, ssp, obs_filters, obs_filters_wl, t, t_obs, Z_i, dust_extinction, 
+                 error_Fnu_obs, **kwargs):
         self.t_obs = t_obs.to_value()
         self.t_hat_start = kwargs.get('t_hat_start', 1.)
         self.t_hat_end = kwargs.get('t_hat_end', 0.)
         
         primordial_coeffs = []
-        primordial_L = []
+        primordial_Fnu = []
         for n in range(N):
             
             c = np.zeros(N)
@@ -192,33 +212,36 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
             
             primordial_coeffs.append(c)
             
-            L = []
+            fnu = []
             p = pst.models.Polynomial_MFH(Z=Z_i, t_hat_start = self.t_hat_start,
                                           t_hat_end = self.t_hat_end,
                                           coeffs=c)
-            sed = p.compute_SED(SSP, t_obs)
-            #print(primordial_coeffs)
-            for filter_name in obs_filters:
-                photo = pst.observables.luminosity(
-                    flux=sed, wavelength=SSP.wavelength, filter_name=filter_name)
-                L.append(photo.integral_flux.to_value(u.Lsun))  
-                # linalg complains about units
-            primordial_L.append(np.array(L))
-        primordial_L = np.array(primordial_L)*dust_extinction / error_L_obs
+
+            cum_mass = np.cumsum(p.integral_SFR(t))
+            z_array = Z_i*np.ones(len(t))
+            sed, weights = ssp.compute_SED(t, cum_mass, z_array)
+
+            for i, filter_name in enumerate(obs_filters):
+                photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                fnu.append( fnu_Jy )
+
+            primordial_Fnu.append(u.Quantity(fnu))
+        primordial_Fnu = np.array(primordial_Fnu)*dust_extinction / error_Fnu_obs
         
         self.p = p
         self.sed = sed
         self.lstsq_solution = np.matmul(
-            np.linalg.pinv(np.matmul(primordial_L, np.transpose(primordial_L))),
-            primordial_L)
+            np.linalg.pinv(np.matmul(primordial_Fnu, np.transpose(primordial_Fnu))),
+            primordial_Fnu)
         self.primordial_coeffs = np.array(primordial_coeffs)
-        self.primordial_L_Lsun = np.array(primordial_L)
-        self.primordial_L = primordial_L
+        self.primordial_Fnu = np.array(primordial_Fnu)
+        self.primordial_Fnu = primordial_Fnu
 
-    def fit(self, L_obs_Lsun, **kwargs):
+    def fit(self, Fnu_obs, **kwargs):
 
         c = np.matmul(self.lstsq_solution,
-                      L_obs_Lsun)              
+                      Fnu_obs)              
         return c
 
 
@@ -250,8 +273,9 @@ class Polynomial_MFH(ChemicalEvolutionModel):
             M=[]
             N = len(self.coeffs)
             for n in range(1, N+1):
-                M.append(t_hat_present_time**n - t_hat_since**n)
-            self.M = M
+                M.append(t_hat_since**n - t_hat_present_time**n)
+
+            self.M = u.Quantity(M)
         else:
             c, M, S = self.fit_components
             return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
@@ -273,8 +297,8 @@ class Polynomial_MFH(ChemicalEvolutionModel):
             M=[]
             N = len(self.coeffs)
             for n in range(1, N+1):
-                M.append(t_hat**n-self.t_hat_start**n)
-            self.M = M
+                M.append(self.t_hat_start**n - t_hat**n)
+            self.M = u.Quantity(M)
         
         else:
             c, M, S = self.fit_components
@@ -298,11 +322,12 @@ class Polynomial_MFH(ChemicalEvolutionModel):
             M=[]
             N = len(self.coeffs)
             for n in range(1, N+1):      
-                m=-(n*t_hat**(n-1))/self.t0
+                m=(n*t_hat**(n-1))/self.t0
+                
                 m[t_hat > self.t_hat_start] = 0.
                 m[t_hat < self.t_hat_end] = 0.
                 M.append(m)
-            self.M = M
+            self.M = u.Quantity(M)
         else:
             c, M, S = self.fit_components
             return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
@@ -313,7 +338,8 @@ class Polynomial_MFH(ChemicalEvolutionModel):
             return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
         else: #If you just want the observable
             return self.M0 * np.matmul(self.coeffs, self.M)
-
+        
+    #The derivatives are not up to date
     def dot_SFR(self, time):
         t_hat = (1 - time/self.t0)
         

@@ -1,4 +1,5 @@
 src/pst/data/ssp/*
+tutorials/output/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

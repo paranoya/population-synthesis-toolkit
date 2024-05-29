@@ -16,7 +16,7 @@ from scipy import interpolate
 def list_of_available_filters():
     filter_dir = os.path.join(os.path.dirname(__file__),
                               "data", "filters")
-    print(f"Checking filters available at {filter_dir}")
+#    print(f"Checking filters available at {filter_dir}")
     return os.listdir(filter_dir)
 
 def find_filt_from_name(name):
@@ -49,12 +49,12 @@ class Filter(object):
         number of points as the given wavelength array.
 
         The wavelength UNITS are by default expressed in AA"""
-        print("Initialising Filter variables")
+#        print("Initialising Filter variables")
 
         self.wavelength = kwargs.get('wavelength', None)
         if self.wavelength is not None:
             if not hasattr(self.wavelength, "unit"):
-                print("Assuming that input wavelength array is in angstrom")
+#                print("Assuming that input wavelength array is in angstrom")
                 self.wavelength *= u.angstrom
             if not (self.wavelength[1:] > self.wavelength[:-1]).all():
                 raise NameError('Wavelength array must be crescent')
@@ -62,7 +62,7 @@ class Filter(object):
         self.filter_wavelength = kwargs.get('filter_wavelength', None)
         if self.filter_wavelength is not None and not hasattr(
             self.filter_wavelength, "unit"):
-            print("Assuming that input filter wavelength array is in angstrom")
+#            print("Assuming that input filter wavelength array is in angstrom")
             self.filter_wavelength *= u.angstrom
 
         self.filter_resp = kwargs.get('filter_resp', None)
@@ -107,7 +107,7 @@ class Filter(object):
                 raise NameError(f"No filter found with input name {name}")
         else:
             raise NameError("No path, nor name provided")
-        print(f"Filter loaded from: {path}")
+#        print(f"Filter loaded from: {path}")
         self.filter_wavelength *= wl_unit
         return self.filter_wavelength, self.filter_resp 
 
@@ -125,7 +125,7 @@ class Filter(object):
     def interpolate(self, wavelength=None):
         """Interpolate a filter response curve to an input wavelength."""
         if not hasattr(wavelength, "unit"):
-            print("Assuming that input wavelength array is in angstrom")
+#            print("Assuming that input wavelength array is in angstrom")
             wavelength *= u.angstrom
 
         delta_wl = wavelength[1:] - wavelength[:-1]
@@ -142,12 +142,12 @@ class Filter(object):
 
         self.response = np.diff(interp_cum_trans_curve)
         self.wavelength= wavelength
-        print("Filter transmission curve interpolated to input wavelength array")
+#        print("Filter transmission curve interpolated to input wavelength array")
         return self.response
 
     def check_spectra(self, spectra):
         if spectra is not None and not hasattr(spectra, "unit"):
-            print("Assuming that input spectra is expressed in Lsun/cm2/AA")
+#            print("Assuming that input spectra is expressed in Lsun/cm2/AA")
             spectra =  spectra.copy() * u.Lsun / u.angstrom / u.cm**2
         return spectra
 
@@ -193,6 +193,7 @@ class Filter(object):
         """Compute the  specific flux per frequency unit from a spectra."""
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
+<<<<<<< HEAD
             3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
         print(n_photons.unit, norm_photons.unit)
         f_nu = n_photons / norm_photons * 3630.781 * u.Jy
@@ -230,20 +231,29 @@ class Filter(object):
 
         return av_f_lambda, av_f_lambda_err
 
+=======
+            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
+        f_nu = (n_photons / norm_photons * 3631 * u.Jy).to('Jy')
+        if n_photons_err is not None:
+            f_nu_err = (n_photons_err / norm_photons * 3631 * u.Jy).to('Jy')
+        else:
+            f_nu_err = None
+        return f_nu, f_nu_err
+>>>>>>> pst_refactoring
 
 class TopHatFilter(Filter):
     """Top hat photometric filter"""
     def __init__(self, central_wave, width, **kwargs):
         if not hasattr(central_wave, 'unit'):
-            print("Assuming that input central wavelength is expressed in angstrom")
+#            print("Assuming that input central wavelength is expressed in angstrom")
             central_wave *= u.Angstrom
         if not hasattr(width, 'unit'):
-            print("Assuming that input width is expressed in angstrom")
+#            print("Assuming that input width is expressed in angstrom")
             width *= u.Angstrom
 
         self.wavelength = kwargs.get('wavelength', None)
         if not hasattr(self.wavelength, "unit"):
-            print("Assuming that input wavelength array is in angstrom")
+#            print("Assuming that input wavelength array is in angstrom")
             self.wavelength *= u.angstrom
         if not (self.wavelength[1:] > self.wavelength[:-1]).all():
             raise NameError('Wavelength array must be crescent')
@@ -274,7 +284,7 @@ if __name__ == '__main__':
         mag, mag_err = photometry.get_ab(sed)
         
 
-        print("SSP absolute magnitude: ", mag)
+#        print("SSP absolute magnitude: ", mag)
     plt.figure()
     plt.plot(ssp.wavelength, photometry.response)
     plt.plot(ssp.wavelength, sed / np.mean(sed))

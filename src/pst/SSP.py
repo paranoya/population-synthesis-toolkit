@@ -94,6 +94,7 @@ class SSPBase(object):
             Average metallicity on each time step.
         """
         # SSP time steps to interpolate (i.e. lookback time)
+<<<<<<< HEAD
         age_bins = np.hstack(
             [0 * u.yr, np.sqrt(self.ages[1:] * self.ages[:-1]), 1e12 * u.yr])
         t_i = t_obs - age_bins
@@ -136,6 +137,78 @@ class SSPBase(object):
         sed = np.nansum(
             weights[mask, np.newaxis] * self.L_lambda[mask, :], axis=(0))
 
+=======
+        if mass.unit == u.Msun:
+            mass=mass.to_value()
+        t_i = self.log_ages_yr - np.ediff1d(self.log_ages_yr, to_begin=0)/2
+        t_i = np.append(t_i, 12)  # 1000 Gyr
+        # Conversion to time since the onset of SF (i.e. age of the Universe)
+        today = time.max()
+        t_i = today - np.power(10,t_i)*u.yr
+        t_i[0] = today
+        t_i.clip(time.min(), today, out=t_i)
+        interp_M_i = np.interp(t_i, time, mass)
+        M_i = -np.ediff1d(interp_M_i)
+        Z_i = np.interp(t_i, time, np.log10(metallicity))
+        Z_i = 10**Z_i
+        # Z_i = -np.ediff1d( Z_i ) / (M_i+u.kg)
+        # to prevent extrapolation
+        Z_i.clip(self.metallicities[0], self.metallicities[-1], out=Z_i)
+        extinction = np.ones((M_i.size,
+                              self.L_lambda[0][0].size))
+        if dust_model:
+            log_t_mid = (np.log10(t_i[:-1])+np.log10(t_i[1:]))/2
+            for ii, log_t_i in enumerate(log_t_mid):
+                extinction[ii, :] = dust_model(10**log_t_i/u.yr, self.wavelength)
+
+        sed = np.zeros(self.wavelength.size)
+        weights = np.zeros((t_i.size, self.metallicities.size))
+        for i, mass_i in enumerate(M_i):
+            if mass_i > 0:
+                index_Z_hi = self.metallicities.searchsorted(Z_i[i]).clip(
+                    1, len(self.metallicities)-1)
+                # log interpolation in Z
+                weight_Z_hi = np.log(
+                    Z_i[i] / self.metallicities[index_Z_hi-1]) / np.log(
+                        self.metallicities[index_Z_hi] / self.metallicities[index_Z_hi-1])
+                sed += extinction[i, :] * mass_i * (
+                    self.L_lambda[index_Z_hi][i] * weight_Z_hi +
+                    self.L_lambda[index_Z_hi-1][i] * (1-weight_Z_hi))
+                weights[i, index_Z_hi] = weight_Z_hi * mass_i
+                weights[i, index_Z_hi-1] = (1 - weight_Z_hi) * mass_i
+        weights /= np.sum(M_i)
+
+        if plot_interpolation:
+            from matplotlib import pyplot as plt
+            fig = plt.figure()
+            ax = fig.add_subplot(211)
+            ax.plot(np.log10(time/u.Gyr), np.log10(mass), 'k-o', label='input')
+            ax.plot(np.log10(t_i/u.Gyr), np.log10(interp_M_i), 'r-o', label='input')
+            ax.set_ylabel(r'$\log_{10}(M_*)$')
+            ax.set_xlabel(r'$\log_{10}(t/Gyr)$')
+
+            ax = fig.add_subplot(212)
+            ax.plot(np.log10(time/u.Gyr), np.log10(metallicity/0.02),
+                    'k-o', label='input')
+            ax.plot(np.log10(t_i/u.Gyr), np.log10(Z_i/0.02), 'r-o', label='interp')
+            ax.set_ylabel(r'$\log_{10}(Z_*/Z_\odot)$')
+            ax.set_xlabel(r'$\log_{10}(t/Gyr)$')
+            fig.subplots_adjust(hspace=0)
+            plt.show()
+
+        if plot_weights:
+            from matplotlib import pyplot as plt
+            fig = plt.figure(figsize=(5,5))
+            plt.imshow(np.log10(weights.T), aspect='auto', origin='lower',
+                       interpolation='none', cmap='rainbow', vmin=-4)
+            nticks = np.arange(0, self.log_ages_yr.size, 15)
+            plt.xticks(nticks, labels=np.round(self.log_ages_yr[nticks],
+                                               decimals=2))
+            plt.xlabel(r'$\log_{10}(age_{SSP}/yr)$')
+            plt.grid(b=True)
+            plt.colorbar()
+            plt.show()    
+>>>>>>> pst_refactoring
         return sed, weights
 
     def compute_burstSED(self, age, Z):
@@ -163,10 +236,17 @@ class SSPBase(object):
             )
         return sed
 
+<<<<<<< HEAD
     def get_ssp_logedges(self):
         """Get the edges of the SSP metallicities and ages."""
         logages = np.log10(self.ages / units.yr)
         lim = 1.5 * logages[[0, -1]] - 0.5 * logages[[1, -2]]
+=======
+    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
+        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
+        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        lim = 1.5 * self.log_ages_yr[[0, -1]] - 0.5 * self.log_ages_yr[[1, -2]]
+>>>>>>> pst_refactoring
         logage_bin_edges = np.hstack(
                 [lim[0], (logages[1:] + logages[:-1])/2, lim[1]])
 
@@ -174,12 +254,15 @@ class SSPBase(object):
         lim = 1.5 * log_met_bins[[0, -1]] - 0.5 * log_met_bins[[1, -2]]
         logmet_bin_edges = np.hstack(
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
+<<<<<<< HEAD
         return logmet_bin_edges, logage_bin_edges
 
     def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
         """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
         print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
         logmet_bin_edges, logage_bin_edges = self.get_ssp_logedges()
+=======
+>>>>>>> pst_refactoring
         
         ssp_age_idx = np.searchsorted(logage_bin_edges, n_logage_bin_edges)
         age_bins = [slice(ssp_age_idx[i], ssp_age_idx[i+1]) for i in range(len(n_logage_bin_edges) - 1)]
@@ -194,11 +277,20 @@ class SSPBase(object):
 
         print("[SSP] New SSP grid dimensions: ", self.L_lambda.shape)
         for j, m_bin in enumerate(met_bins):
+<<<<<<< HEAD
             met_av_sed = np.exp(np.mean(
                 np.log(previous_sed[m_bin] / previous_sed.unit), axis=0))
             for i, a_bin in enumerate(age_bins):
                 self.L_lambda[j, i, :] = np.exp(
                     np.mean(np.log(met_av_sed[a_bin]), axis=0)) * previous_sed.unit
+=======
+            met_av_sed = np.mean(previous_sed[m_bin], axis=0)
+            for i, a_bin in enumerate(age_bins):
+                self.L_lambda[j, i, :] = np.mean(met_av_sed[a_bin], axis=0)
+        self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2)
+        self.log_ages_yr = (n_logage_bin_edges[:-1] + n_logage_bin_edges[1:]) / 2
+        self.ages = 10**self.log_ages_yr
+>>>>>>> pst_refactoring
 
         self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2
                                   ) * units.dimensionless_unscaled
@@ -353,7 +445,7 @@ class PyPopStar(SSPBase):
 
     def __init__(self, IMF, nebular=False, path=None):
         if path is None:
-            self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
+            self.path = os.path.join(self.default_path, 'PyPopStar')
         else:
             self.path = path
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05]
@@ -387,8 +479,13 @@ class PyPopStar(SSPBase):
             print("> Initialising Popstar models (no neb em) (IMF='"
                   + IMF + "')")
             column = 'flux_stellar'
+<<<<<<< HEAD
         with fits.open(os.path.join(self.path, header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(
                 self.metallicities.value[0], self.log_ages_yr.value[0]))
+=======
+        with fits.open(header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(
+                self.metallicities[0], self.log_ages_yr[0])
+>>>>>>> pst_refactoring
                        ) as hdul:
             self.wavelength = hdul[1].data['wavelength'] * units.Angstrom # Angstrom
 
@@ -399,12 +496,16 @@ class PyPopStar(SSPBase):
         for i, Z in enumerate(self.metallicities.value):
             for j, age in enumerate(self.log_ages_yr.value):
                 filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
-                file = os.path.join(self.path, filename)
+                file = os.path.join(self.path, IMF, filename)
                 with fits.open(file) as hdul:
                     self.L_lambda[i][j] = hdul[1].data[column] * self.L_lambda.unit
                     hdul.close()
+<<<<<<< HEAD
         # Avoid 0 flux
         self.L_lambda[self.L_lambda <= 0] += self.L_lambda[self.L_lambda > 0].min()
+=======
+        self.sed_unit = 'Lsun/Angstrom/Msun'
+>>>>>>> pst_refactoring
 
 # class BC03_Padova94(SSP): # TODO: CHANGE METHODS
 
