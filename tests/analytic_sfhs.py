@@ -22,24 +22,18 @@ alpha = -2.0
 z_0 = 0.02
 t_0 = 7.0
 
-def exponential_sfh(time, tau):
-    m =  (1 - np.exp(-time / tau)) 
-    m /= m[-1]
-    return m* u.Msun
+model = models.LogNormalQuenched_MFH(
+    alpha=alpha, z_today=z_0 << u.dimensionless_unscaled,
+    lnt0=np.log(7.0), scale=2.0, t_quench=10 << u.Gyr, tau_quench=1 << u.Gyr)
 
-def z_star(time, alpha, z_0, t_0):
-    z = z_0 * (1 - np.power((time + t_0)/ t_0, alpha))
-    return z * u.dimensionless_unscaled
+plt.figure()
+plt.plot(dummy_t, model.integral_SFR(dummy_t))
+plt.show()
 
-m1 = exponential_sfh(time, tau)
-z1 = np.ones_like(m1.value) * 0.02 * u.dimensionless_unscaled
-z1 = z_star(time, alpha, z_0, t_0)
-
-model = models.Tabular_MFH(times=time * u.Gyr, masses=m1, Z=z1)
+n_tries = 1
 print("PROFILING >>>\n\n")
 t0 = ttime()
-sed  = model.compute_SED(ssp, t_obs=13.7 * u.Gyr, allow_negative=False)
-print(sed)
+model.compute_SED(ssp, t_obs=13.7 * u.Gyr, allow_negative=False)
 print(ttime() - t0)
 
 with Profile() as profile:
@@ -50,5 +44,3 @@ with Profile() as profile:
         .sort_stats(SortKey.CALLS)
         .print_stats()
     )
-
-
