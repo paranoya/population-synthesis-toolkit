@@ -25,9 +25,6 @@ class ChemicalEvolutionModel(ABC):
         self.M_gas = kwargs.get('M_gas', 0*u.Msun)
         self.Z = kwargs.get('Z', 0.02)
 
-    def get_Z(self, time):
-        return self.Z
-
     def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
@@ -61,7 +58,7 @@ class ChemicalEvolutionModel(ABC):
         M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
         MZ_t = self.integral_Z_SFR(t_bins)
         MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
-        z_bin = np.clip(MZ_bin / M_bin,
+        z_bin = np.clip(MZ_bin / (M_bin + 1 * u.kg),
                         SSP.metallicities[0],
                         SSP.metallicities[-1]) << u.dimensionless_unscaled
         sed = np.zeros(SSP.wavelength.size) << u.Lsun / u.Angstrom
@@ -77,10 +74,11 @@ class ChemicalEvolutionModel(ABC):
         weights[z_indices, t_indices] = weight_Z
         weights[z_indices - 1, t_indices] = 1 - weight_Z
         weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
+        weights = weights << u.Msun
         if not allow_negative:
-            mask = (weights > 0)
+            mask = (weights > 0) & np.isfinite(weights)
         else:
-            mask = np.ones_like(weights, dtype=bool)
+            mask = np.isfinite(weights)
         sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
                     axis=(0))
         return sed
@@ -92,6 +90,7 @@ class ChemicalEvolutionModel(ABC):
     @abstractmethod
     def integral_Z_SFR(self):
        pass
+
 #-------------------------------------------------------------------------------
 class Single_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
@@ -375,6 +374,55 @@ class Gaussian_burst(ChemicalEvolutionModel):
     a = self.M_inf/(self.c*np.sqrt(np.pi/2))
     return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
 
+class LogNormal_MFH(ChemicalEvolutionModel):
+    def __init__(self, alpha : float, z_today : u.Quantity,
+                 lnt0: float, scale:float, m_today=1.0 << u.Msun,
+                 **kwargs):
+        super().__init__(**kwargs)
+        self.alpha = alpha
+        self.z_today = z_today
+        self.lnt0 = lnt0
+        self.scale = scale
+        self.m_today = m_today
+
+    @property
+    def Z(self):
+        return 
+
+    @Z.setter
+    def Z(self, z):
+        pass
+
+    def integral_SFR(self, times: u.Quantity):
+        z = - (np.log(times.to_value("Gyr")) - self.lnt0) / self.scale
+        m = 0.5 * (1 - special.erf(z / np.sqrt(2)))
+        return m / m.max() * self.m_today
+
+    def integral_Z_SFR(self, times: u.Quantity):
+        m = self.integral_SFR(times)
+        z_star = self.z_today * np.power(m / m.max(), self.alpha)
+        return m * z_star
+
+class LogNormalQuenched_MFH(LogNormal_MFH):
+    __slots__ = 'alpha', 'z_today', 'lnt0', 'scale', 't_quench', 'tau_quench'
+    def __init__(self, alpha : float, z_today : u.Quantity,
+                 lnt0: float, scale:float,
+                 t_quench: u.Quantity, tau_quench: u.Quantity, **kwargs):
+        super().__init__(alpha, z_today, lnt0, scale, **kwargs)
+        self.alpha = alpha
+        self.z_today = z_today
+        self.lnt0 = lnt0
+        self.scale = scale
+        self.t_quench = t_quench
+        self.tau_quench = tau_quench
+
+    def integral_SFR(self, times: u.Quantity):
+        lognorm = super().integral_SFR(times)
+        q = times >= self.t_quench
+        if q.any():
+            lognorm[q] = lognorm[q][1] * (1 - np.exp(-times[q] / self.tau_quench))
+        print("lognorm> ", lognorm)
+        return lognorm / lognorm.max() * self.m_today
 
 #-------------------------------------------------------------------------------
 class Tabular_MFH(ChemicalEvolutionModel):
