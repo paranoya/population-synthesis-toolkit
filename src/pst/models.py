@@ -4,13 +4,6 @@ from astropy import units as u
 from astropy.io import fits
 from scipy import special
 import pst
-<<<<<<< HEAD
-=======
-
-#-------------------------------------------------------------------------------
-class Chemical_evolution_model:
-#-------------------------------------------------------------------------------
->>>>>>> pst_refactoring
 
 from scipy import interpolate
 from abc import ABC, abstractmethod
@@ -32,7 +25,6 @@ class ChemicalEvolutionModel(ABC):
         self.M_gas = kwargs.get('M_gas', 0*u.Msun)
         self.Z = kwargs.get('Z', 0.02)
 
-<<<<<<< HEAD
     def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
@@ -98,15 +90,6 @@ class ChemicalEvolutionModel(ABC):
     @abstractmethod
     def integral_Z_SFR(self):
        pass
-=======
-    def get_Z(self, time):
-        return self.Z
-
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-
-
->>>>>>> pst_refactoring
 
 #-------------------------------------------------------------------------------
 class Single_burst(ChemicalEvolutionModel):
@@ -129,10 +112,6 @@ class Single_burst(ChemicalEvolutionModel):
           M_t.append( self.M_stars)
     return M_t
 
-<<<<<<< HEAD
-
-=======
->>>>>>> pst_refactoring
 #-------------------------------------------------------------------------------
 class Exponential_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
