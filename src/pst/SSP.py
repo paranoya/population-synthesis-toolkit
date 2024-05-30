@@ -353,7 +353,7 @@ class PyPopStar(SSPBase):
 
     def __init__(self, IMF, nebular=False, path=None):
         if path is None:
-            self.path = os.path.join(self.default_path, 'PyPopStar')
+            self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
         else:
             self.path = path
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05]
@@ -399,7 +399,7 @@ class PyPopStar(SSPBase):
         for i, Z in enumerate(self.metallicities.value):
             for j, age in enumerate(self.log_ages_yr.value):
                 filename = header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(Z, age)
-                file = os.path.join(self.path, IMF, filename)
+                file = os.path.join(self.path, filename)
                 with fits.open(file) as hdul:
                     self.L_lambda[i][j] = hdul[1].data[column] * self.L_lambda.unit
                     hdul.close()
