@@ -118,7 +118,7 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
                                           t_hat_end = self.t_hat_end,
                                           coeffs=c)
 
-            cum_mass = np.cumsum(p.integral_SFR(t))
+            cum_mass = np.cumsum(p.M(t))
             z_array = Z_i*np.ones(len(t))
             sed, weights = ssp.compute_SED(t, cum_mass, z_array)
 
@@ -187,7 +187,7 @@ class Polynomial_MFH(Chemical_evolution_model):
         else: #If you just want the observable
             return self.M0 * np.matmul(self.coeffs, self.M)
         
-    def integral_SFR(self, time, **kwargs):
+    def M(self, time, **kwargs):
         self.get_sigma = kwargs.get('get_sigma', False)
         self.get_components = kwargs.get('get_components', False)
         self.fit_components = kwargs.get('fit_components', None)

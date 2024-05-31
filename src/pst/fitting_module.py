@@ -88,7 +88,7 @@ def compute_polynomial_models(input_type):
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
         fnu = []
     #    fnu_error = []
-        cum_mass = np.cumsum(model.integral_SFR(t))
+        cum_mass = np.cumsum(model.M(t))
         z_array = Z_i*np.ones(len(t))
         sed, weights = ssp.compute_SED(t, cum_mass, z_array)
         
