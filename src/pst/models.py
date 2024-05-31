@@ -425,8 +425,7 @@ class LogNormalQuenched_MFH(LogNormal_MFH):
         lognorm = super().integral_SFR(times)
         q = times >= self.t_quench
         if q.any():
-            lognorm[q] = lognorm[q][1] * (1 - np.exp(-times[q] / self.tau_quench))
-        print("lognorm> ", lognorm)
+            lognorm[q] = lognorm[q][0] * (1 - np.exp(-times[q] / self.tau_quench))
         return lognorm / lognorm.max() * self.m_today
 
 #-------------------------------------------------------------------------------
