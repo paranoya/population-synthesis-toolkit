@@ -11,21 +11,21 @@ import os
 from astropy import units as u
 from astropy import constants
 
-from scipy import interpolate
+# from scipy import interpolate
 
-def list_of_available_filters():
-    filter_dir = os.path.join(os.path.dirname(__file__),
-                              "data", "filters")
-#    print(f"Checking filters available at {filter_dir}")
-    return os.listdir(filter_dir)
+# def list_of_available_filters():
+#     filter_dir = os.path.join(os.path.dirname(__file__),
+#                               "data", "filters")
+# #    print(f"Checking filters available at {filter_dir}")
+#     return os.listdir(filter_dir)
 
-def find_filt_from_name(name):
-    filters = list_of_available_filters()
-    for f in filters:
-        if name.lower() in f.strip(".dat").lower():
-            return os.path.join(os.path.dirname(__file__),
-                              "data", "filters", f)
-    return None
+# def find_filt_from_name(name):
+#     filters = list_of_available_filters()
+#     for f in filters:
+#         if name.lower() in f.strip(".dat").lower():
+#             return os.path.join(os.path.dirname(__file__),
+#                               "data", "filters", f)
+#     return None
 
 
 class Filter(object):
@@ -96,7 +96,8 @@ class Filter(object):
                 path, usecols=(0, 1), unpack=True)
             self.filter_path = path
         elif name is not None:
-            path = find_filt_from_name(name)
+            path = os.path.join(os.path.dirname(__file__),
+                                "data", "filters", f'{name}.dat')
             # Update the name
             self.filter_name = name
             self.filter_path = path
