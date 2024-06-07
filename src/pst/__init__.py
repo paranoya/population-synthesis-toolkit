@@ -1,4 +1,5 @@
-import pst.models
-import pst.SSP
-import pst.observables
-import pst.fitting_module
+from . import SSP
+from . import observables
+from . import models
+from . import fitting_module
+__all__ = [SSP, observables, models, fitting_module]

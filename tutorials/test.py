@@ -107,35 +107,40 @@ dusty_ssfr_salim = []
 dusty_ssfr_poly = []
 av_lim = .3
 
-with open(output_file, 'r') as csvfile:
-    csv_reader = csv.reader(csvfile)
-    for i, row in enumerate(csv_reader):
-        poly_mass_fraction = np.array([float(i) for i in row[0].split(' ')])
-        lbt= .3
-        lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
-        p = poly_mass_fraction[lbt_index]
-        poly_ssfr_i = p/lbt/1e9
-        poly_ssfr.append( poly_ssfr_i)
+csvfile = open(output_file, 'r')
+csv_reader = csv.reader(csvfile)
+
+dust_polynomial = []
+dust_polynomial_error = []
+for i, row in enumerate(csv_reader):
+    dust_polynomial.append(np.array([float(i) for i in row[-3].split(' ')]))
+    dust_polynomial_error.append(np.array([float(i) for i in row[-4].split(' ')]))
+    
+    poly_mass_fraction = np.array([float(i) for i in row[0].split(' ')])
+    lbt= .3
+    lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
+    p = poly_mass_fraction[lbt_index]
+    poly_ssfr_i = p/lbt/1e9
+    poly_ssfr.append( poly_ssfr_i)
+    
+    #Selecting bad ids and their ssfr
+    if poly_ssfr_i <= 4e-12 and ssfr_salim[i]>1e-11:
+        bad_id_poly_ssfr.append(poly_ssfr_i)
+        bad_id_salim_ssfr.append(ssfr_salim[i])
+        bad_id.append(target_id[i])
         
-        #Selecting bad ids and their ssfr
-        if poly_ssfr_i <= 4e-12 and ssfr_salim[i]>1e-11:
-            bad_id_poly_ssfr.append(poly_ssfr_i)
-            bad_id_salim_ssfr.append(ssfr_salim[i])
-            bad_id.append(target_id[i])
-            
-            bad_id_salim_ssfr_error.append(ssfr_salim_error[i])
-            bad_id_salim_ssfr_sn.append(ssfr_salim[i]/ssfr_salim_error[i])
-            
-            bad_id_met_salim.append(met_salim[i])
-            bad_id_av_salim.append(av_salim[i])
-            bad_id_av_salim_error.append(av_salim_error[i])
-            
-            
-            if av_salim[i]>av_lim:
-                dusty_ssfr_salim.append(ssfr_salim[i])
-                dusty_ssfr_poly.append(poly_ssfr_i)
-                
-                
+        bad_id_salim_ssfr_error.append(ssfr_salim_error[i])
+        bad_id_salim_ssfr_sn.append(ssfr_salim[i]/ssfr_salim_error[i])
+        
+        bad_id_met_salim.append(met_salim[i])
+        bad_id_av_salim.append(av_salim[i])
+        bad_id_av_salim_error.append(av_salim_error[i])
+        
+        
+        if av_salim[i]>av_lim:
+            dusty_ssfr_salim.append(ssfr_salim[i])
+            dusty_ssfr_poly.append(poly_ssfr_i)
+                            
 #%% Bad ids fnu
 fnu_ = []
 fnu_error_ = []
@@ -157,8 +162,10 @@ for line in input_data:
 plt.figure()
 plt.xlabel('sSFR poly')
 plt.ylabel('sSFR salim')
-plt.scatter(poly_ssfr, ssfr_salim, c='blue', alpha=.7, s=1)
-plt.scatter(dusty_ssfr_poly, dusty_ssfr_salim, c='red', alpha=1, s=1, label='AV>{}'.format(av_lim))
+
+plt.scatter(np.array(poly_ssfr)[av_salim<av_lim], np.array(ssfr_salim)[av_salim<av_lim], c='blue', alpha=.7, s=1)
+# plt.scatter(dusty_ssfr_poly, dusty_ssfr_salim, c='red', alpha=1, s=1, label='AV>{}'.format(av_lim))
+
 plt.xscale('log')
 plt.yscale('log')
 plt.xlim(1e-12, 1e-9)

@@ -182,7 +182,7 @@ class Filter(object):
     def get_ab(self, spectra, spectra_err=None):
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
-            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
+            3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
         m_ab = - 2.5 * np.log10(n_photons / norm_photons)
         if n_photons_err is None:
             m_ab_err = None
@@ -194,13 +194,43 @@ class Filter(object):
         """Compute the  specific flux per frequency unit from a spectra."""
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
-            3631 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
-        f_nu = (n_photons / norm_photons * 3631 * u.Jy).to('Jy')
-        if n_photons_err is not None:
-            f_nu_err = (n_photons_err / norm_photons * 3631 * u.Jy).to('Jy')
-        else:
+            3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
+        print(n_photons.unit, norm_photons.unit)
+        f_nu = n_photons / norm_photons * 3630.781 * u.Jy
+        f_nu = f_nu.to('Jy')
+        if spectra_err is None:
             f_nu_err = None
+        else:
+            f_nu_err = n_photons_err / norm_photons * 3630.781 * u.Jy
+            f_nu_err = f_nu_err.to('Jy')
         return f_nu, f_nu_err
+
+    def get_flambda_vegamag(self, spectra, spectra_err=None, mask_nan=True):
+        spectra = self.check_spectra(spectra)
+        spectra_err = self.check_spectra(spectra_err)
+        if mask_nan:
+            mask = np.isfinite(spectra)
+        else:
+            mask = np.ones_like(spectra, dtype=bool)
+
+        av_f_lambda = np.trapz(spectra[mask] * self.wavelength[mask] * self.response[mask], x=self.wavelength[mask]
+                               ) / np.trapz(self.response[mask] * self.wavelength[mask], x=self.wavelength[mask])
+
+        if spectra_err is not None:
+            if mask_nan:
+                mask = mask & np.isfinite(spectra_err)
+            else:
+                mask = np.ones_like(spectra_err, dtype=bool)
+
+            av_f_lambda_err = np.trapz(
+            spectra_err[mask] / (constants.h * constants.c / self.wavelength[mask]
+                                   ) * self.response[mask],
+            x=self.wavelength[mask])
+        else:
+            av_f_lambda_err = None
+
+        return av_f_lambda, av_f_lambda_err
+
 
 class TopHatFilter(Filter):
     """Top hat photometric filter"""
@@ -239,8 +269,11 @@ if __name__ == '__main__':
     
     photometry = Filter(filter_name='r', wavelength=ssp.wavelength)
 
-    for sed in ssp.L_lambda.reshape((ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
-        mag, mag_err = photometry.get_ab(sed * u.Lsun / u.angstrom / 4 / np.pi / (10 * u.pc)**2)
+    for sed in ssp.L_lambda.reshape(
+            (ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
+        sed = 1 * u.Msun * sed / 4 / np.pi / (10 * u.pc)**2
+        mag, mag_err = photometry.get_ab(sed)
+        
 
 #        print("SSP absolute magnitude: ", mag)
     plt.figure()

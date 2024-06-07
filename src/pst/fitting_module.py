@@ -52,17 +52,17 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     print('effective_wavelengths: ', obs_filters_wl)       
     #Computing real models
     
-    #NEED read the lines [subhalo_name [Fnu] [Fnu_error]]
-    real_models = {}
+    #NEED read the lines [target_ID_name [Fnu] [Fnu_error]]
+    input_photo = {}
     
     content = open(input_file, "r").readlines()
     
     for line in content:
         data = line.split(' ')
-        subhalo = data[0]
-        real_models[subhalo] = {}
-        real_models[subhalo]['Fnu_obs'] = [float(string) for string in data[1:len(obs_filters)+1]]
-        real_models[subhalo]['error_Fnu_obs'] = [float(string) for string in data[-len(obs_filters):]]
+        target_ID = data[0]
+        input_photo[target_ID] = {}
+        input_photo[target_ID]['Fnu_obs'] = [float(string) for string in data[1:len(obs_filters)+1]]
+        input_photo[target_ID]['error_Fnu_obs'] = [float(string) for string in data[-len(obs_filters):]]
     
     
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
@@ -84,21 +84,12 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     ##################################################################################
     ##################################################################################
     #Main code
-    # output_path = output_file
-    # if not os.path.exists(output_path):
-    #     os.makedirs(output_path)
-        
-    #Saving the t in Gyrs
-    # with open(os.path.join(output_file, 't_Gyr.txt'), 'w+') as f_MFH:
-    #     if os.stat(os.path.join(output_file, 't_Gyr.txt')).st_size == 0:
-    #         f_MFH.write(" ".join(str(x) for x in t.to_value()) + "\n")
-         
     f_output = open(output_file, 'w+')
-    for number_model, subhalo in enumerate(real_models):
-        print('Computing Model #{} of {}'.format(number_model+1, len(real_models)))
-                
-        target = real_models[subhalo]
-        
+    for number_model, target_ID in enumerate(input_photo):
+        print('Computing Model #{} of {}'.format(number_model+1, len(input_photo)))
+                        
+        target = input_photo[target_ID]
+
         model_poly = []
         chi2_poly = []
         metallicities_poly = []
@@ -255,8 +246,6 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
         
         #%%  
         #Saving results def
-        file_ID = subhalo
-        # f_MFH.write(" ".join(str(x) for x in t.to_value()) + "\n")
         mass_fraction = " ".join(str(x) for x in mass_fraction)
         mass_fraction_error = " ".join(str(x) for x in paper_fraction_std)
         total_mass = "{}".format(np.round(weighted_total_mass, 8))
@@ -268,46 +257,17 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
         metallicity_model_error = np.round(std_weighted_z[0], 5)
         
         f_output.write(mass_fraction +',')
-        f_output.write(file_ID +',')
+        f_output.write(target_ID +',')
         f_output.write(mass_fraction_error +',')
         f_output.write(total_mass +',')
         f_output.write(age_of_fraction +',')
         f_output.write(age_of_fraction_error +',')
         f_output.write('{}'.format(av_model +','))
         f_output.write('{}'.format(av_model_error +','))
-        # print(str(metallicity_model)+'\n')
-        # print(str(av_model_error)+'\n')
 
         f_output.write(str(metallicity_model)+',')
-        f_output.write(str(metallicity_model_error)+'\n')
-        
-        
-            
-        # with open(os.path.join(run_path, 'met_dust_model_{}.txt'.format(file_ID)), 'w+') as f:
-        #     f.write('model_Z std_Z model_dust_extinction model_dust_extinction_std'+'\n')
-        #     f.write('{} {} {} {} {}'.format(file_ID, 
-        #                    np.round(weighted_z[0], 5), np.round(std_weighted_z[0], 5), 
-        #                    str(np.round(weighted_d, 3))[1:-1], str(np.round(std_weighted_d, 3))[1:-1]+'\n'))
-        # with open(os.path.join(run_path, 'mass_fraction_model_{}.txt'.format(file_ID)), 'w+') as f:
-        #     f.write('M(t) delta_M(t) M0'+'\n')
-        #     f.write(" ".join(str(x) for x in mass_fraction) + "\n")
-        #     f.write(" ".join(str(x) for x in paper_fraction_std) + "\n")
-        #     f.write("{}".format(np.round(weighted_total_mass, 5))+'\n')
-            
-        # with open(os.path.join(run_path, 'age_of_fraction_model_{}.txt'.format(file_ID)), 'w+') as f:
-        #     f.write('t(M) delta_t(M)'+'\n')
-        #     f.write(" ".join(str(x) for x in age_of_fraction) + "\n")
-        #     f.write(" ".join(str(x) for x in age_of_fraction_std) + "\n")
-        
-        # keys_array = []
-        # for key, value in real_models[subhalo].items():
-        #     keys_array.append(key)
-            
-        # with open(os.path.join(run_path, 'real_parameters_model_{}.txt'.format(file_ID)), 'w+') as f:
-        #     f.write(" ".join([key for key in real_models[subhalo].keys()]) + "\n")
-        #     for key, value in real_models[subhalo].items():
-        #         f.write("{}".format(value) + "\n")
-        
+        f_output.write(str(metallicity_model_error)+'\n')        
+                
         print("--- time computing model = %s seconds ---" % (round(pst_time, 3)))
         
     f_output.close()
