@@ -118,9 +118,9 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
                                           t_hat_end = self.t_hat_end,
                                           coeffs=c)
 
-            cum_mass = np.cumsum(p.M(t))
+            # cum_mass = np.cumsum(p.M(t))
             z_array = Z_i*np.ones(len(t))
-            sed, weights = ssp.compute_SED(t, cum_mass, z_array)
+            sed, weights = ssp.compute_SED(t, p.M(t), z_array)
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
