@@ -148,24 +148,12 @@ class Filter(object):
     def interpolate(self, wavelength=None):
         """Interpolate a filter response curve to an input wavelength."""
         if not hasattr(wavelength, "unit"):
-#            print("Assuming that input wavelength array is in angstrom")
             wavelength *= u.angstrom
 
-        delta_wl = wavelength[1:] - wavelength[:-1]
-        wavelength_edges = np.zeros((wavelength.size + 1)
-                                    ) * wavelength.unit
-        wavelength_edges[1:-1] = wavelength[1:] - delta_wl / 2
-        wavelength_edges[0] = wavelength[0] - delta_wl[0] / 2
-        wavelength_edges[-1] = wavelength[-1] + delta_wl[-1] / 2
-        
-        cumulative_trans_curve = np.cumsum(self.filter_resp)
-        interp_cum_trans_curve = np.interp(wavelength_edges,
-                                           self.filter_wavelength,
-                                           cumulative_trans_curve)
-
-        self.response = np.diff(interp_cum_trans_curve)
+        self.response = np.interp(wavelength,
+                                  self.filter_wavelength, self.filter_resp,
+                                  left=0, right=0)
         self.wavelength= wavelength
-#        print("Filter transmission curve interpolated to input wavelength array")
         return self.response
 
     def check_spectra(self, spectra):
