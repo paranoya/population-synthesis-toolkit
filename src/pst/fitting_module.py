@@ -49,7 +49,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
         photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = name)
         obs_filters_wl.append(photo.effective_wavelength().to_value())
     obs_filters_wl = np.array(obs_filters_wl)     
-    print('effective_wavelengths: ', obs_filters_wl)       
+    # print('effective_wavelengths: ', obs_filters_wl)       
     #Computing real models
     
     #NEED read the lines [target_ID_name [Fnu] [Fnu_error]]
@@ -69,12 +69,13 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
         fnu = []
     #    fnu_error = []
         z_array = Z_i*np.ones(len(t))
-        sed, weights = ssp.compute_SED(t, model.M(t), z_array)
+        sed = model.compute_SED(SSP = ssp, t_obs = t0)
         
     
         for i, filter_name in enumerate(obs_filters):
             photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-            fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err=None)
+            spectra_flambda = ( sed/(4*np.pi*(10*u.pc.to('cm'))*u.cm**2) )
+            fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err=None)
             fnu.append( fnu_Jy )
     #        fnu_error.append( fnu_Jy_error )
             fnu_Jy

@@ -81,6 +81,10 @@ class ChemicalEvolutionModel(ABC):
             mask = np.isfinite(weights)
         sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
                     axis=(0))
+        # print('A', weights[mask, np.newaxis].unit)
+        # print('b', SSP.L_lambda[mask, :].unit)
+        # print('c', weight_Z.unit)
+        # print('sed', sed.unit)
         return sed
 
     @abstractmethod
@@ -196,13 +200,19 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
                                           t_hat_end = self.t_hat_end,
                                           coeffs=c)
 
-            # cum_mass = np.cumsum(p.M(t))
+            # cum_mass = np.cumsum(p.integral_SFR(t))
             z_array = Z_i*np.ones(len(t))
-            sed, weights = ssp.compute_SED(t, p.M(t), z_array)
+            # print(ssp)
+            sed = p.compute_SED(SSP = ssp, t_obs = t_obs)
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                # print('SED = ', sed)
+                # print('ef_wl', photo.effective_wavelength())
+                spectra_flambda = ( sed/(4*np.pi*(10*u.pc.to('cm'))*u.cm**2) )
+                # print('spectra', spectra_fnu.unit)
+
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err = None)
                 fnu.append( fnu_Jy )
 
             primordial_Fnu.append(u.Quantity(fnu))
@@ -266,7 +276,7 @@ class Polynomial_MFH(ChemicalEvolutionModel):
         else: #If you just want the observable
             return self.M0 * np.matmul(self.coeffs, self.M)
         
-    def M(self, time, **kwargs):
+    def integral_SFR(self, time, **kwargs):
         self.get_sigma = kwargs.get('get_sigma', False)
         self.get_components = kwargs.get('get_components', False)
         self.fit_components = kwargs.get('fit_components', None)
@@ -353,6 +363,8 @@ class Polynomial_MFH(ChemicalEvolutionModel):
         else:
             return self.M0 * np.matmul(self.coeffs, M)
 
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
 
 #-------------------------------------------------------------------------------
 class Gaussian_burst(ChemicalEvolutionModel):
