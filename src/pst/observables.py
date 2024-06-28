@@ -27,6 +27,29 @@ def find_filt_from_name(name):
                               "data", "filters", f)
     return None
 
+def load_photometric_filters(filters):
+    """Convenience function for constructing a list of photometric filters.
+    
+    Parameters
+    ----------
+    - filters: list of str
+        List of filters to load. The list might contain the absolute path to
+        a filter response file, or just the filter name following the SVO
+        convention.
+    
+    Returns
+    -------
+    - filters_out: list of pst.observables.Filter
+        List of filters.
+    """
+    filters_out = []
+    for f in filters:
+        if os.path.exists(f):
+            filters_out.append(Filter(filter_path=f))
+        else:
+            filters_out.append(Filter(filter_name=f))
+    return filters_out
+
 
 class Filter(object):
     """This class represent a photometric filter
