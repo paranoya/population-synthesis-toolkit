@@ -316,6 +316,7 @@ class SSPBase(object):
             self.photometry[ith], _ = f.get_fnu(
                     self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
                     mask_nan=False)
+        return self.photometry
 
     def copy(self):
         """Return a copy of the SSP model."""
