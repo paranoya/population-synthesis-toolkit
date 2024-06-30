@@ -203,11 +203,7 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-                # print('SED = ', sed)
-                # print('ef_wl', photo.effective_wavelength())
                 spectra_flambda = ( sed/(4*np.pi*(10*u.pc.to('cm'))*u.cm**2) )
-                # print('spectra', spectra_fnu.unit)
-
                 fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err = None)
                 fnu.append( fnu_Jy )
 
