@@ -10,6 +10,7 @@ import numpy as np
 import os
 from astropy import units as u
 from astropy import constants
+import requests
 
 # from scipy import interpolate
 
@@ -96,16 +97,46 @@ class Filter(object):
                 path, usecols=(0, 1), unpack=True)
             self.filter_path = path
         elif name is not None:
+            filter_file_name = name.split('/')[-1]
             path = os.path.join(os.path.dirname(__file__),
-                                "data", "filters", f'{name}.dat')
+                                 "data", "filters", f'{filter_file_name}.dat')
+            
+            # path = os.path.join(os.path.dirname(__file__),
+            #                     "data", "filters", f'{name}.dat')
             # Update the name
             self.filter_name = name
             self.filter_path = path
-            if path is not None:
+            if path is not None and os.path.exists(path):
                 self.filter_wavelength, self.filter_resp = np.loadtxt(
                     path, usecols=(0, 1), unpack=True)
             else:
-                raise NameError(f"No filter found with input name {name}")
+                # raise NameError(f"No filter found with input name {name}")
+                print('Filter "{}" not found, downloading data from SVO'.format(name))
+                
+                def download(url: str, dest_folder: str):
+                    if not os.path.exists(dest_folder):
+                        os.makedirs(dest_folder)  # create folder if it does not exist
+
+                    filename = url.split('/')[-1]
+                    file_path = os.path.join(dest_folder, filename +'.dat')
+
+                    r = requests.get(url, stream=True)
+                    if r.ok:
+                        print("Saving new filter to ", os.path.abspath(file_path))
+                        with open(file_path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=1024 * 8):
+                                if chunk:
+                                    f.write(chunk)
+                                    f.flush()
+                                    os.fsync(f.fileno())
+                    else:
+                        print("Something happened and the filter could not be downloaded: status code {}\n{}".format(r.status_code, r.text))
+                
+                download('http://svo2.cab.inta-csic.es/theory/fps/getdata.php?format=ascii&id={}'.format(name), 
+                         dest_folder = os.path.join(os.path.dirname(__file__), "data", "filters"))
+                self.filter_wavelength, self.filter_resp = np.loadtxt(
+                    path, usecols=(0, 1), unpack=True)
+                
         else:
             raise NameError("No path, nor name provided")
 #        print(f"Filter loaded from: {path}")
@@ -195,7 +226,7 @@ class Filter(object):
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
         norm_photons, _ = self.get_photons(
             3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
-        print(n_photons.unit, norm_photons.unit)
+        # print(n_photons.unit, norm_photons.unit)
         f_nu = n_photons / norm_photons * 3630.781 * u.Jy
         f_nu = f_nu.to('Jy')
         if spectra_err is None:
