@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 import numpy as np
 
 from astropy.io import fits
@@ -292,7 +293,34 @@ class SSPBase(object):
             for j in range(self.ages.size):
                 mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
         return mass_to_lum
+    
+    def compute_photometry(self, filter_list, z_obs=0.0):
+        """Compute the SSP synthetic photometry of a set of filters.
+        
+        Paramteres
+        ----------
+        filter_list: list of pst.observable.Filter
+            A list of photometric filters.
 
+        Returns
+        -------
+        photometry: np.ndarray
+            Array storing the photometry. The dimensions correspond to
+            filter, metallicity and age.
+        """
+        print("Computing synthetic photometry for SSP model")
+        self.photometry = np.zeros((len(filter_list),
+                                    *self.L_lambda.shape[:-1]))
+        self.photometry_filters = filter_list
+        for ith, f in enumerate(filter_list):
+            f.interpolate(self.wavelength * (1 + z_obs))
+            self.photometry[ith], _ = f.get_fnu(
+                    self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
+                    mask_nan=False)
+
+    def copy(self):
+        """Return a copy of the SSP model."""
+        return deepcopy(self)
 
 class PopStar(SSPBase):
     """PopStar SSP models (Mollá+09)."""
