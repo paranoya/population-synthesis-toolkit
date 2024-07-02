@@ -1,7 +1,9 @@
 import os
+from copy import deepcopy
 import numpy as np
 
 from astropy.io import fits
+from astropy.table import Table
 from astropy import units as u
 from astropy import constants as c
 from astropy import units
@@ -64,7 +66,7 @@ class SSPBase(object):
     @L_lambda.setter
     def L_lambda(self, l_lamdba):
         if not isinstance(l_lamdba, units.Quantity):
-            raise NameError("Ages must be an astropy.Quantity")
+            raise NameError("L_lambda must be an astropy.Quantity")
         else:
             self._L_lambda = l_lamdba
 
@@ -291,7 +293,34 @@ class SSPBase(object):
             for j in range(self.ages.size):
                 mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
         return mass_to_lum
+    
+    def compute_photometry(self, filter_list, z_obs=0.0):
+        """Compute the SSP synthetic photometry of a set of filters.
+        
+        Paramteres
+        ----------
+        filter_list: list of pst.observable.Filter
+            A list of photometric filters.
 
+        Returns
+        -------
+        photometry: np.ndarray
+            Array storing the photometry. The dimensions correspond to
+            filter, metallicity and age.
+        """
+        print("Computing synthetic photometry for SSP model")
+        self.photometry = np.zeros((len(filter_list),
+                                    *self.L_lambda.shape[:-1]))
+        self.photometry_filters = filter_list
+        for ith, f in enumerate(filter_list):
+            f.interpolate(self.wavelength * (1 + z_obs))
+            self.photometry[ith], _ = f.get_fnu(
+                    self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
+                    mask_nan=False)
+
+    def copy(self):
+        """Return a copy of the SSP model."""
+        return deepcopy(self)
 
 class PopStar(SSPBase):
     """PopStar SSP models (Mollá+09)."""
@@ -406,39 +435,80 @@ class PyPopStar(SSPBase):
         # Avoid 0 flux
         self.L_lambda[self.L_lambda <= 0] += self.L_lambda[self.L_lambda > 0].min()
 
-# class BC03_Padova94(SSP): # TODO: CHANGE METHODS
+class BC03_2016(SSPBase):
 
-#     def __init__(self, mode, IMF):
-#         self.path = os.path.join(os.path.dirname(__file__),
-#                                  'data/BC03/models/Padova1994')
-#         self.metallicities = np.array([0.0001, 0.0004, 0.004, 0.008, 0.02,
-#                                        0.05])
-#         self.ages = np.loadtxt(os.path.join(self.path, 'ages.dat'))
-#         self.log_ages_yr = np.log10(self.ages)
+    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+     # Padova1994
+    'm22': 0.0001,
+    'm32': 0.0004,
+    'm42': 0.004,
+    'm52': 0.008,
+    'm62': 0.02,
+    'm72': 0.05,
+    'm82': 0.1}
+    resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
+    
+    def __init__(self, model='BaSeL', imf='Kroupa', path=None) -> None:
+        self.model, model_key = self.parse_model(model)
+        self.imf, imf_key = self.parse_imf(imf)
 
-#         self.L_lambda = np.empty(shape=(self.metallicities.size,
-#                                         self.log_ages_yr.size),
-#                                  dtype=Spectrum1D)
-#         self.wavelength = np.loadtxt(os.path.join(self.path,
-#                                      'wavelength_'+mode+'.dat')) * u.Angstrom
-#         print("> Initialising Bruzual&Charlote2003 (P94) models (IMF='"
-#               + IMF + "')")
-#         self.L_lambda = np.empty(shape=(self.metallicities.size,
-#                                         self.log_ages_yr.size,
-#                                         self.wavelength.size),
-#                                  dtype=np.ndarray)
-#         for i, Z in enumerate(self.metallicities):
-#             file = os.path.join(self.path, IMF, 'SED',
-#                                 'bc03_{0}_Z_{1:.4f}_{2}.txt'.format(mode, Z,
-#                                                                     IMF))
-#             spec = np.loadtxt(file, dtype=float,
-#                               usecols=(1),
-#                               unpack=True
-#                               ) * u.Lsun/u.Angstrom/u.Msun
-#             Spectrum1D(flux=spec, spectral_axis=self.wavelength)
-                
-#             self.L_lambda[i][:, :] = np.loadtxt(file, dtype=float
-#                                                      ) * u.Lsun/u.Angstrom/u.Msun
+        if path is None:
+            self.path = os.path.join(self.default_path, 'BC03', 'bc03_2016ver',
+                                     self.model, self.imf)
+        else:
+            self.path = path
+
+        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        self.metallicities = np.array(list(self.metallicity_map.values())) * units.dimensionless_unscaled
+        self.ages = np.loadtxt(
+            os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')) * units.yr
+        
+        self.log_ages_yr = np.log10(self.ages / units.yr)
+
+        load_wavelength = False
+        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+            fits_path = os.path.join(
+                self.path, f"bc2003_{self.resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+            table = Table.read(fits_path)
+            if not load_wavelength:
+                self.wavelength = table['wavelength'].value * u.angstrom
+                self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
+                                          self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
+                load_wavelength = True
+            table.remove_column("wavelength")
+            for j, column in enumerate(table.itercols()):
+                self.L_lambda[i, j] = column.value * self.L_lambda.unit
+
+
+    def parse_model(self, model):
+        if 'basel' in model.lower():
+            model = 'BaSeL3.1_Atlas'
+            key = 'BaSeL'
+        elif 'stelib' in model.lower():
+            model = 'Stelib_Atlas'
+            key = 'stelib'
+        elif 'miles' in model.lower():
+            model = 'Miles_Atlas'
+            key = 'xmiless'
+        else:
+            raise NameError(f"Unrecognized model: {model}.\n"
+                             + "Select Basel, Stelib, Miles")
+        return model, key
+
+    def parse_imf(self, imf):
+        if 'cha' in imf.lower():
+            imf = 'Chabrier_IMF'
+            key = 'chab'
+        elif 'sal' in imf.lower():
+            imf = 'Salpeter_IMF'
+            key = 'salp'
+        elif 'kro' in imf.lower():
+            imf = 'Kroupa_IMF'
+            key = 'kroup'
+        else:
+            raise NameError(f"Unrecognized IMF: {imf}.\n"
+                             + "Select Chabrier, Salpeter or Kroupa")
+        return imf, key
 
 class BaseGM(SSPBase):
     """Granada models..."""

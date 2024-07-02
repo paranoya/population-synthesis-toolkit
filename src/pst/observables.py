@@ -188,13 +188,15 @@ class Filter(object):
         spectra_err = self.check_spectra(spectra_err)
         if mask_nan:
             mask = np.isfinite(spectra)
-        else:
-            mask = np.ones_like(spectra, dtype=bool)
-
-        photon_flux = np.trapz(
-            spectra[mask] / (constants.h * constants.c / self.wavelength[mask]
+            photon_flux = np.trapz(
+                spectra[mask] / (constants.h * constants.c / self.wavelength[mask]
                                    ) * self.response[mask],
-            x=self.wavelength[mask])
+                x=self.wavelength[mask])
+        else:
+            photon_flux = np.trapz(
+                spectra / (constants.h * constants.c / self.wavelength
+                                   ) * self.response,
+                x=self.wavelength)
 
         if spectra_err is not None:
             if mask_nan:
@@ -210,10 +212,11 @@ class Filter(object):
             photon_flux_err = None
         return photon_flux, photon_flux_err
     
-    def get_ab(self, spectra, spectra_err=None):
-        n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
+    def get_ab(self, spectra, spectra_err=None, mask_nan=True):
+        n_photons, n_photons_err = self.get_photons(spectra, spectra_err, mask_nan=mask_nan)
         norm_photons, _ = self.get_photons(
-            3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
+            3630.781 * u.Jy * np.ones(spectra.shape) * constants.c / self.wavelength**2,
+            mask_nan=False)
         m_ab = - 2.5 * np.log10(n_photons / norm_photons)
         if n_photons_err is None:
             m_ab_err = None
@@ -221,12 +224,12 @@ class Filter(object):
             m_ab_err = 2.5 / np.log(10) * n_photons_err / n_photons
         return m_ab, m_ab_err
 
-    def get_fnu(self, spectra, spectra_err):
+    def get_fnu(self, spectra, spectra_err=None, mask_nan=True):
         """Compute the  specific flux per frequency unit from a spectra."""
-        n_photons, n_photons_err = self.get_photons(spectra, spectra_err)
+        n_photons, n_photons_err = self.get_photons(spectra, spectra_err, mask_nan=mask_nan)
         norm_photons, _ = self.get_photons(
-            3630.781 * u.Jy * np.ones(spectra.size) * constants.c / self.wavelength**2)
-        # print(n_photons.unit, norm_photons.unit)
+            3630.781 * u.Jy * np.ones(spectra.shape) * constants.c / self.wavelength**2,
+            mask_nan=False)
         f_nu = n_photons / norm_photons * 3630.781 * u.Jy
         f_nu = f_nu.to('Jy')
         if spectra_err is None:
