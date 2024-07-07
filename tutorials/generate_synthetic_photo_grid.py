@@ -13,27 +13,19 @@ from time import time
 
 from pst.SSP import PopStar
 from pst.dust import DustScreen
-from pst.observables import Filter
+from pst.observables import Filter, load_photometric_filters
 
 
-def prepare_photometric_filters(filters):
-    filters_out = []
-    for f in filters:
-        if os.path.exists(f):
-            filters_out.append(Filter(filter_path=f))
-        else:
-            filters_out.append(Filter(filter_name=f))
-    return filters_out
-
-filters = prepare_photometric_filters(
+filters = load_photometric_filters(
     ['GALEX_FUV', 'GALEX_NUV', 'Euclid_VIS.vis', 'PANSTARRS_PS1.g',
      'PANSTARRS_PS1.r', 'JPLUS_J0660'])
 
 ssp = PopStar(IMF='cha')
 dust_model = DustScreen("ccm89")
 
-a_v_array = np.linspace(0.1, 3, 10)
-redshift_array = np.linspace(0, 3, 30)
+a_v_array = np.linspace(0.1, 3, 30)
+redshift_array = np.linspace(0, 2.5, 10)
+
 
 tstart = time()
 ssps = [dust_model.redden_ssp_model(ssp, a_v=av) for av in a_v_array]
@@ -46,3 +38,14 @@ for i, z in enumerate(redshift_array):
 tend = time()
 print("time spent generating SSP photometry: ", tend - tstart)
 print("time spent generating a single SSP model: ", (tend - tstart) / (all_photometry.shape[0] * all_photometry.shape[1]))
+
+met_idx = 3
+age_idx = 5
+plt.figure()
+plt.pcolormesh(a_v_array, redshift_array,
+    - 2.5 * np.log10(all_photometry[:, :, 3, met_idx, age_idx] / all_photometry[:, :, 4, met_idx, age_idx]),
+    cmap='jet')
+plt.colorbar(label=f'PS g - PS r (Z={ssp.metallicities[met_idx]}, age={ssp.ages[age_idx]:.2f})')
+
+
+
