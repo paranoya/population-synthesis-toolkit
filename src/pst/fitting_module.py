@@ -8,10 +8,11 @@ import numpy as np
 from astropy import units as u
 import pst
 import time as tic
-import os
 import extinction
+import csv
 
-def compute_polynomial_models(input_type):
+def compute_polynomial_models(input_file, output_file, obs_filters, 
+                              **kwargs):
     
     # Observables
     t0 = 13.7 * u.Gyr  # time of observation 
@@ -19,6 +20,12 @@ def compute_polynomial_models(input_type):
     t = t0*(1-t_hat) #time from 0Gyr --> 13.7Gyr
     lookback_time = (t0-t)[::-1] #t0 --> 0
     R_V = 3.1
+    
+    t_start_values = kwargs.get('ti_grid', [0]*u.Gyr)
+    t_end_values = kwargs.get('tf_grid', [13.7]*u.Gyr)
+    z_grid = kwargs.get('z_grid', np.array([0.02]))
+    av_grid = kwargs.get('av_grid', [0])
+    N_range = kwargs.get('N_grid', np.arange(1, 4))
     
     # SSPs
     ssp_pop = pst.SSP.PopStar(IMF="sal")
@@ -30,109 +37,51 @@ def compute_polynomial_models(input_type):
     
     print('Initiating code')
     print()
-    print('Code parameters:')
-    print('Negative SFR: ', allow_negative_sfr)
-    print()
-    
-    t_start_values = [0]*u.Gyr
-    #t_end_values = [1, 2, 3, 4, 7, 10, 11, 12, 12.7, 13, 13.2, 13.5, 13.6, 13.62, 13.65, 13.67, 13.7]*u.Gyr
-    t_end_values =  [13.7]*u.Gyr
-
+   
     t_grid = [(b, c) for b in t_start_values for c in t_end_values
                   if b.to_value()<c.to_value()]
     
-    # Primordial polynomia
-    N_min = 1
-    N_max = 3
-    N_range = np.arange(N_min, N_max+1)  # polynomial degree
-    
     ##############################################################
-    
-    #MODELS GRID
-    model_A_V_grid = [0, 0.5, 1.0, 1.2]
-    model_z_grid = np.array([0.004, 0.008, 0.02, 0.05])
-     
-    ## MFH TARGET
-    filters_names = ['GALEX_FUV', 'GALEX_NUV', 'u', 'g', 'r', 'i', 'z']
-    filters_wl = np.array([1538.6, 2315.7, 3543., 4770., 6231., 7625., 9134.])
-    
-    
-    if input_type == 'Illustris':
-        obs_filters = filters_names[2:]
-        obs_filters_wl = filters_wl[2:]
-        ssp.cut_wavelength(1000, 1600000)
-        
-    elif input_type == 'salim':
-        obs_filters = filters_names
-        obs_filters_wl = filters_wl
-        ssp.cut_wavelength(1000, 1600000)
-        
+    ssp.cut_wavelength(1000, 1600000)
+    obs_filters_wl = []
+    for name in obs_filters:
+        photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = name)
+        obs_filters_wl.append(photo.effective_wavelength().to_value())
+    obs_filters_wl = np.array(obs_filters_wl)     
+    # print('effective_wavelengths: ', obs_filters_wl)       
     #Computing real models
-    max_per_folder = 100 #Max amount per folder
-    current_run = 0 #Current run (0 --> n_runs-1)   
     
     #NEED read the lines [target_ID_name [Fnu] [Fnu_error]]
     input_photo = {}
-    input_file = os.path.join(os.getcwd(),'input', '{}_input.txt'.format(input_type))
     
-    content = open(input_file, "r").readlines()
-    
-    for line in content:
-        data = line.split(' ')
-        target_ID = data[0]
+    content = csv.reader(open(input_file, "r"))
+    for i, row in enumerate(content):
+        target_ID = int(row[0])
         input_photo[target_ID] = {}
-        input_photo[target_ID]['Fnu_obs'] = [float(string) for string in data[1:len(obs_filters)+1]]
-        input_photo[target_ID]['error_Fnu_obs'] = [float(string) for string in data[-len(obs_filters):]]
-    
+        input_photo[target_ID]['Fnu_obs'] = np.array([float(k) for k in row[1].split()])
+        input_photo[target_ID]['error_Fnu_obs'] = np.array([float(k) for k in row[2].split()])
     
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
         fnu = []
-    #    fnu_error = []
-        cum_mass = np.cumsum(model.integral_SFR(t))
-        z_array = Z_i*np.ones(len(t))
-        sed, weights = ssp.compute_SED(t, cum_mass, z_array)
-        
-    
+        sed = model.compute_SED(SSP = ssp, t_obs = t0)
         for i, filter_name in enumerate(obs_filters):
             photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-            fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err=None)
+            spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
+            fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err=None)
             fnu.append( fnu_Jy )
-    #        fnu_error.append( fnu_Jy_error )
-            fnu_Jy
         return u.Quantity(fnu)
+
     
     #%% 
     ##################################################################################
     ##################################################################################
     #Main code
-    output_path = os.path.join(os.getcwd(), 'output', 'results_{}'.format(input_type)) #Change folder name as desired
-    if not os.path.exists(output_path):
-        os.makedirs(output_path)
-        
-    #Saving t in Gyrs
-    with open(os.path.join(output_path, 't_Gyr.txt'), 'w+') as f_MFH:
-        if os.stat(os.path.join(output_path, 't_Gyr.txt')).st_size == 0:
-            f_MFH.write(" ".join(str(x) for x in t.to_value()) + "\n")
-         
+    f_output = open(output_file, 'w+')
     for number_model, target_ID in enumerate(input_photo):
         print('Computing Model #{} of {}'.format(number_model+1, len(input_photo)))
-        
-        #Dividing the output into files    
-        if number_model % max_per_folder == 0:
-            if number_model==0:
-                min_ID= 0
-            else:
-                min_ID+=1
-        
-        run_folder = 'models_{}_{}'.format(current_run*len(input_photo)+min_ID*max_per_folder, 
-                             current_run*len(input_photo)+min((min_ID+1)*max_per_folder-1, len(input_photo)-1))
-                            
-        run_path = os.path.join(output_path, run_folder)
-        if not os.path.exists(run_path):
-            os.makedirs(run_path)
-        
+                        
         target = input_photo[target_ID]
-        
+
         model_poly = []
         chi2_poly = []
         metallicities_poly = []
@@ -146,9 +95,9 @@ def compute_polynomial_models(input_type):
     
         #PST     
         time_before_pst = tic.time()                
-        for Z_i_index, Z_i in enumerate(model_z_grid):   
+        for Z_i_index, Z_i in enumerate(z_grid):   
             
-            for av_index, A_V_model in enumerate(model_A_V_grid):
+            for av_index, A_V_model in enumerate(av_grid):
                 
                 model_A_lambda = extinction.ccm89(obs_filters_wl, A_V_model, R_V)
                 dust_extinction = np.power(10, -model_A_lambda/2.5)
@@ -227,15 +176,10 @@ def compute_polynomial_models(input_type):
         def weighted_mean(x, w):
             return np.dot(w, x)
            
-        def old_std(x, w):
+        def std(x, w):
             mu= weighted_mean(x, w)
             return np.sqrt(np.dot(w, np.power(x, 2))-np.power(mu, 2))
-        
-        def yago_std(x, sigma, w):
-            mu= weighted_mean(x, w)
-            return np.sqrt((np.dot(w, np.power((x-mu), 2))+ np.power(sigma, 2)).sum(axis=0))
-    #        return np.sqrt((np.array(w)*(np.array(x)-mu)**2+ np.array(sigma)**2).sum(axis=0))
-        
+                
         #t(M) y M(t)           
         norm_chi2_poly = chi2_poly - min(chi2_poly)
         likelihood_poly = np.array(np.exp(-norm_chi2_poly/2))
@@ -245,7 +189,7 @@ def compute_polynomial_models(input_type):
         #MODELO SIN ERRORES             
         age_of_fraction_i = []
         fraction_i = []
-        new_sigma2 = []
+        sigma2 = []
         sigma_i = []
         total_mass_i = []
         for i, model in enumerate(model_poly): #For each model of this MC loop:
@@ -255,7 +199,7 @@ def compute_polynomial_models(input_type):
             total_mass_i.append(total_mass)        
             fraction_model = np.array(mass/total_mass)
             sigma_model = np.array(sigma/total_mass)
-            new_sigma2.append((norm_weights[i]*(np.matmul(S.T,  M))**2).sum(axis=0)/total_mass**2) 
+            sigma2.append((norm_weights[i]*(np.matmul(S.T,  M))**2).sum(axis=0)/total_mass**2) 
             fraction = np.logspace(-3, 0, len(t))
             age_of_fraction_model = np.interp(fraction, fraction_model, lookback_time)
             
@@ -265,12 +209,11 @@ def compute_polynomial_models(input_type):
         
                      
         mass_fraction = weighted_mean(fraction_i, norm_weights)
-        paper_fraction_std = np.sqrt(np.array(new_sigma2).sum(axis=0))  
+        mass_fraction_std = np.sqrt(np.array(sigma2).sum(axis=0))  
         weighted_total_mass = weighted_mean(total_mass_i, norm_weights)
-    #    old_fraction_std = old_std(fraction_i, norm_weights) 
-    #    yago_fraction_std = yago_std(fraction_i, sigma_i, norm_weights)
+
         age_of_fraction = weighted_mean(age_of_fraction_i, norm_weights) 
-        age_of_fraction_std = old_std(age_of_fraction_i, norm_weights) 
+        age_of_fraction_std = std(age_of_fraction_i, norm_weights) 
                                      
         #Computing recovered metallicity and dust extinction 
         weighted_z = 0
@@ -288,31 +231,31 @@ def compute_polynomial_models(input_type):
         
         #%%  
         #Saving results def
-        file_ID = target_ID[8:]
-        with open(os.path.join(run_path, 'met_dust_model_{}.txt'.format(file_ID)), 'w+') as f:
-            f.write('model_Z std_Z model_dust_extinction model_dust_extinction_std'+'\n')
-            f.write('{} {} {} {} {}'.format(file_ID, 
-                           np.round(weighted_z[0], 5), np.round(std_weighted_z[0], 5), 
-                           str(np.round(weighted_d, 3))[1:], str(np.round(std_weighted_d, 3))[1:]+'\n'))
-        with open(os.path.join(run_path, 'mass_fraction_model_{}.txt'.format(file_ID)), 'w+') as f:
-            f.write('M(t) delta_M(t) M0'+'\n')
-            f.write(" ".join(str(x) for x in mass_fraction) + "\n")
-            f.write(" ".join(str(x) for x in paper_fraction_std) + "\n")
-            f.write("{}".format(np.round(weighted_total_mass, 5))+'\n')
-            
-        with open(os.path.join(run_path, 'age_of_fraction_model_{}.txt'.format(file_ID)), 'w+') as f:
-            f.write('t(M) delta_t(M)'+'\n')
-            f.write(" ".join(str(x) for x in age_of_fraction) + "\n")
-            f.write(" ".join(str(x) for x in age_of_fraction_std) + "\n")
+        mass_fraction = " ".join(str(x) for x in mass_fraction)
+        mass_fraction_error = " ".join(str(x) for x in mass_fraction_std)
+        total_mass = "{}".format(np.round(weighted_total_mass, 8))
+        age_of_fraction = " ".join(str(x) for x in age_of_fraction)
+        age_of_fraction_error = " ".join(str(x) for x in age_of_fraction_std)
+        av_model = str(np.round(weighted_d, 3))[1:-1]
+        av_model_error = str(np.round(std_weighted_d, 3))[1:-1]
+        metallicity_model = np.round(weighted_z[0], 5)
+        metallicity_model_error = np.round(std_weighted_z[0], 5)
         
-        keys_array = []
-        for key, value in input_photo[target_ID].items():
-            keys_array.append(key)
-            
-        with open(os.path.join(run_path, 'real_parameters_model_{}.txt'.format(file_ID)), 'w+') as f:
-            f.write(" ".join([key for key in input_photo[target_ID].keys()]) + "\n")
-            for key, value in input_photo[target_ID].items():
-                f.write("{}".format(value) + "\n")
+        f_output.write('{}'.format(target_ID) +',')
+        f_output.write(total_mass +',')
         
-     #%%
+        f_output.write(mass_fraction +',')       
+        f_output.write(mass_fraction_error +',')
+        
+        f_output.write(age_of_fraction +',')
+        f_output.write(age_of_fraction_error +',')
+        
+        f_output.write('{}'.format(av_model +','))
+        f_output.write('{}'.format(av_model_error +','))
+
+        f_output.write(str(metallicity_model)+',')
+        f_output.write(str(metallicity_model_error)+'\n')     
+                        
         print("--- time computing model = %s seconds ---" % (round(pst_time, 3)))
+        
+    f_output.close()

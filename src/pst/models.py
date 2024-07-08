@@ -95,23 +95,25 @@ class ChemicalEvolutionModel(ABC):
 class Single_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
-  def __init__(self, **kwargs):
-    self.M_stars = kwargs['M_stars']
-    self.t = kwargs['t_burst']
-    ChemicalEvolutionModel.__init__(self, **kwargs)
+    def __init__(self, **kwargs):
+        self.M_stars = kwargs['M_stars']*u.Msun
+        self.tb = kwargs['t_burst']*u.Gyr
+        ChemicalEvolutionModel.__init__(self, **kwargs)
 
 # TODO: do this using np.select(); actually, does tb exist at all?
-  def integral_SFR(self, time):
-    M_t = []
-    if type(time)==float:
-        time=[time]
-    for  t in time:
-      if t<=self.tb:
-           M_t.append(0)
-      else:
-          M_t.append( self.M_stars)
-    return M_t
-
+    def integral_SFR(self, time):
+        M_t = []
+        if type(time)==float:
+            time=[time]
+        for  t in time:
+          if t<=self.tb:
+               M_t.append(0)
+          else:
+              M_t.append( 1)
+        return M_t*self.M_stars
+    
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
 #-------------------------------------------------------------------------------
 class Exponential_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
@@ -196,13 +198,15 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
                                           t_hat_end = self.t_hat_end,
                                           coeffs=c)
 
-            cum_mass = np.cumsum(p.integral_SFR(t))
+            # cum_mass = np.cumsum(p.integral_SFR(t))
             z_array = Z_i*np.ones(len(t))
-            sed, weights = ssp.compute_SED(t, cum_mass, z_array)
+            # print(ssp)
+            sed = p.compute_SED(SSP = ssp, t_obs = t_obs)
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err = None)
                 fnu.append( fnu_Jy )
 
             primordial_Fnu.append(u.Quantity(fnu))
@@ -353,32 +357,37 @@ class Polynomial_MFH(ChemicalEvolutionModel):
         else:
             return self.M0 * np.matmul(self.coeffs, M)
 
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
 
 #-------------------------------------------------------------------------------
 class Gaussian_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
-  def __init__(self, **kwargs):
-    self.M_inf = kwargs['M_stars']*u.Msun
-    self.tb = kwargs['t']*u.Gyr             # Born time
-    self.c = kwargs['c']*u.Gyr # En Myr
-    ChemicalEvolutionModel.__init__(self, **kwargs)
-
-  def integral_SFR(self, time):
-    return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
-
-  def SFR(self, time):
-    a = self.M_inf/(2*self.c*np.sqrt(np.pi/2))
-    return a * np.exp(-(time-self.tb)**2/(2*self.c**2))
-
-  def dot_SFR(self,time):
-    a = self.M_inf/(self.c*np.sqrt(np.pi/2))
-    return -a/self.c**2 * (time-self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
-
-  def ddot_SFR(self,time):
-    a = self.M_inf/(self.c*np.sqrt(np.pi/2))
-    return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
-
+    def __init__(self, **kwargs):
+      self.M_inf = kwargs['M_stars']*u.Msun
+      self.tb = kwargs['t']*u.Gyr  # Born time
+      self.c = kwargs['c']*u.Gyr #fwhm
+      ChemicalEvolutionModel.__init__(self, **kwargs)
+    
+    def integral_SFR(self, time):
+      return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
+    
+    def SFR(self, time):
+      a = self.M_inf/(2*self.c*np.sqrt(np.pi/2))
+      return a * np.exp(-(time-self.tb)**2/(2*self.c**2))
+    
+    def dot_SFR(self,time):
+      a = self.M_inf/(self.c*np.sqrt(np.pi/2))
+      return -a/self.c**2 * (time-self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
+    
+    def ddot_SFR(self,time):
+      a = self.M_inf/(self.c*np.sqrt(np.pi/2))
+      return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
+    
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
+    
 class LogNormal_MFH(ChemicalEvolutionModel):
     def __init__(self, alpha : float, z_today : u.Quantity,
                  lnt0: float, scale:float, m_today=1.0 << u.Msun,
