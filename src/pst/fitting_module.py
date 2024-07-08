@@ -67,19 +67,14 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
         fnu = []
-    #    fnu_error = []
-        z_array = Z_i*np.ones(len(t))
         sed = model.compute_SED(SSP = ssp, t_obs = t0)
-        
-    
         for i, filter_name in enumerate(obs_filters):
             photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-            spectra_flambda = ( sed/(4*np.pi*(10*u.pc.to('cm'))*u.cm**2) )
+            spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
             fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err=None)
             fnu.append( fnu_Jy )
-    #        fnu_error.append( fnu_Jy_error )
-            fnu_Jy
         return u.Quantity(fnu)
+
     
     #%% 
     ##################################################################################

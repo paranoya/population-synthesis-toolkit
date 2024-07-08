@@ -95,23 +95,25 @@ class ChemicalEvolutionModel(ABC):
 class Single_burst(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
 
-  def __init__(self, **kwargs):
-    self.M_stars = kwargs['M_stars']
-    self.t = kwargs['t_burst']
-    ChemicalEvolutionModel.__init__(self, **kwargs)
+    def __init__(self, **kwargs):
+        self.M_stars = kwargs['M_stars']*u.Msun
+        self.tb = kwargs['t_burst']*u.Gyr
+        ChemicalEvolutionModel.__init__(self, **kwargs)
 
 # TODO: do this using np.select(); actually, does tb exist at all?
-  def integral_SFR(self, time):
-    M_t = []
-    if type(time)==float:
-        time=[time]
-    for  t in time:
-      if t<=self.tb:
-           M_t.append(0)
-      else:
-          M_t.append( self.M_stars)
-    return M_t
-
+    def integral_SFR(self, time):
+        M_t = []
+        if type(time)==float:
+            time=[time]
+        for  t in time:
+          if t<=self.tb:
+               M_t.append(0)
+          else:
+              M_t.append( 1)
+        return M_t*self.M_stars
+    
+    def integral_Z_SFR(self, time):
+        return self.Z * self.integral_SFR(time)
 #-------------------------------------------------------------------------------
 class Exponential_SFR(ChemicalEvolutionModel):
 #-------------------------------------------------------------------------------
@@ -203,7 +205,7 @@ class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-                spectra_flambda = ( sed/(4*np.pi*(10*u.pc.to('cm'))*u.cm**2) )
+                spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
                 fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err = None)
                 fnu.append( fnu_Jy )
 
@@ -364,8 +366,8 @@ class Gaussian_burst(ChemicalEvolutionModel):
 
     def __init__(self, **kwargs):
       self.M_inf = kwargs['M_stars']*u.Msun
-      self.tb = kwargs['t']*u.Gyr             # Born time
-      self.c = kwargs['c']*u.Gyr # En Myr
+      self.tb = kwargs['t']*u.Gyr  # Born time
+      self.c = kwargs['c']*u.Gyr #fwhm
       ChemicalEvolutionModel.__init__(self, **kwargs)
     
     def integral_SFR(self, time):
