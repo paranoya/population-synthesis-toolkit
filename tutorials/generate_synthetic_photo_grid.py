@@ -15,6 +15,8 @@ from pst.SSP import PopStar
 from pst.dust import DustScreen
 from pst.observables import Filter, load_photometric_filters
 
+from pst.models import Exponential_SFR
+from astropy import units as u
 
 filters = load_photometric_filters(
     ['GALEX_FUV', 'GALEX_NUV', 'Euclid_VIS.vis', 'PANSTARRS_PS1.g',
@@ -48,4 +50,20 @@ plt.pcolormesh(a_v_array, redshift_array,
 plt.colorbar(label=f'PS g - PS r (Z={ssp.metallicities[met_idx]}, age={ssp.ages[age_idx]:.2f})')
 
 
+# =============================================================================
+# Generate the photometry of a SFH model
+# =============================================================================
+sfh_model = Exponential_SFR(M_inf=1.0, tau=3.0, Z=0.02)
+
+weights = sfh_model.interpolate_ssp_masses(ssps[0], t_obs=13.7 * u.Gyr)
+
+sfh_photometry = sfh_model.compute_photometry(ssps[0], t_obs=13.7 * u.Gyr, photometry=all_photometry)
+
+gr = -2.5 * np.log10(sfh_photometry[:, :, 3] / sfh_photometry[:, :, 4])
+
+plt.figure()
+plt.pcolormesh(a_v_array, redshift_array, gr, cmap='nipy_spectral')
+plt.xlabel("Av")
+plt.ylabel("Observed redshift")
+plt.colorbar(label=r'$g-r$')
 

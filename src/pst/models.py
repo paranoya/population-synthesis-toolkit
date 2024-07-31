@@ -73,7 +73,8 @@ class ChemicalEvolutionModel(ABC):
         weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
         weights = weights << u.Msun
         return weights
-        
+    
+    #TODO: This method should be renamed by compute_spectra or compute_L_lambda
     def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
@@ -108,14 +109,48 @@ class ChemicalEvolutionModel(ABC):
                     axis=(0))
         return sed
 
-    def compute_photometry(self, ssp, t_obs, photometry=None):
+    def compute_photometry(self, ssp, t_obs, photometry=None,
+                           allow_negative=True):
+        """
+        Compute the SED of a given model, observed at a given time.
+
+        Description
+        -----------
+        This method computes the spectra energy distribution resulting from the
+        chemical evolution model observed at a given time.
+
+        Parameters
+        ----------
+        - ssp: pst.SSP.SSP
+            The SSP model to used for synthezising the SED.
+        - t_obs: astropy.Quantity
+            Cosmic time at which the galaxy is observed. This will prevent the
+            use the SSP with ages older than `t_obs`.
+        - photometry: np.ndarray
+            Array containing a grid of luminosities in multiple bands. If none,
+            the default SSP photometry will be used. The last two dimensions of
+            the array must be equal to the metallicity and age dimensionality of
+            the SSP model.
+        - allow_negative: bool, default=True
+            Allow for some SSPs to have negative masses during the computation
+            of the resulting SED.
+        
+        Returns
+        -------
+        - sed: astropy.Quantity
+            Spectral energy distribution in the same units as `photometry`.
+        """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
+        if photometry is None:
+            photometry = ssp.photometry
+        if not isinstance(photometry, u.Quantity):
+            print("Assuming input photometry array in Jy/Msun")
+            photometry *= u.Jy / u.Msun
         extra_dim = photometry.ndim - weights.ndim
         if extra_dim > 0:
             new_dims = tuple(np.arange(extra_dim))
             np.expand_dims(weights, new_dims)
-        if photometry is None:
-            photometry = ssp.photometry
+        
         model_photometry = np.sum(photometry * weights, axis=(-1, -2))
         return model_photometry
 
