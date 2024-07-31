@@ -58,7 +58,7 @@ class ChemicalEvolutionModel(ABC):
         z_bin = np.clip(MZ_bin / (M_bin + 1 * u.kg),
                         SSP.metallicities[0],
                         SSP.metallicities[-1]) << u.dimensionless_unscaled
-        sed = np.zeros(SSP.wavelength.size) << u.Lsun / u.Angstrom
+
         weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
         z_indices = np.searchsorted(
             SSP.metallicities, z_bin).clip(
