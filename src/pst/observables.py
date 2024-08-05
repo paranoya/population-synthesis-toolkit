@@ -222,12 +222,12 @@ class Filter(object):
             3630.781 * u.Jy * np.ones(spectra.shape) * constants.c / self.wavelength**2,
             mask_nan=False)
         f_nu = n_photons / norm_photons * 3630.781 * u.Jy
-        f_nu = f_nu.to('Jy')
+        # f_nu = f_nu.to('Jy')
         if spectra_err is None:
             f_nu_err = None
         else:
             f_nu_err = n_photons_err / norm_photons * 3630.781 * u.Jy
-            f_nu_err = f_nu_err.to('Jy')
+            # f_nu_err = f_nu_err.to('Jy')
         return f_nu, f_nu_err
 
     def get_flambda_vegamag(self, spectra, spectra_err=None, mask_nan=True):
