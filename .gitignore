@@ -1,4 +1,5 @@
 src/pst/data/ssp/*
+src/pst/data/filters/*
 tutorials/output/*
 
 # Byte-compiled / optimized / DLL files

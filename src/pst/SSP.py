@@ -310,13 +310,15 @@ class SSPBase(object):
         """
         print("Computing synthetic photometry for SSP model")
         self.photometry = np.zeros((len(filter_list),
-                                    *self.L_lambda.shape[:-1]))
+                                    *self.L_lambda.shape[:-1])) * u.Jy / u.Msun
         self.photometry_filters = filter_list
         for ith, f in enumerate(filter_list):
             f.interpolate(self.wavelength * (1 + z_obs))
-            self.photometry[ith], _ = f.get_fnu(
+            flux, _ = f.get_fnu(
                     self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
                     mask_nan=False)
+            self.photometry[ith] = flux.to('Jy') / u.Msun
+        return self.photometry
 
     def copy(self):
         """Return a copy of the SSP model."""
