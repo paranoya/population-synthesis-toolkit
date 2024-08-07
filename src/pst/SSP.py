@@ -437,6 +437,84 @@ class PyPopStar(SSPBase):
         # Avoid 0 flux
         self.L_lambda[self.L_lambda <= 0] += self.L_lambda[self.L_lambda > 0].min()
 
+
+class BC03_2013(SSPBase):
+
+    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+     # Padova1994
+    'm22': 0.0001,
+    'm32': 0.0004,
+    'm42': 0.004,
+    'm52': 0.008,
+    'm62': 0.02,
+    'm72': 0.05,
+    'm82': 0.1}
+    resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
+    
+    def __init__(self, isochrone='Padova1994', model='BaSeL',
+                 imf='Chabrier', path=None) -> None:
+        self.isochrone = isochrone
+        self.model, model_key = self.parse_model(model)
+        self.imf, imf_key = self.parse_imf(imf)
+
+        if path is None:
+            self.path = os.path.join(self.default_path,
+                                     'BC03', 'bc03_2013ver', "bc03",
+                                     self.isochrone, self.imf)
+        else:
+            self.path = path
+
+        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        self.metallicities = np.array(list(self.metallicity_map.values())
+                                      ) * units.dimensionless_unscaled
+        self.ages = np.loadtxt(
+            os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
+            ) * units.yr
+
+        self.log_ages_yr = np.log10(self.ages / units.yr)
+
+        load_wavelength = False
+        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+            fits_path = os.path.join(
+                self.path, f"bc2003_{self.resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+            table = Table.read(fits_path)
+            if not load_wavelength:
+                self.wavelength = table['wavelength'].value * u.angstrom
+                self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
+                                          self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
+                load_wavelength = True
+            table.remove_column("wavelength")
+            for j, column in enumerate(table.itercols()):
+                self.L_lambda[i, j] = column.value * self.L_lambda.unit
+
+    def parse_model(self, model):
+        if 'basel' in model.lower():
+            model = 'BaSeL'
+            key = 'BaSeL'
+        elif 'stelib' in model.lower():
+            model = 'stelib'
+            key = 'stelib'
+        else:
+            raise NameError(f"Unrecognized model: {model}.\n"
+                             + "Select Basel, Stelib, Miles")
+        return model, key
+
+    def parse_imf(self, imf):
+        if 'cha' in imf.lower():
+            imf = 'chabrier'
+            key = 'chab'
+        elif 'sal' in imf.lower():
+            imf = 'salpeter'
+            key = 'salp'
+        elif 'kro' in imf.lower():
+            imf = 'kroupa'
+            key = 'kro'
+        else:
+            raise NameError(f"Unrecognized IMF: {imf}.\n"
+                             + "Select Chabrier, Salpeter or Kroupa")
+        return imf, key
+
+
 class BC03_2016(SSPBase):
 
     metallicity_map = {                                                                                                                                                                                                                                                                                                  
