@@ -8,6 +8,7 @@ import pst
 from scipy import interpolate
 from abc import ABC, abstractmethod
 
+
 class ChemicalEvolutionModel(ABC):
     """TODO
 
@@ -25,6 +26,55 @@ class ChemicalEvolutionModel(ABC):
         self.M_gas = kwargs.get('M_gas', 0*u.Msun)
         self.Z = kwargs.get('Z', 0.02)
 
+    def interpolate_ssp_masses(self, SSP: pst.SSP.SSPBase, t_obs: u.Quantity):
+        """Interpolate the star formation history to compute the SSP stellar massess.
+
+        Description
+        -----------
+        This method computes the spectra energy distribution resulting from the
+        chemical evolution model observed at a given time.
+
+        Parameters
+        ----------
+        - SSP: pst.SSP.SSP
+            The SSP model to used for synthezising the SED.
+        - t_obs: astropy.Quantity
+            Cosmic time at which the galaxy is observed. This will prevent the
+            use the SSP with ages older than `t_obs`.
+
+        Returns
+        -------
+        - masses: astropy.Quantity
+            Corresponding stellar mass of each SSP.
+        """
+        age_bins = np.hstack(
+            [0 << u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 << u.yr])
+        t_bins = t_obs - age_bins
+        t_bins = t_bins[t_bins >= 0]
+        M_t = self.integral_SFR(t_bins)
+        M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
+        MZ_t = self.integral_Z_SFR(t_bins)
+        MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
+        z_bin = np.clip(MZ_bin / (M_bin + 1 * u.kg),
+                        SSP.metallicities[0],
+                        SSP.metallicities[-1]) << u.dimensionless_unscaled
+
+        weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
+        z_indices = np.searchsorted(
+            SSP.metallicities, z_bin).clip(
+            min=1, max=SSP.metallicities.size - 1)
+        t_indices = np.arange(0, M_bin.size, dtype=int)
+        weight_Z = np.log(
+                    z_bin / SSP.metallicities[z_indices - 1]) / np.log(
+                    SSP.metallicities[z_indices] / SSP.metallicities[z_indices-1]
+                    )
+        weights[z_indices, t_indices] = weight_Z
+        weights[z_indices - 1, t_indices] = 1 - weight_Z
+        weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
+        weights = weights << u.Msun
+        return weights
+    
+    #TODO: This method should be renamed by compute_spectra or compute_L_lambda
     def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
@@ -50,31 +100,7 @@ class ChemicalEvolutionModel(ABC):
         - sed: astropy.Quantity
             Spectral energy distribution in the same units as `SSP.L_lambda`.
         """
-        age_bins = np.hstack(
-            [0 << u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 << u.yr])
-        t_bins = t_obs - age_bins
-        t_bins = t_bins[t_bins >= 0]
-        M_t = self.integral_SFR(t_bins)
-        M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
-        MZ_t = self.integral_Z_SFR(t_bins)
-        MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
-        z_bin = np.clip(MZ_bin / (M_bin + 1 * u.kg),
-                        SSP.metallicities[0],
-                        SSP.metallicities[-1]) << u.dimensionless_unscaled
-        sed = np.zeros(SSP.wavelength.size) << u.Lsun / u.Angstrom
-        weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
-        z_indices = np.searchsorted(
-            SSP.metallicities, z_bin).clip(
-            min=1, max=SSP.metallicities.size - 1)
-        t_indices = np.arange(0, M_bin.size, dtype=int)
-        weight_Z = np.log(
-                    z_bin / SSP.metallicities[z_indices - 1]) / np.log(
-                    SSP.metallicities[z_indices] / SSP.metallicities[z_indices-1]
-                    )
-        weights[z_indices, t_indices] = weight_Z
-        weights[z_indices - 1, t_indices] = 1 - weight_Z
-        weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
-        weights = weights << u.Msun
+        weights = self.interpolate_ssp_masses(SSP, t_obs)
         if not allow_negative:
             mask = (weights > 0) & np.isfinite(weights)
         else:
@@ -82,6 +108,51 @@ class ChemicalEvolutionModel(ABC):
         sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
                     axis=(0))
         return sed
+
+    def compute_photometry(self, ssp, t_obs, photometry=None,
+                           allow_negative=True):
+        """
+        Compute the SED of a given model, observed at a given time.
+
+        Description
+        -----------
+        This method computes the spectra energy distribution resulting from the
+        chemical evolution model observed at a given time.
+
+        Parameters
+        ----------
+        - ssp: pst.SSP.SSP
+            The SSP model to used for synthezising the SED.
+        - t_obs: astropy.Quantity
+            Cosmic time at which the galaxy is observed. This will prevent the
+            use the SSP with ages older than `t_obs`.
+        - photometry: np.ndarray
+            Array containing a grid of luminosities in multiple bands. If none,
+            the default SSP photometry will be used. The last two dimensions of
+            the array must be equal to the metallicity and age dimensionality of
+            the SSP model.
+        - allow_negative: bool, default=True
+            Allow for some SSPs to have negative masses during the computation
+            of the resulting SED.
+        
+        Returns
+        -------
+        - sed: astropy.Quantity
+            Spectral energy distribution in the same units as `photometry`.
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        if photometry is None:
+            photometry = ssp.photometry
+        if not isinstance(photometry, u.Quantity):
+            print("Assuming input photometry array in Jy/Msun")
+            photometry *= u.Jy / u.Msun
+        extra_dim = photometry.ndim - weights.ndim
+        if extra_dim > 0:
+            new_dims = tuple(np.arange(extra_dim))
+            np.expand_dims(weights, new_dims)
+        
+        model_photometry = np.sum(photometry * weights, axis=(-1, -2))
+        return model_photometry
 
     @abstractmethod
     def integral_SFR(self):
