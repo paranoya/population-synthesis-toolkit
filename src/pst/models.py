@@ -612,6 +612,81 @@ class Tabular_MFH(ChemicalEvolutionModel):
     def ddot_SFR(self, times):
         return np.interp(times, self.table_t, self.table_ddot_SFR, left=0, right=0)
 
+    def interpolate_ssp_masses_new(self, ssp: pst.SSP.SSPBase, t_obs: u.Quantity):
+        """Interpolate the star formation history to compute the SSP stellar massess.
+
+        Description
+        -----------
+        This method computes the spectra energy distribution resulting from the
+        chemical evolution model observed at a given time.
+
+        Parameters
+        ----------
+        - SSP: pst.SSP.SSP
+            The SSP model to used for synthezising the SED.
+        - t_obs: astropy.Quantity
+            Cosmic time at which the galaxy is observed. This will prevent the
+            use the SSP with ages older than `t_obs`.
+
+        Returns
+        -------
+        - masses: astropy.Quantity
+            Corresponding stellar mass of each SSP.
+        """
+        age_bins = np.hstack(
+            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
+        t_bins = t_obs - age_bins
+        # Discard those SSPs older than t_obs
+        valid_bins = t_bins >= 0
+        t_bins = t_bins[valid_bins]
+
+
+        met_matrix = np.zeros((ssp.metallicities.size, self.Z.size))
+        idx = np.arange(0, met_matrix.shape[1])
+        met_bins = np.searchsorted(ssp.metallicities, self.Z, side='right')
+        met_bins = met_bins.clip(min=1, max=ssp.metallicities.size - 1)
+        
+        int_z_history = self.Z.clip(min=ssp.metallicities[0].value,
+                                    max=ssp.metallicities[-1].value)
+        
+        weight_Z = np.log(
+                        int_z_history / ssp.metallicities.value[met_bins - 1]) / np.log(
+                        ssp.metallicities.value[met_bins] / ssp.metallicities.value[met_bins-1]
+                        )
+        # Clip negative values close to zero due to numerical errors
+        weight_Z = weight_Z.clip(min=0, max=1)
+        
+        met_matrix[met_bins, idx] = weight_Z
+        met_matrix[met_bins - 1, idx] = 1 - weight_Z
+        
+        met_matrix[0, met_bins == 0] = 1
+        met_matrix[-1, met_bins == ssp.metallicities.size] = 1
+        
+        cum_met_matrix = np.cumsum(met_matrix, axis=1)
+
+        interpolator = interpolate.interp1d(self.table_t, cum_met_matrix,
+                                            fill_value=(
+                                                np.zeros(cum_met_matrix.shape[0]),
+                                                cum_met_matrix[:, -1]),
+                                            kind="linear",
+                                            bounds_error=False,
+                                            axis=1)
+        
+        cum_z_mat = interpolator(t_bins.value)
+        z_weights = np.hstack((cum_z_mat[:, :-1] - cum_z_mat[:, 1:],
+                               cum_z_mat[:, -1][:, np.newaxis]))
+        # Renormalize across metallicity axis
+        z_weights = np.clip(z_weights, a_min=0, a_max=None)
+        z_weights /= np.sum(z_weights, axis=0)
+        z_weights = np.nan_to_num(z_weights, nan=0.0)
+        
+        M_t = self.integral_SFR(t_bins)
+        M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
+
+        weights = np.zeros((ssp.metallicities.size, ssp.ages.size))
+        t_indices = np.arange(0, M_bin.size, dtype=int)
+        weights[:, t_indices] = z_weights * M_bin[np.newaxis, :]
+        return weights << u.Msun
 
 class Tabular_ZPowerLaw(Tabular_MFH):
     """Chemical evolution model based on a grid of times and metallicities.
