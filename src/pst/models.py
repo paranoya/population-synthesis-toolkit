@@ -612,7 +612,7 @@ class Tabular_MFH(ChemicalEvolutionModel):
     def ddot_SFR(self, times):
         return np.interp(times, self.table_t, self.table_ddot_SFR, left=0, right=0)
 
-    def interpolate_ssp_masses_new(self, ssp: pst.SSP.SSPBase, t_obs: u.Quantity):
+    def interpolate_ssp_masses(self, ssp: pst.SSP.SSPBase, t_obs: u.Quantity):
         """Interpolate the star formation history to compute the SSP stellar massess.
 
         Description
