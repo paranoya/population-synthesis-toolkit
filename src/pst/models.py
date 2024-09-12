@@ -63,7 +63,7 @@ class ChemicalEvolutionModel(ABC):
 
         weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
         z_indices = np.searchsorted(
-            SSP.metallicities, z_bin).clip(
+            SSP.metallicities, z_bin, side="right").clip(
             min=1, max=SSP.metallicities.size - 1)
         t_indices = np.arange(0, M_bin.size, dtype=int)
         weight_Z = np.log(
@@ -517,11 +517,11 @@ class Tabular_MFH(ChemicalEvolutionModel):
     - table_M: astropy.Quantity
         Total stellar mass at each cosmic time step.
     - Z: astropy.Quantity
-        Average stellar metallicity at each cosmic time step.
+        Gas metallicity at each cosmic time step.
 
-    Methods
-    -------
-    See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
+    See also
+    --------
+    :class:`pst.models.ChemicalEvolutionModel` documentation.
 
     """
     def __init__(self, times, masses, **kwargs):
