@@ -8,6 +8,8 @@ import pst
 from scipy import interpolate
 from abc import ABC, abstractmethod
 
+from pst.SSP import SSPBase
+
 
 class ChemicalEvolutionModel(ABC):
     """TODO
@@ -787,7 +789,107 @@ class ASCII_file(ChemicalEvolutionModel):
     #plt.show()
 
 
+class SSPDataCEM(ChemicalEvolutionModel):
+    """A Chemical Evolution Model using a individual SSP data.
+    
+    Description
+    -----------
+    This CEM uses indiviudal SSP to reconstruct the CSP.
+
+    Attributes
+    ----------
+    ages : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the age (i.e. formation lookback time) of each SSP particle.
+        If the ``type`` is ``numpy.array``, units are assumed to be in Gyr.
+    metallicities : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the metallicity of each SSP particle. If the ``type`` is
+        ``numpy.array``, ``astropy.units.dimensionless_unscaled`` is used as unit.
+    masses : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the mass of each SSP particle. If the ``type`` is
+        ``numpy.array``, units are assumed to be in solar masses.
+    """
+    def __init__(self, ages, metallicities, masses, today=13.7 * u.Gyr):
+        self.ages, self.metallicities, self.masses = ages, metallicities, masses
+
+    @property
+    def ages(self):
+        return self._ages
+
+    @ages.setter
+    def ages(self, values):
+        if not isinstance(values, u.Quantity):
+            self._ages = values >> u.Gyr
+        else:
+            self._ages = values
+
+    @property
+    def metallicities(self):
+        return self._metallicities
+
+    @metallicities.setter
+    def metallicities(self, values):
+        if not isinstance(values, u.Quantity):
+            self._metallicities = values >> u.dimensionless_unscaled
+        else:
+            self._metallicities = values
+
+    @property
+    def masses(self):
+        return self._masses
+
+    @masses.setter
+    def masses(self, values):
+        if not isinstance(values, u.Quantity):
+            self._masses = values >> u.Msun
+        else:
+            self._masses = values
+
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
+        valid_particles = self.ages <= t_obs
+        particle_ages = self.ages[valid_particles].to_value("Gyr")
+        particle_metallicity = self.metallicities[valid_particles].clip(
+            ssp.metallicities.value[0], ssp.metallicities.value[-1]).value
+
+        age_idx = np.searchsorted(ssp.ages.to_value("Gyr"), particle_ages,
+                                  side="right").clip(min=1, max=ssp.ages.size - 1)
+        metalliticy_idx = np.searchsorted(ssp.metallicities.value,
+                                          particle_metallicity,
+                                          side="right").clip(min=1, max=ssp.metallicities.size - 1)
+        # Interpolation weights of the right element
+        weight_Z = np.log(
+                    self.metallicities / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
+                    ssp.metallicities.value[metalliticy_idx] / ssp.metallicities.value[metalliticy_idx - 1]
+                    )
+        weight_age = (self.ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
+                    ssp.ages.to_value('Gyr')[age_idx] - ssp.ages.to_value('Gyr')[age_idx - 1]
+                    )
+        weights = np.zeros(ssp.L_lambda.shape[:-1]) >> self.masses.unit
+        weights[metalliticy_idx, age_idx] = weight_Z * weight_age * self.masses
+        weights[metalliticy_idx - 1, age_idx] = (1 - weight_Z) * weight_age * self.masses
+        weights[metalliticy_idx - 1, age_idx - 1] = (1 - weight_Z) * (1 - weight_age) * self.masses
+        weights[metalliticy_idx, age_idx - 1] = weight_Z * (1 - weight_age) * self.masses
+
+        return weights
+
+    def integral_SFR(self, time):
+        t = self.today - self.ages
+        good_particles = t >= 0
+        sort_idx = np.argsort(t[good_particles])
+        mass_history = np.cumsum(self.masses[good_particles][sort_idx])
+        return np.interp(time, t[good_particles][sort_idx], mass_history)
+
+    def integral_SFR(self, time):
+        t = self.today - self.ages
+        good_particles = t >= 0
+        sort_idx = np.argsort(t[good_particles])
+        z_mass_history = np.cumsum(self.masses[good_particles][sort_idx]
+                                 * self.metallicities[good_particles][sort_idx])
+        mass_history = np.cumsum(self.masses[good_particles][sort_idx])
+        z_history = z_mass_history / mass_history
+        return np.interp(time, t[good_particles][sort_idx], z_history)
+
 # %%
 # -----------------------------------------------------------------------------
 #                                                    ... Paranoy@ Rulz! ;^D
+# Mr Krtxo \(ﾟ▽ﾟ)/
 # -----------------------------------------------------------------------------
