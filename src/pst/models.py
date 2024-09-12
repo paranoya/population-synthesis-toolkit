@@ -789,7 +789,7 @@ class ASCII_file(ChemicalEvolutionModel):
     #plt.show()
 
 
-class SSPDataCEM(ChemicalEvolutionModel):
+class SSPGridCEM(ChemicalEvolutionModel):
     """A Chemical Evolution Model using a individual SSP data.
     
     Description
@@ -845,8 +845,23 @@ class SSPDataCEM(ChemicalEvolutionModel):
             self._masses = values
 
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
+        """Interpolate the particles to a base of SSPs.
+        
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            A SSP model.
+        t_obs : :class:`astropy.units.Quantity`
+            The age of the Universe at the time of the observation.
+        
+        Returns
+        -------
+        ssp_weights : :class:`astropy.units.Quantity`
+            A 2D array containing the stellar mass associated to each SSP.
+        """
         valid_particles = self.ages <= t_obs
-        particle_ages = self.ages[valid_particles].to_value("Gyr")
+        particle_ages = self.ages[valid_particles].to_value("Gyr").clip(
+            ssp.ages.to_value('Gyr').min(), ssp.ages.to_value('Gyr').max())
         particle_metallicity = self.metallicities[valid_particles].clip(
             ssp.metallicities.value[0], ssp.metallicities.value[-1]).value
 
@@ -857,17 +872,18 @@ class SSPDataCEM(ChemicalEvolutionModel):
                                           side="right").clip(min=1, max=ssp.metallicities.size - 1)
         # Interpolation weights of the right element
         weight_Z = np.log(
-                    self.metallicities / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
+                    particle_metallicity / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
                     ssp.metallicities.value[metalliticy_idx] / ssp.metallicities.value[metalliticy_idx - 1]
                     )
-        weight_age = (self.ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
+        weight_age = (particle_ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
                     ssp.ages.to_value('Gyr')[age_idx] - ssp.ages.to_value('Gyr')[age_idx - 1]
                     )
+
         weights = np.zeros(ssp.L_lambda.shape[:-1]) >> self.masses.unit
-        weights[metalliticy_idx, age_idx] = weight_Z * weight_age * self.masses
-        weights[metalliticy_idx - 1, age_idx] = (1 - weight_Z) * weight_age * self.masses
-        weights[metalliticy_idx - 1, age_idx - 1] = (1 - weight_Z) * (1 - weight_age) * self.masses
-        weights[metalliticy_idx, age_idx - 1] = weight_Z * (1 - weight_age) * self.masses
+        weights[metalliticy_idx, age_idx] = weight_Z * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx] = (1 - weight_Z) * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx - 1] = (1 - weight_Z) * (1 - weight_age) * self.masses[valid_particles]
+        weights[metalliticy_idx, age_idx - 1] = weight_Z * (1 - weight_age) * self.masses[valid_particles]
 
         return weights
 
