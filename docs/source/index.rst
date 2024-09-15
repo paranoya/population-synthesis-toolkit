@@ -13,6 +13,7 @@ Welcome to PST's Documentation
    :caption: Contents:
 
    api
+   get_ssp_data
 
 Indices and tables
 ==================
