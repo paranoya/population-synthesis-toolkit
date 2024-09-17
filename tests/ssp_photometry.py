@@ -8,15 +8,12 @@ import os
 from time import time
 
 ssp = PyPopStar(IMF='KRO')
-ssp_original = ssp.copy()
-
-ssp.interpolate_sed(np.arange(900, 11000, 3) * u.angstrom)
-#ssp = BaseGM()
 t_in = time()
-_ = ssp.copy()
+ssp_original = ssp.copy()
 t_end = time()
 print("time spent copying the ssp: ", t_end - t_in)
 
+ssp.interpolate_sed(np.arange(900, 11000, 3) * u.angstrom)
 
 def prepare_photometric_filters(filters):
     filters_out = []
