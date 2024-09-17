@@ -152,19 +152,9 @@ class Filter(object):
     def interpolate(self, wavelength=None):
         """Interpolate a filter response curve to an input wavelength."""
         if not hasattr(wavelength, "unit"):
-            wavelength *= u.angstrom
-        self.response = np.zeros(wavelength.size)
-        wave_limits = 1.5 * self.filter_wavelength[[0, -1]] - 0.5 * self.filter_wavelength[[1, -2]]
-        wave_edges = np.hstack(
-            [wave_limits[0], (self.filter_wavelength[1:] + self.filter_wavelength[:-1])/2, wave_limits[1]])
-        idx = np.searchsorted(wave_edges, wavelength, side="right") - 1
-        values_in = (idx > 0) & (idx < self.filter_wavelength.size)
-        self.response[values_in] = self.filter_resp[idx[values_in]]
-
+            wavelength = wavelength << u.angstrom
         self.response = utils.flux_conserving_interpolation(
             wavelength, self.filter_wavelength, self.filter_resp)
-        # self.response = np.interp(wavelength, self.filter_wavelength,
-        #                          self.filter_resp)
         self.wavelength= wavelength
         return self.response
 
