@@ -21,19 +21,15 @@ class SSPBase(object):
 
     Attributes
     ----------
-    - ages: astropy.units.Quantity
+    ages: astropy.units.Quantity
         Ages of the SSPs.
-    - metallicities: astropy.units.Quantity
+    metallicities: astropy.units.Quantity
         Metallicities of the SSPs.
-    - L_lambda: astropy.units.Quantity
+    L_lambda: astropy.units.Quantity
         Spectral energy distribution of each SSP. Each dimension correspond to
         (metallicity, ages, wavelength).
-    - wavelength: astroy.units.Quantity
+    wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
-    
-    Methods
-    -------
-    #TODO
     """
     default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
 
