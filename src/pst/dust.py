@@ -2,7 +2,7 @@ from astropy import units as u
 import numpy as np
 import extinction
 
-from abc import ABC, abstractclassmethod
+from abc import ABC, abstractmethod
 
 
 class DustModelBase(ABC):
@@ -18,11 +18,11 @@ class DustModelBase(ABC):
         `extinction` library.
     """
 
-    @abstractclassmethod
+    @abstractmethod
     def get_extinction(self, *args, **kwargs):
         pass
 
-    @abstractclassmethod
+    @abstractmethod
     def get_emission(self, *args, **kwargs):
         pass
 
