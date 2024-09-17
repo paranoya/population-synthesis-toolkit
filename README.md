@@ -1,6 +1,6 @@
 # Population Synthesis Toolkit (PST)
 
-[Documentation](https://population-synthesis-toolkit.readthedocs.io/en/latest/)
+[Documentation page](https://population-synthesis-toolkit.readthedocs.io/en/latest/)
 
 ## Status
 [![Documentation Status](https://readthedocs.org/projects/population-synthesis-toolkit/badge/?version=latest)](https://population-synthesis-toolkit.readthedocs.io/en/latest/?badge=latest)
@@ -19,7 +19,6 @@ websites.
 
 - [(Py)PopStar](https://www.fractal-es.com/PopStar)
 
-- [XSL](http://xsl.u-strasbg.fr/page_ssp_all.html)
+- [Bruzual&Charlote2003](http://www.bruzual.org/bc03/)
 
-# Observables
-- Synthetic photometry
+- [XSL](http://xsl.u-strasbg.fr/page_ssp_all.html)
