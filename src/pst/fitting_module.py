@@ -1,8 +1,5 @@
-# -*- coding: utf-8 -*-
 """
-Created on Wed Jul 27 16:17:01 2022
 
-@author: Propietario
 """
 import numpy as np
 from astropy import units as u
