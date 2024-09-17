@@ -13,6 +13,10 @@ from astropy import constants
 
 from scipy import interpolate
 
+from matplotlib import pyplot as plt
+
+from . import utils
+
 def list_of_available_filters():
     filter_dir = os.path.join(os.path.dirname(__file__),
                               "data", "filters")
@@ -149,10 +153,18 @@ class Filter(object):
         """Interpolate a filter response curve to an input wavelength."""
         if not hasattr(wavelength, "unit"):
             wavelength *= u.angstrom
+        self.response = np.zeros(wavelength.size)
+        wave_limits = 1.5 * self.filter_wavelength[[0, -1]] - 0.5 * self.filter_wavelength[[1, -2]]
+        wave_edges = np.hstack(
+            [wave_limits[0], (self.filter_wavelength[1:] + self.filter_wavelength[:-1])/2, wave_limits[1]])
+        idx = np.searchsorted(wave_edges, wavelength, side="right") - 1
+        values_in = (idx > 0) & (idx < self.filter_wavelength.size)
+        self.response[values_in] = self.filter_resp[idx[values_in]]
 
-        self.response = np.interp(wavelength,
-                                  self.filter_wavelength, self.filter_resp,
-                                  left=0, right=0)
+        self.response = utils.flux_conserving_interpolation(
+            wavelength, self.filter_wavelength, self.filter_resp)
+        # self.response = np.interp(wavelength, self.filter_wavelength,
+        #                          self.filter_resp)
         self.wavelength= wavelength
         return self.response
 
@@ -244,6 +256,20 @@ class Filter(object):
 
         return av_f_lambda, av_f_lambda_err
 
+    def plot(self):
+        """Plot the filter response curve."""
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.step(self.filter_wavelength, self.filter_resp, label='Original',
+                color='k', where="mid")
+        ax.plot(self.filter_wavelength, self.filter_resp, '.', color='k')
+        ax.set_xlabel(f"Wavelength ({self.filter_wavelength.unit})")
+        ax.set_ylabel("Filter response")
+        if self.wavelength is not None:
+            ax.step(self.wavelength, self.response, label='Interpolated',
+                      color='r', where="mid")
+        ax.legend()
+        return fig
 
 class TopHatFilter(Filter):
     """Top hat photometric filter"""
