@@ -8,8 +8,24 @@ from astropy import units as u
 from astropy import constants
 import requests
 import json
+from matplotlib import pyplot as plt
+from . import utils
 
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+def list_of_available_filters():
+    filter_dir = os.path.join(os.path.dirname(__file__),
+                              "data", "filters")
+#    print(f"Checking filters available at {filter_dir}")
+    return os.listdir(filter_dir)
+
+def find_filt_from_name(name):
+    filters = list_of_available_filters()
+    for f in filters:
+        if name.lower() in f.strip(".dat").lower():
+            return os.path.join(os.path.dirname(__file__),
+                              "data", "filters", f)
+    return None
 
 def load_photometric_filters(filters):
     """Convenience function for constructing a list of photometric filters.
@@ -273,19 +289,8 @@ class Filter(object):
         if not hasattr(wavelength, "unit"):
             wavelength = wavelength << u.angstrom
 
-        delta_wl = wavelength[1:] - wavelength[:-1]
-        wavelength_edges = np.zeros((wavelength.size + 1)
-                                    ) * wavelength.unit
-        wavelength_edges[1:-1] = wavelength[1:] - delta_wl / 2
-        wavelength_edges[0] = wavelength[0] - delta_wl[0] / 2
-        wavelength_edges[-1] = wavelength[-1] + delta_wl[-1] / 2
-        
-        cumulative_trans_curve = np.cumsum(self.filter_resp)
-        interp_cum_trans_curve = np.interp(wavelength_edges,
-                                           self.filter_wavelength,
-                                           cumulative_trans_curve)
-
-        self.response = np.diff(interp_cum_trans_curve)
+        self.response = utils.flux_conserving_interpolation(
+            wavelength, self.filter_wavelength, self.filter_resp)
         self.wavelength= wavelength
         return self.response
 
@@ -478,6 +483,20 @@ class Filter(object):
 
         return f_lambda, f_lambda_err
 
+    def plot(self):
+        """Plot the filter response curve."""
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.step(self.filter_wavelength, self.filter_resp, label='Original',
+                color='k', where="mid")
+        ax.plot(self.filter_wavelength, self.filter_resp, '.', color='k')
+        ax.set_xlabel(f"Wavelength ({self.filter_wavelength.unit})")
+        ax.set_ylabel("Filter response")
+        if self.wavelength is not None:
+            ax.step(self.wavelength, self.response, label='Interpolated',
+                      color='r', where="mid")
+        ax.legend()
+        return fig
 
 class TopHatFilter(Filter):
     """Top hat photometric filter

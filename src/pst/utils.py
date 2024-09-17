@@ -16,7 +16,10 @@ def flux_conserving_interpolation(new_wave, wave, spectra):
 
     new_wave_limits = 1.5 * new_wave[[0, -1]] - 0.5 * new_wave[[1, -2]]
     new_wave_edges = np.hstack([new_wave_limits[0], (new_wave[1:] + new_wave[:-1])/2, new_wave_limits[1]])
-    interp_spectra = np.diff(np.interp(new_wave_edges, wave, np.cumsum(spectra * np.diff(wave_edges)))) / np.diff(new_wave_edges)
+    cumulative_spectra = np.cumsum(spectra * np.diff(wave_edges))
+    cumulative_spectra = np.insert(cumulative_spectra, 0, 0)
+    new_cumulative_spectra = np.interp(new_wave_edges, wave_edges, cumulative_spectra)
+    interp_spectra = np.diff(new_cumulative_spectra) / np.diff(new_wave_edges)
     return interp_spectra
 
 def gaussian1d_conv(f, sigma, deltax):
