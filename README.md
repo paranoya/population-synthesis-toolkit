@@ -2,6 +2,10 @@
 
 [Documentation](https://population-synthesis-toolkit.readthedocs.io/en/latest/)
 
+## Status
+[![Documentation Status](https://readthedocs.org/projects/population-synthesis-toolkit/badge/?version=latest)](https://population-synthesis-toolkit.readthedocs.io/en/latest/?badge=latest)
+
+
 # Stellar population synthesis
 PST provides the tools for performing stellar population synthesis and computing
 composite stellar populations (CSP) spectra.
