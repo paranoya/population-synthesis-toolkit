@@ -18,31 +18,31 @@ sys.path.insert(0, os.path.abspath(
     )
 
 
-# Avoid build failures on read the docs
-try:
-    import numpy
-except ImportError:
-    from mock import MagicMock
+# # Avoid build failures on read the docs
+# try:
+#     import numpy
+# except ImportError:
+#     from mock import MagicMock
 
-    MOCK_MODULES = [
-        'numpy',
-        'astropy',
-        'astropy.convolution',
-        'astropy.io',
-        'astropy.wcs',
-        'matplotlib',
-        'matplotlib.colors',
-        'matplotlib.pyplot',
-        'synphot',
-        'scipy',
-        'scipy.ndimage',
-        'scipy.ndimage.interpolation',
-        'scipy.optimize',
-        'scipy.signal',
-        "past",
-        "past.utils"
-    ]
-    sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
+#     MOCK_MODULES = [
+#         'numpy',
+#         'astropy',
+#         'astropy.convolution',
+#         'astropy.io',
+#         'astropy.wcs',
+#         'matplotlib',
+#         'matplotlib.colors',
+#         'matplotlib.pyplot',
+#         'synphot',
+#         'scipy',
+#         'scipy.ndimage',
+#         'scipy.ndimage.interpolation',
+#         'scipy.optimize',
+#         'scipy.signal',
+#         "past",
+#         "past.utils"
+#     ]
+#     sys.modules.update((mod_name, MagicMock()) for mod_name in MOCK_MODULES)
 
 
 
