@@ -9,6 +9,8 @@ Created on Sun Jun  5 16:18:39 2022
 import numpy as np
 from matplotlib import pyplot as plt
 
+from astropy import units as u
+
 def flux_conserving_interpolation(new_wave, wave, spectra):
     """Interpolate a spectra to a new grid of wavelengths preserving the flux density."""
     wave_limits = 1.5 * wave[[0, -1]] - 0.5 * wave[[1, -2]]
@@ -50,6 +52,19 @@ def gaussian1d_conv(f, sigma, deltax):
             f_convolved[pixel] = np.sum(f * g)
     return f_convolved
 
+def check_unit(self, quantity, default_unit=None):
+    """Check the units of an input quantity"""
+    isq = isinstance(quantity, u.Quantity)
+    if isq and default_unit is not None:
+        if not quantity.is_equivalent(default_unit):
+            raise u.UnitTypeError(
+                "Input quantity does not have the appropriate units")
+    elif not isq and default_unit is not None:
+        return quantity * default_unit
+    elif not isq and default_unit is None:
+        raise ValueError("Input value must be a astropy.units.Quantity")
+    else:
+        return quantity
 
 if __name__ == '__main__':
     # Small test
