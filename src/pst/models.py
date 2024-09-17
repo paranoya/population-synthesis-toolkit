@@ -8,6 +8,8 @@ import pst
 from scipy import interpolate
 from abc import ABC, abstractmethod
 
+from pst.SSP import SSPBase
+
 
 class ChemicalEvolutionModel(ABC):
     """TODO
@@ -787,7 +789,118 @@ class ASCII_file(ChemicalEvolutionModel):
     #plt.show()
 
 
+class ParticleGridCEM(ChemicalEvolutionModel):
+    """A Chemical Evolution Model using a individual SSP data.
+    
+    Description
+    -----------
+    This CEM uses indiviudal SSP to reconstruct the CSP.
+
+    Attributes
+    ----------
+    time_form : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the cosmic formation time of each SSP particle.
+        If the ``type`` is ``numpy.array``, units are assumed to be in Gyr.
+    metallicities : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the metallicity of each SSP particle. If the ``type`` is
+        ``numpy.array``, ``astropy.units.dimensionless_unscaled`` is used as unit.
+    masses : :class:`numpy.array` or :class:`astropy.units.Quantity`
+        Vector containing the mass of each SSP particle. If the ``type`` is
+        ``numpy.array``, units are assumed to be in solar masses.
+    """
+    def __init__(self, time_form, metallicities, masses):
+        self.time_form, self.metallicities, self.masses = (
+            time_form, metallicities, masses)
+
+    @property
+    def time_form(self):
+        return self._time_form
+
+    @time_form.setter
+    def time_form(self, values):
+        if not isinstance(values, u.Quantity):
+            self._time_form = values << u.Gyr
+        else:
+            self._time_form = values
+
+    @property
+    def metallicities(self):
+        return self._metallicities
+
+    @metallicities.setter
+    def metallicities(self, values):
+        if not isinstance(values, u.Quantity):
+            self._metallicities = values << u.dimensionless_unscaled
+        else:
+            self._metallicities = values
+
+    @property
+    def masses(self):
+        return self._masses
+
+    @masses.setter
+    def masses(self, values):
+        if not isinstance(values, u.Quantity):
+            self._masses = values << u.Msun
+        else:
+            self._masses = values
+
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
+        """Interpolate the particles to a base of SSPs.
+        
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            A SSP model.
+        t_obs : :class:`astropy.units.Quantity`
+            The age of the Universe at the time of the observation.
+        
+        Returns
+        -------
+        ssp_weights : :class:`astropy.units.Quantity`
+            A 2D array containing the stellar mass associated to each SSP.
+        """
+        valid_particles = self.time_form <= t_obs
+        particle_ages = (t_obs - self.time_form[valid_particles]).to_value("Gyr").clip(
+            ssp.ages.to_value('Gyr').min(), ssp.ages.to_value('Gyr').max())
+        particle_metallicity = self.metallicities[valid_particles].clip(
+            ssp.metallicities.value[0], ssp.metallicities.value[-1]).value
+
+        age_idx = np.searchsorted(ssp.ages.to_value("Gyr"), particle_ages,
+                                  side="right").clip(min=1, max=ssp.ages.size - 1)
+        metalliticy_idx = np.searchsorted(ssp.metallicities.value,
+                                          particle_metallicity,
+                                          side="right").clip(min=1, max=ssp.metallicities.size - 1)
+        # Interpolation weights of the right element
+        weight_Z = np.log(
+                    particle_metallicity / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
+                    ssp.metallicities.value[metalliticy_idx] / ssp.metallicities.value[metalliticy_idx - 1]
+                    )
+        weight_age = (particle_ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
+                    ssp.ages.to_value('Gyr')[age_idx] - ssp.ages.to_value('Gyr')[age_idx - 1]
+                    )
+
+        weights = np.zeros(ssp.L_lambda.shape[:-1]) << self.masses.unit
+        weights[metalliticy_idx, age_idx] = weight_Z * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx] = (1 - weight_Z) * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx - 1] = (1 - weight_Z) * (1 - weight_age) * self.masses[valid_particles]
+        weights[metalliticy_idx, age_idx - 1] = weight_Z * (1 - weight_age) * self.masses[valid_particles]
+
+        return weights
+
+    def integral_SFR(self, time):
+        sort_idx = np.argsort(self.time_form)
+        mass_history = np.cumsum(self.masses[sort_idx])
+        return np.interp(time, self.time_form[sort_idx], mass_history)
+
+    def integral_Z_SFR(self, time):
+        sort_idx = np.argsort(self.time_form)
+        z_mass_history = np.cumsum(self.masses[sort_idx]
+                                 * self.metallicities[sort_idx])
+        return np.interp(time, self.time_form[sort_idx], z_mass_history)
+
 # %%
 # -----------------------------------------------------------------------------
 #                                                    ... Paranoy@ Rulz! ;^D
+# Mr Krtxo \(ﾟ▽ﾟ)/
 # -----------------------------------------------------------------------------
