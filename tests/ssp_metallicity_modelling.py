@@ -21,7 +21,9 @@ z_histories = [0.02 * mass_history / mass_history[-1],
 ]
 z_labels = ['Monotonically increasing Z(t)', 'Monotonically decreasing Z(t)',
             'Oscillating Z(t)']
+
 # Monotonically decreasing metallicity
+
 ssp = SSP.PopStar(IMF='cha')
 
 fig, axs = plt.subplots(nrows=3, ncols=2, constrained_layout=True,
@@ -33,9 +35,10 @@ for z_hist, label, z_axs in zip(z_histories, z_labels, axs):
     sfh_model = models.Tabular_MFH(times=cosmic_time, masses=mass_history,
                                    Z=z_hist)
 
-    old_masses = sfh_model.interpolate_ssp_masses(ssp, t_obs=today)
-    new_masses = sfh_model.interpolate_ssp_masses_new(ssp, t_obs=today)
+    old_masses = models.ChemicalEvolutionModel.interpolate_ssp_masses(sfh_model, ssp, today)
+    new_masses = sfh_model.interpolate_ssp_masses(ssp, t_obs=today)
 
+    #plt.figure(fig)
     ax = z_axs[0]
     ax.set_title("Old method " + label)
     mappable = ax.pcolormesh(ssp.ages.to_value("Gyr"),
@@ -58,4 +61,6 @@ for z_hist, label, z_axs in zip(z_histories, z_labels, axs):
 
     ax.set_xlabel("Lookback time (Gyr)")
     ax.set_ylabel("Z(t)")
+    ax.set_xlim(ssp.ages[0].to_value("Gyr")/2, ssp.ages[-1].to_value("Gyr")*2)
+    ax.set_xscale('log')
 plt.show()

@@ -1,5 +1,5 @@
 import numpy as np
-#import pylab as plt
+from matplotlib import pyplot as plt
 from astropy import units as u
 from astropy.io import fits
 from scipy import special
@@ -533,6 +533,11 @@ class Tabular_MFH(ChemicalEvolutionModel):
         self.table_M = masses[sort_times]
         # 
         self.Z = self.Z[sort_times]
+        
+        dM_mid = self.table_M[1:] - self.table_M[:-1]
+        Z_mid = (self.Z[1:] + self.Z[:-1]) / 2
+        self.table_MZ = np.cumsum(np.hstack([self.table_M[0]*self.Z[0], dM_mid * Z_mid]))
+
         # FIXME: this variables should not be declared here
         self.t_hat_start = kwargs.get('t_hat_start', 1.)
         self.t_hat_end = kwargs.get('t_hat_end', 0.)
@@ -593,14 +598,12 @@ class Tabular_MFH(ChemicalEvolutionModel):
         - integral: astropy.units.Quantity
             Integral evaluated at each input time.
         """
+
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t, self.table_M * self.Z)
+           self.table_t, self.table_MZ)
         integral = interpolator(times) << self.table_M.unit * self.Z.unit
-        integral[times > self.table_t[-1]] = self.table_M[-1] * self.Z[-1].value
+        integral[times > self.table_t[-1]] = self.table_MZ[-1]
         integral[times < self.table_t[0]] = 0
-        idx = np.where((times > self.table_t[0]) & (times < self.table_t[1]))
-        integral[idx] *= np.sqrt((
-           times[idx] - self.table_t[0]) / (self.table_t[1] - self.table_t[0]))
         return integral
 
     def SFR(self, times):
