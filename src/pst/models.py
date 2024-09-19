@@ -751,8 +751,8 @@ class Tabular_CEM(ChemicalEvolutionModel):
         return weights << u.Msun
     '''
 
-'''
-class Tabular_ZPowerLaw(Tabular_MFH):
+
+class Tabular_CEM_ZPowerLaw(Tabular_CEM):
     """Chemical evolution model based on a grid of times and metallicities.
     
     Description
@@ -781,13 +781,10 @@ class Tabular_ZPowerLaw(Tabular_MFH):
         
 
     @property
-    def Z(self):
-        return self.z_today * np.power(self.table_M / self.table_M[-1], self.alpha)
+    def table_metallicity(self):
+        return self.z_today * np.power(self.table_mass / self.table_mass[-1], self.alpha)
 
-    @Z.setter
-    def Z(self, z):
-        pass
-
+'''
 #-------------------------------------------------------------------------------
 class Tabular_Illustris(Tabular_MFH):
 #-------------------------------------------------------------------------------
