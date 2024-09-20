@@ -876,15 +876,16 @@ class ParticleGridCEM(ChemicalEvolutionModel):
                     particle_metallicity / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
                     ssp.metallicities.value[metalliticy_idx] / ssp.metallicities.value[metalliticy_idx - 1]
                     )
+        weight_Z = weight_Z.clip(0, 1)
         weight_age = (particle_ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
                     ssp.ages.to_value('Gyr')[age_idx] - ssp.ages.to_value('Gyr')[age_idx - 1]
                     )
-
+        weight_age = weight_age.clip(0, 1)
         weights = np.zeros(ssp.L_lambda.shape[:-1]) << self.masses.unit
-        weights[metalliticy_idx, age_idx] = weight_Z * weight_age * self.masses[valid_particles]
-        weights[metalliticy_idx - 1, age_idx] = (1 - weight_Z) * weight_age * self.masses[valid_particles]
-        weights[metalliticy_idx - 1, age_idx - 1] = (1 - weight_Z) * (1 - weight_age) * self.masses[valid_particles]
-        weights[metalliticy_idx, age_idx - 1] = weight_Z * (1 - weight_age) * self.masses[valid_particles]
+        weights[metalliticy_idx, age_idx] += weight_Z * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx] += (1 - weight_Z) * weight_age * self.masses[valid_particles]
+        weights[metalliticy_idx - 1, age_idx - 1] += (1 - weight_Z) * (1 - weight_age) * self.masses[valid_particles]
+        weights[metalliticy_idx, age_idx - 1] += weight_Z * (1 - weight_age) * self.masses[valid_particles]
 
         return weights
 
