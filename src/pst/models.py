@@ -1,7 +1,5 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from astropy import units as u
-from astropy.io import fits
 from scipy import special
 import pst
 
@@ -774,17 +772,17 @@ class Tabular_CEM_ZPowerLaw(Tabular_CEM):
     See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
 
     """
-    def __init__(self, times, masses, alpha, z_today, **kwargs):
-        self.z_today = z_today
+    def __init__(self, times, masses, alpha, ism_metallicity_today, **kwargs):
+        self.ism_metallicity_today = ism_metallicity_today
         self.alpha = alpha
         super().__init__(times, masses, **kwargs)
         
 
     @property
     def table_metallicity(self):
-        return self.z_today * np.power(self.table_mass / self.table_mass[-1], self.alpha)
-
-'''
+        return self.ism_metallicity_today * np.power(self.table_mass / self.table_mass[-1], self.alpha)
+    
+"""
 #-------------------------------------------------------------------------------
 class Tabular_Illustris(Tabular_MFH):
 #-------------------------------------------------------------------------------
