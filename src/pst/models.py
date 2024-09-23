@@ -921,7 +921,7 @@ class ASCII_file(ChemicalEvolutionModel):
     #plt.semilogy( self.t_table/units.Gyr, self.stellar_mass_formed_table/units.Msun )
     #plt.semilogy( self.t_table/units.Gyr, self.Z_table )
     #plt.show()
-
+"""
 
 class ParticleGridCEM(ChemicalEvolutionModel):
     """A Chemical Evolution Model using a individual SSP data.
