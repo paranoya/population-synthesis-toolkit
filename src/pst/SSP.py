@@ -352,6 +352,7 @@ class SSPBase(object):
             flux, _ = f.get_fnu(
                     self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
                     mask_nan=False)
+            flux /= 1 + z_obs
             self.photometry[ith] = flux.to('Jy') / u.Msun
         return self.photometry
 
