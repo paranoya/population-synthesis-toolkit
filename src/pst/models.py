@@ -37,7 +37,7 @@ class ChemicalEvolutionModel(ABC):
         return
 
     @u.quantity_input
-    def interpolate_ssp_masses(self, SSP: SSPBase, t_obs: u.Gyr, oversample_factor=10):
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr, oversample_factor=10):
         """Interpolate the star formation history to compute the SSP stellar massess.
 
         Description
@@ -61,7 +61,7 @@ class ChemicalEvolutionModel(ABC):
         
         # define age bins from 0 to t_obs
         age_bins = np.hstack(
-            [0 << u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 << u.yr])
+            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
         age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
         age_bins[-1] = t_obs
         # oversample
@@ -79,32 +79,6 @@ class ChemicalEvolutionModel(ABC):
         return ssp.get_weights(ages=bin_age,
                                metallicities=bin_metallicity,
                                masses=bin_mass)
-        
-        # 2D interpolation
-        
-        age_idx = np.clip(SSP.ages.searchsorted(bin_age),
-                            1, SSP.ages.size - 1)
-        weight_age = np.log(bin_age / SSP.ages[age_idx - 1])
-        weight_age /= np.log(SSP.ages[age_idx] / SSP.ages[age_idx-1])
-        np.clip(weight_age, 0., 1.)
-        
-        z_idx = np.clip(SSP.metallicities.searchsorted(bin_metallicity),
-                          1, SSP.metallicities.size - 1)
-        weight_z = np.log(bin_metallicity / SSP.metallicities[z_idx - 1])
-        weight_z /= np.log(
-            SSP.metallicities[z_idx] / SSP.metallicities[z_idx-1])
-        np.clip(weight_z, 0., 1.)
-
-        weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
-        np.add.at(weights, (z_idx, age_idx),
-                  bin_mass * weight_age * weight_z)
-        np.add.at(weights, (z_idx - 1, age_idx),
-                  bin_mass * weight_age * (1 - weight_z))
-        np.add.at(weights, (z_idx - 1, age_idx - 1),
-                  bin_mass * (1 - weight_age) * (1 - weight_z))
-        np.add.at(weights, (z_idx, age_idx - 1),
-                  bin_mass * (1 - weight_age) * weight_z)
-        return weights << u.Msun
     
     #TODO: This method should be renamed by compute_spectra or compute_L_lambda
     def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
