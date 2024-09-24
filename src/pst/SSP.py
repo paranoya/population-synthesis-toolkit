@@ -89,7 +89,7 @@ class SSPBase(object):
         ages = np.array(ages)
         metallicities = np.array(metallicities)
         if masses is None:
-            masses = np.ones_like(ages)
+            masses = np.ones(ages.size)
         else:
             masses = np.array(masses)
 
