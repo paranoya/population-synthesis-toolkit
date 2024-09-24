@@ -1,14 +1,13 @@
+from abc import ABC, abstractmethod
+
 import numpy as np
 from astropy import units as u
 from scipy import special
-import pst
-
 from scipy import interpolate
-from abc import ABC, abstractmethod
 
+import pst
 from pst.SSP import SSPBase
-from astropy.visualization import quantity_support
-quantity_support()
+
 
 class ChemicalEvolutionModel(ABC):
     """TODO
@@ -76,15 +75,6 @@ class ChemicalEvolutionModel(ABC):
         bin_mass = mass[:-1] - mass[1:]
         bin_age = (age_bins[1:] + age_bins[:-1]) / 2
         bin_metallicity = self.ism_metallicity(t_obs - bin_age)
-        
-        '''
-        # test plot
-        fig, axes = plt.subplots(nrows=1, ncols=1)
-        ax = axes
-        ax.plot(bin_age, bin_metallicity, 'k-+')
-        ax.plot(t_obs-self.table_t, self.table_metallicity, 'm-+')
-        ax.set_xscale('log')
-        '''
         
         # 2D interpolation
         
