@@ -80,7 +80,42 @@ class SSPBase(object):
             raise NameError("wavelength must be an astropy.Quantity")
         else:
             self._wavelength = wave
+       
+    def get_weights(ages, metallicities, masses = None):
+        """2D interpolation of a list of ages nd metallicities.
+        """
+        # ensure it works if single float values are passed
+        # (is it useful?)
+        ages = np.array(ages)
+        metallicities = np.array(metallicities)
+        if masses is None:
+            masses = np.ones_like(ages)
+        else:
+            masses = np.array(masses)
 
+        # add units
+        if not isinstance(ages, u.Quantity):
+            ages = ages << u.Gyr
+        if not isinstance(masses, u.Quantity):
+            masses = masses << u.Msun
+
+        age_idx = np.clip(self.ages.searchsorted(ages), 1, self.ages.size-1)
+        weights_age = np.log(ages / self.ages[age_idx-1])
+        weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
+        weights_age = np.clip(weights_age, 0., 1.)
+
+        z_idx = np.clip(self.metallicities.searchsorted(metallicities), 1, self.metallicities.size-1)
+        weights_z = np.log(metallicities / self.metallicities[z_idx-1])
+        weights_z /= np.log(self.metallicities[z_idx] / self.metallicities[z_idx-1])
+        weights_z = np.clip(weights_z, 0., 1.)
+
+        weights = np.zeros((self.metallicities.size, self.ages.size)) << masses.unit
+        np.add.at(weights, (z_idx, age_idx), masses * weights_age * weights_z)
+        np.add.at(weights, (z_idx-1, age_idx), masses * weights_age * (1-weights_z))
+        np.add.at(weights, (z_idx-1, age_idx-1), masses * (1-weights_age) * (1-weights_z))
+        np.add.at(weights, (z_idx, age_idx-1), masses * (1-weights_age) * weights_z)
+        return weights
+    
     def compute_SED(self, time, mass, metallicity,
                     t_obs=13.7 * u.Gyr):
         """

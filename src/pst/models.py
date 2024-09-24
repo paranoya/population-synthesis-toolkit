@@ -37,7 +37,7 @@ class ChemicalEvolutionModel(ABC):
         return
 
     @u.quantity_input
-    def interpolate_ssp_masses(self, SSP: pst.SSP.SSPBase, t_obs: u.Gyr, oversample_factor=10):
+    def interpolate_ssp_masses(self, SSP: SSPBase, t_obs: u.Gyr, oversample_factor=10):
         """Interpolate the star formation history to compute the SSP stellar massess.
 
         Description
@@ -76,32 +76,38 @@ class ChemicalEvolutionModel(ABC):
         bin_age = (age_bins[1:] + age_bins[:-1]) / 2
         bin_metallicity = self.ism_metallicity(t_obs - bin_age)
         
+        return ssp.get_weights(ages=bin_age,
+                               metallicities=bin_metallicity,
+                               masses=bin_mass)
+        
         # 2D interpolation
         
-        age_index = np.clip(SSP.ages.searchsorted(bin_age),
+        age_idx = np.clip(SSP.ages.searchsorted(bin_age),
                             1, SSP.ages.size - 1)
-        weight_age = np.log(bin_age / SSP.ages[age_index - 1])
-        weight_age /= np.log(SSP.ages[age_index] / SSP.ages[age_index-1])
+        weight_age = np.log(bin_age / SSP.ages[age_idx - 1])
+        weight_age /= np.log(SSP.ages[age_idx] / SSP.ages[age_idx-1])
+        np.clip(weight_age, 0., 1.)
         
-        z_index = np.clip(SSP.metallicities.searchsorted(bin_metallicity),
-                          1, SSP.ages.size - 1)
-        weight_z = np.log(bin_metallicity / SSP.metallicities[z_index - 1])
+        z_idx = np.clip(SSP.metallicities.searchsorted(bin_metallicity),
+                          1, SSP.metallicities.size - 1)
+        weight_z = np.log(bin_metallicity / SSP.metallicities[z_idx - 1])
         weight_z /= np.log(
-            SSP.metallicities[z_index] / SSP.metallicities[z_index-1])
+            SSP.metallicities[z_idx] / SSP.metallicities[z_idx-1])
+        np.clip(weight_z, 0., 1.)
 
         weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
-        np.add.at(weights, (z_index, age_index),
+        np.add.at(weights, (z_idx, age_idx),
                   bin_mass * weight_age * weight_z)
-        np.add.at(weights, (z_index - 1, age_index),
+        np.add.at(weights, (z_idx - 1, age_idx),
                   bin_mass * weight_age * (1 - weight_z))
-        np.add.at(weights, (z_index - 1, age_index - 1),
+        np.add.at(weights, (z_idx - 1, age_idx - 1),
                   bin_mass * (1 - weight_age) * (1 - weight_z))
-        np.add.at(weights, (z_index, age_index - 1),
+        np.add.at(weights, (z_idx, age_idx - 1),
                   bin_mass * (1 - weight_age) * weight_z)
         return weights << u.Msun
     
     #TODO: This method should be renamed by compute_spectra or compute_L_lambda
-    def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
+    def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
                     allow_negative=True):
         """Compute the SED of a given model observed at a given time.
         
@@ -126,12 +132,12 @@ class ChemicalEvolutionModel(ABC):
         - sed: astropy.Quantity
             Spectral energy distribution in the same units as `SSP.L_lambda`.
         """
-        weights = self.interpolate_ssp_masses(SSP, t_obs)
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
         if not allow_negative:
             mask = (weights > 0) & np.isfinite(weights)
         else:
             mask = np.isfinite(weights)
-        sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
+        sed = np.sum(weights[mask, np.newaxis] * ssp.L_lambda[mask, :],
                     axis=(0))
         return sed
 
@@ -985,34 +991,10 @@ class ParticleGridCEM(ChemicalEvolutionModel):
             A 2D array containing the stellar mass associated to each SSP.
         """
         valid_particles = self.time_form <= t_obs
-        particle_ages = (t_obs - self.time_form[valid_particles]).to_value("Gyr").clip(
-            ssp.ages.to_value('Gyr').min(), ssp.ages.to_value('Gyr').max())
-        particle_metallicity = self.metallicities[valid_particles].clip(
-            ssp.metallicities.value[0], ssp.metallicities.value[-1]).value
-
-        age_idx = np.searchsorted(ssp.ages.to_value("Gyr"), particle_ages,
-                                  side="right").clip(min=1, max=ssp.ages.size - 1)
-        metalliticy_idx = np.searchsorted(ssp.metallicities.value,
-                                          particle_metallicity,
-                                          side="right").clip(min=1, max=ssp.metallicities.size - 1)
-        # Interpolation weights of the right element
-        weight_Z = np.log(
-                    particle_metallicity / ssp.metallicities.value[metalliticy_idx - 1]) / np.log(
-                    ssp.metallicities.value[metalliticy_idx] / ssp.metallicities.value[metalliticy_idx - 1]
-                    )
-        weight_Z = weight_Z.clip(0, 1)
-        weight_age = (particle_ages - ssp.ages.to_value('Gyr')[age_idx - 1]) / (
-                    ssp.ages.to_value('Gyr')[age_idx] - ssp.ages.to_value('Gyr')[age_idx - 1]
-                    )
-        weight_age = weight_age.clip(0, 1)
-        weights = np.zeros(ssp.L_lambda.shape[:-1]) << self.masses.unit
-        weights[metalliticy_idx, age_idx] += weight_Z * weight_age * self.masses[valid_particles]
-        weights[metalliticy_idx - 1, age_idx] += (1 - weight_Z) * weight_age * self.masses[valid_particles]
-        weights[metalliticy_idx - 1, age_idx - 1] += (1 - weight_Z) * (1 - weight_age) * self.masses[valid_particles]
-        weights[metalliticy_idx, age_idx - 1] += weight_Z * (1 - weight_age) * self.masses[valid_particles]
-
-        return weights
-
+        return ssp.get_weights(ages=t_obs - self.time_form[valid_particles],
+                               metallicities=self.metallicities[valid_particles],
+                               masses=self.masses[valid_particles])
+        
     def integral_SFR(self, time):
         sort_idx = np.argsort(self.time_form)
         mass_history = np.cumsum(self.masses[sort_idx])
