@@ -387,32 +387,32 @@ class PopStar(SSPBase):
                                      10.04, 10.08, 10.11, 10.12, 10.13, 10.14,
                                      10.15, 10.18]) * units.dimensionless_unscaled
         self.ages = 10**self.log_ages_yr * units.yr
-
-        # isochrone age in delta [log(tau)]=0.01
-        self.wavelength = np.loadtxt(os.path.join(
-            self.path, IMF, 'SED', f'spneb_{IMF}_0.15_100_z0500_t9.95'), dtype=float,
-            skiprows=0, usecols=(0,), unpack=True) * units.Angstrom
-
         print("> Initialising Popstar models (IMF='"+IMF+"')")
-        self.L_lambda = np.empty(
-            shape=(self.metallicities.size, self.log_ages_yr.size,
-                   self.wavelength.size), dtype=np.float32
-                   ) * units.Lsun / units.Angstrom / units.Msun
+        # isochrone age in delta [log(tau)]=0.01
         if nebular:
-            column = 3
+            column = "_total"
             print('--> Including NEBULAR emission')
         else:
-            column = 1
+            column = "_stellar"
             print('--> Only stellar continuum')
-        for i, Z in enumerate(self.metallicities.value):
-            for j, age in enumerate(self.log_ages_yr.value):
-                file = os.path.join(
-                    self.path, IMF, 'SED',
-                    'spneb_{0}_0.15_100_z{1:04.0f}_t{2:.2f}'.format(IMF, Z*1e4, age))
-                spec = np.loadtxt(
-                    file, dtype=float, skiprows=0, usecols=(column),
-                    unpack=True)  # Lsun/Angstrom/Msun
-                self.L_lambda[i][j] = spec * self.L_lambda.unit
+
+        with fits.open(
+            os.path.join(self.path, f"popstar_{IMF.lower()}_0.15_100.fits.gz")
+            ) as hdul:
+            self.wavelength = hdul[1].data["wavelength"] * u.Unit(
+                hdul[1].header["TUNIT1"])
+
+            self.L_lambda = np.empty(
+                shape=(self.metallicities.size, self.log_ages_yr.size,
+                    self.wavelength.size), dtype=np.float32
+                    ) * u.Unit(hdul[2].header["TUNIT1"])
+
+            for i, Z in enumerate(self.metallicities.value):
+                table = hdul["SED_Z_0.{:04.0f}".format(Z*1e4)].data
+                for j, age in enumerate(self.log_ages_yr.value):
+                    self.L_lambda[i][j] = table[
+                        "logage_yr_{:02.2f}".format(age)
+                        + column] * self.L_lambda.unit
 
 
 class PyPopStar(SSPBase):
