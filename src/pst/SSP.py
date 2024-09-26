@@ -81,7 +81,7 @@ class SSPBase(object):
         else:
             self._wavelength = wave
        
-    def get_weights(ages, metallicities, masses = None):
+    def get_weights(self, ages, metallicities, masses = None):
         """2D interpolation of a list of ages nd metallicities.
         """
         # ensure it works if single float values are passed
