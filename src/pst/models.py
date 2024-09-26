@@ -969,16 +969,13 @@ class ParticleGridCEM(ChemicalEvolutionModel):
                                metallicities=self.metallicities[valid_particles],
                                masses=self.masses[valid_particles])
         
-    def integral_SFR(self, time):
+    def stellar_mass_formed(self, time):
         sort_idx = np.argsort(self.time_form)
         mass_history = np.cumsum(self.masses[sort_idx])
         return np.interp(time, self.time_form[sort_idx], mass_history)
 
-    def integral_Z_SFR(self, time):
-        sort_idx = np.argsort(self.time_form)
-        z_mass_history = np.cumsum(self.masses[sort_idx]
-                                 * self.metallicities[sort_idx])
-        return np.interp(time, self.time_form[sort_idx], z_mass_history)
+    def ism_metallicity(self, time):
+        return np.full(time.size, fill_value=np.nan)
 
 # %%
 # -----------------------------------------------------------------------------
