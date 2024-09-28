@@ -26,14 +26,11 @@ cosmic_time = np.geomspace(1e-3, 13.7, 300) * u.Gyr
 # plt.hist(particles_t_form, weights=particles_mass)
 
 
-mass_history = sfh_model.integral_SFR(cosmic_time)
-z_mass_history = sfh_model.integral_Z_SFR(cosmic_time)
+mass_history = sfh_model.stellar_mass_formed(cosmic_time)
 
 plt.figure()
-plt.subplot(121)
+plt.subplot(111)
 plt.plot(cosmic_time, mass_history)
-plt.subplot(122)
-plt.plot(cosmic_time, z_mass_history)
 
 ssp_weights = sfh_model.interpolate_ssp_masses(ssp, t_obs=13.7 * u.Gyr)
 plt.figure()
