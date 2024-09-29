@@ -5,10 +5,9 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 from astropy import units as u
-from astropy import constants as c
 from astropy import units
 
-from scipy import interpolate
+from pst.utils import check_unit
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
@@ -111,90 +110,6 @@ class SSPBase(object):
         np.add.at(weights, (z_idx-1, age_idx-1), masses * (1-weights_age) * (1-weights_z))
         np.add.at(weights, (z_idx, age_idx-1), masses * (1-weights_age) * weights_z)
         return weights
-    
-    def compute_SED(self, time, mass, metallicity,
-                    t_obs=13.7 * u.Gyr):
-        """
-        Compute the SED for a given star formation history.
-        
-        Prameters:
-        ----------
-        - time: (np.ndarray)
-            Time steps expressed in Gyr corresponding to the age of the Universe.
-        - mass: (np.ndarray)
-                Cumulative stellar mass for each time step.
-        - metallicity: (np.ndarray)
-            Average metallicity on each time step.
-        """
-        # SSP time steps to interpolate (i.e. lookback time)
-        age_bins = np.hstack(
-            [0 * u.yr, np.sqrt(self.ages[1:] * self.ages[:-1]), 1e12 * u.yr])
-        t_i = t_obs - age_bins
-        t_i = t_i[t_i > 0]
-        mass_interpolator = interpolate.Akima1DInterpolator(
-            time.value, mass.value)
-        mass_history = mass_interpolator(t_i.to(time.unit)) * mass.unit
-        mass_history[t_i > time[-1]] = mass[-1]
-        mass_history[t_i < time[0]] = 0
-        mass_bins = np.hstack([mass_history[:-1] - mass_history[1:],
-                                 mass_history[-1]])
-
-        mass_z_interpolator = interpolate.Akima1DInterpolator(
-            time.value, mass.value * metallicity.value)
-        mass_z_history = mass_z_interpolator(
-            t_i.to(time.unit)) * metallicity.unit * mass.unit
-        mass_z_history[t_i > time[-1]] = metallicity[-1] * mass[-1]
-        mass_z_history[t_i < time[-1]] = 0
-        mass_z_bins = np.hstack([mass_z_history[:-1] - mass_z_history[1:],
-                                 mass_z_history[-1]])
-        z_history = np.clip(mass_z_bins / mass_bins,
-                            self.metallicities[0], self.metallicities[-1])
-
-        sed = np.zeros(self.wavelength.size)
-        weights = np.zeros((self.metallicities.size, t_i.size)) * mass.unit
-        
-        z_indices = np.searchsorted(
-            self.metallicities, z_history).clip(
-            min=1, max=self.metallicities.size - 1)
-        t_indices = np.arange(0, weights.shape[1], dtype=int)
-
-        weight_Z = np.log(
-                    z_history / self.metallicities[z_indices - 1]) / np.log(
-                    self.metallicities[z_indices] / self.metallicities[z_indices-1]
-                    ) * mass.unit
-        weights[z_indices, t_indices] = weight_Z
-        weights[z_indices - 1, t_indices] = 1 * mass.unit - weight_Z
-        weights *=  mass_bins[np.newaxis, :]
-        mask = (weights > 0) & np.isfinite(weights)
-        sed = np.nansum(
-            weights[mask, np.newaxis] * self.L_lambda[mask, :], axis=(0))
-
-        return sed, weights
-
-    def compute_burstSED(self, age, Z):
-        """Compute the SED of a stellar burst of age t and metallicity Z."""
-        log_age = np.log10(age)
-        index_Z_hi = self.metallicities.searchsorted(Z).clip(
-            1, len(self.metallicities)-1)
-        weight_Z_hi = (np.log(Z/self.metallicities[index_Z_hi-1])
-                       / np.log(self.metallicities[index_Z_hi]
-                                / self.metallicities[index_Z_hi-1]))
-        index_tage_hi = self.log_ages_yr.searchsorted(log_age).clip(
-            1, len(self.log_ages_yr)-1)
-        weight_tage_hi = (log_age - self.log_ages_yr[index_tage_hi-1])/(
-            self.log_ages_yr[index_tage_hi]
-            - self.log_ages_yr[index_tage_hi-1])
-        sed = (
-            self.L_lambda[index_Z_hi][index_tage_hi]
-            * weight_Z_hi * weight_tage_hi
-            + self.L_lambda[index_Z_hi][index_tage_hi - 1]
-            * weight_Z_hi * (1 - weight_tage_hi)
-            + self.L_lambda[index_Z_hi-1][index_tage_hi]
-            * (1 - weight_Z_hi) * weight_tage_hi
-            + self.L_lambda[index_Z_hi-1][index_tage_hi-1]
-            * (1 - weight_Z_hi) * (1 - weight_tage_hi)
-            )
-        return sed
 
     def get_ssp_logedges(self):
         """Get the edges of the SSP metallicities and ages."""
@@ -239,17 +154,23 @@ class SSPBase(object):
         self.ages = 10**log_ages_yr * u.yr
 
     def cut_wavelength(self, wl_min=None, wl_max=None):
-        """Cut model wavelength edges."""
+        """Cut model wavelength edges.
+        
+        Parameters
+        ----------
+        wl_min : float or astropy.units.Quantity, optional
+            Minimum wavelength value.
+        wl_max : float or astropy.units.Quantity, optional
+            Maximum wavelength value.
+        """
         if wl_min is None:
             wl_min = self.wavelength[0]
-        elif not isinstance(wl_min, u.Quantity):
-            print("Assuming minimum wavelenth in the same units as wavelength")
-            wl_min *= self.wavelength.unit
+        else:
+            wl_min = check_unit(wl_min, self.wavelength.unit)
         if wl_max is None:
             wl_max = self.wavelength[0]
-        elif not isinstance(wl_max, u.Quantity):
-            print("Assuming minimum wavelenth in the same units as wavelength")
-            wl_max *= self.wavelength.unit
+        else:
+            wl_max = check_unit(wl_max, self.wavelength.unit)
 
         cut_pts = np.where((self.wavelength >= wl_min) &
                            (self.wavelength <= wl_max))[0]
@@ -355,6 +276,7 @@ class SSPBase(object):
     def copy(self):
         """Return a copy of the SSP model."""
         return deepcopy(self)
+
 
 class PopStar(SSPBase):
     """PopStar SSP models (Mollá+09)."""
