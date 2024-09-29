@@ -80,9 +80,11 @@ def check_unit(quantity, default_unit=None):
     """
     isq = isinstance(quantity, u.Quantity)
     if isq and default_unit is not None:
-        if not quantity.is_equivalent(default_unit):
+        if not quantity.unit.is_equivalent(default_unit):
             raise u.UnitTypeError(
                 "Input quantity does not have the appropriate units")
+        else:
+            return quantity
     elif not isq and default_unit is not None:
         return quantity * default_unit
     elif not isq and default_unit is None:
