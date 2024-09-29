@@ -8,6 +8,123 @@ import time as tic
 import os
 import extinction
 
+
+#-------------------------------------------------------------------------------
+class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
+    def __init__(self, N, ssp, obs_filters, obs_filters_wl, t, t_obs, Z_i, dust_extinction, 
+                 error_Fnu_obs, **kwargs):
+        self.t_obs = t_obs.to_value()
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        
+        primordial_coeffs = []
+        primordial_Fnu = []
+        for n in range(N):
+            
+            c = np.zeros(N)
+            c[n] = 1
+            
+            primordial_coeffs.append(c)
+            
+            fnu = []
+            p = pst.models.Polynomial_MFH(Z=Z_i, t_hat_start = self.t_hat_start,
+                                          t_hat_end = self.t_hat_end,
+                                          coeffs=c)
+
+            cum_mass = np.cumsum(p.stellar_mass_formed(t))
+            z_array = Z_i*np.ones(len(t))
+            sed, weights = ssp.compute_SED(t, cum_mass, z_array)
+
+            for i, filter_name in enumerate(obs_filters):
+                photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                fnu.append( fnu_Jy )
+
+            primordial_Fnu.append(u.Quantity(fnu))
+        primordial_Fnu = np.array(primordial_Fnu)*dust_extinction / error_Fnu_obs
+        
+        self.p = p
+        self.sed = sed
+        self.lstsq_solution = np.matmul(
+            np.linalg.pinv(np.matmul(primordial_Fnu, np.transpose(primordial_Fnu))),
+            primordial_Fnu)
+        self.primordial_coeffs = np.array(primordial_coeffs)
+        self.primordial_Fnu = np.array(primordial_Fnu)
+        self.primordial_Fnu = primordial_Fnu
+
+    def fit(self, Fnu_obs, **kwargs):
+
+        c = np.matmul(self.lstsq_solution,
+                      Fnu_obs)              
+        return c
+
+
+#-------------------------------------------------------------------------------
+class Polynomial_MFH(ChemicalEvolutionModel):
+#-------------------------------------------------------------------------------
+
+    def __init__(self, **kwargs):
+        self.t0 = kwargs.get('t0', 13.7*u.Gyr)
+        self.M0 = kwargs.get('M_end', 1*u.Msun)
+        self.t_hat_start = kwargs.get('t_hat_start', 1.)
+        self.t_hat_end = kwargs.get('t_hat_end', 0.)
+        self.coeffs = kwargs['coeffs']
+        self.S = kwargs.get('S', False)
+        
+        ChemicalEvolutionModel.__init__(self, **kwargs)
+    
+    #If you want the raw components: model.xxxx(t, get_components=True)
+    #If you want the observable + error: model.xxxx(t, get_sigma=True)
+    #If you want only the observable: model.xxxx(t)
+    def mass_formed_since(self, cosmic_time, **kwargs):
+        t_hat_present_time = (1 - self.t0/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        t_hat_since = (1 - cosmic_time/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        self.get_sigma = kwargs.get('get_sigma', False)
+        self.get_components = kwargs.get('get_components', False)
+        self.fit_components = kwargs.get('fit_components', None)
+        
+        if self.fit_components is None:  
+            M=[]
+            N = len(self.coeffs)
+            for n in range(1, N+1):
+                M.append(t_hat_since**n - t_hat_present_time**n)
+
+            self.M = u.Quantity(M)
+        else:
+            c, M, S = self.fit_components
+            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
+        
+        if self.get_components: #if you want the raw components c, M, S
+            return self.coeffs, self.M0 *self.M, self.S
+        elif self.get_sigma: #If you want the observable + sigma
+            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
+        else: #If you just want the observable
+            return self.M0 * np.matmul(self.coeffs, self.M)
+        
+    def stellar_mass_formed(self, time, **kwargs):
+        self.get_sigma = kwargs.get('get_sigma', False)
+        self.get_components = kwargs.get('get_components', False)
+        self.fit_components = kwargs.get('fit_components', None)
+        t_hat = (1 - time/self.t0).clip(self.t_hat_end, self.t_hat_start)
+        
+        if self.fit_components is None:              
+            M=[]
+            N = len(self.coeffs)
+            for n in range(1, N+1):
+                M.append(self.t_hat_start**n - t_hat**n)
+            self.M = u.Quantity(M)
+        
+        else:
+            c, M, S = self.fit_components
+            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
+        
+        if self.get_components: #if you want the raw components c, M, S
+            return self.coeffs, self.M0 *self.M, self.S
+        elif self.get_sigma: #If you want the observable + sigma
+            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
+        else: #If you just want the observable
+            return self.M0 * np.matmul(self.coeffs, self.M)
+
 def compute_polynomial_models(input_type):
     
     # Observables
