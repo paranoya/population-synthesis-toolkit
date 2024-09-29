@@ -1,22 +1,20 @@
 from abc import ABC, abstractmethod
-import functools
 
 import numpy as np
 from astropy import units as u
 from scipy import special
 from scipy import interpolate
 
-import pst
 from pst.SSP import SSPBase
 from pst.utils import check_unit, SQRT_2
 
 
 # Utils and mixins
 class MassPropMetallicityMixin:
-    """Model mixin where the metallicity is proportional to the stellar mass
+    r"""Model mixin where the metallicity is proportional to the stellar mass
     
     .. math::
-        Z(t) = Z_{today} \cdot \frac{M_{\star}(t)}{M_{\star}(today)}
+        Z(t) = Z_{today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(today)}\right)^\alpha
     """
     @property
     def ism_metallicity_today(self):
@@ -60,37 +58,6 @@ class ChemicalEvolutionModel(ABC):
     a given Simple Stellar Population (SSP) model. The specific methods for 
     computing the star formation rate (SFR) and the metallicity evolution 
     (Z-SFR) need to be implemented in a subclass.
-
-    Parameters
-    ----------
-    **kwargs : dict, optional
-        Optional parameters to initialize the model. The following parameters
-        are supported:
-        - `M_gas` (astropy.Quantity): Initial gas mass of the galaxy. Default is 0 solar masses.
-        - `Z` (float): Initial metallicity of the galaxy. Default is 0.02 (solar metallicity).
-
-    Attributes
-    ----------
-    M_gas : astropy.Quantity
-        The gas mass of the galaxy.
-    Z : float
-        The metallicity of the galaxy.
-
-    Methods
-    -------
-    interpolate_ssp_masses(SSP, t_obs)
-        Interpolates the star formation history to compute the stellar masses
-        for a given SSP model.
-    compute_SED(SSP, t_obs, allow_negative=True)
-        Computes the Spectral Energy Distribution (SED) of the galaxy at a given
-        observation time.
-    compute_photometry(ssp, t_obs, photometry=None, allow_negative=True)
-        Computes the photometry of the galaxy at a given observation time.
-    integral_SFR()
-        Abstract method for computing the integral of the star formation rate.
-    integral_Z_SFR()
-        Abstract method for computing the integral of the metallicity-weighted
-        star formation rate.
     """
     
     def __init__(self, **kwargs):
@@ -233,7 +200,7 @@ class ChemicalEvolutionModel(ABC):
 #-------------------------------------------------------------------------------
 class SingleBurstCEM(ChemicalEvolutionModel):
     """
-    Single burst star formation model.
+    Single-burst star formation model.
 
     This class models a galaxy's star formation history as a single burst
     occurring at a specific time, after which no further star formation occurs.
@@ -275,14 +242,14 @@ class SingleBurstCEM(ChemicalEvolutionModel):
 
 #-------------------------------------------------------------------------------
 class ExponentialCEM(ChemicalEvolutionModel):
-    """
+    r"""
     Exponentially declining star formation history model.
 
     This class models a galaxy's star formation rate as an exponentially
     declining function of time:
 
     .. math::
-        M_\star(t) = M_{inf} \cdot (1 - e^{-t/tau})
+        M_\star(t) = M_{inf} \cdot (1 - e^{-t/\tau})
  
     Attributes
     ----------
@@ -328,14 +295,14 @@ class ExponentialQuenchedCEM(ExponentialCEM):
 
 #-------------------------------------------------------------------------------
 class ExponentialDelayedCEM(ChemicalEvolutionModel):
-    """
+    r"""
     Exponentially delayed star formation history model.
 
     This CEM models a galaxy's star formation rate as a delayed exponential
     function of time, where the SFR rises initially and then decays.
 
     .. math::
-        M_\star(t) = t/tau \cdot M_{inf} \cdot (1 - e^{-t/tau})
+        M_\star(t) = M_{inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
  
     Attributes
     ----------
@@ -403,7 +370,7 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
 
 
 class LogNormalCEM(ChemicalEvolutionModel):
-    """
+    r"""
     Log-normal star formation history model.
 
     This CEM models a galaxy's star formation rate as a log-normal
@@ -411,7 +378,7 @@ class LogNormalCEM(ChemicalEvolutionModel):
     and then decays:
 
     .. math::
-        M_\star(t) = M_{today} / 2 \cdot \left(1 - erf\left(\frac{ln(t) - ln(t_0)}{tau \sqrt{2}}\right) \right)
+        M_\star(t) = \frac{M_{today}}{2} \cdot \left(1 - erf\left(\frac{ln(t) - ln(t_0)}{\sigma \sqrt{2}}\right) \right)
 
     Attributes
     ----------
@@ -500,7 +467,7 @@ class Tabular_CEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Gyr):
-        """Evaluate the integral of the SFR over a given set of times.
+        r"""Evaluate the integral of the SFR over a given set of times.
         
         Description
         -----------
