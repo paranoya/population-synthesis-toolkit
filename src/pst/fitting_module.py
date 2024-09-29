@@ -7,7 +7,7 @@ import pst
 import time as tic
 import os
 import extinction
-
+from pst.models import ChemicalEvolutionModel
 
 #-------------------------------------------------------------------------------
 class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
