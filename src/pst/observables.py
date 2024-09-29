@@ -1,5 +1,6 @@
 """
-Module to compute observable quantities from an input spectra.
+This module contains some tools for computing observable quantities
+(e.g. photometry, equivalent widths) from spectra.
 """
 
 import numpy as np
@@ -14,18 +15,9 @@ from . import utils
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 def list_of_available_filters():
-    filter_dir = os.path.join(os.path.dirname(__file__),
-                              "data", "filters")
-#    print(f"Checking filters available at {filter_dir}")
+    """List the currently available filters in the default directory."""
+    filter_dir = os.path.join(PST_DATA_DIR, "filters")
     return os.listdir(filter_dir)
-
-def find_filt_from_name(name):
-    filters = list_of_available_filters()
-    for f in filters:
-        if name.lower() in f.strip(".dat").lower():
-            return os.path.join(os.path.dirname(__file__),
-                              "data", "filters", f)
-    return None
 
 def load_photometric_filters(filters):
     """Convenience function for constructing a list of photometric filters.
