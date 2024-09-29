@@ -7,7 +7,7 @@ from scipy import interpolate
 
 import pst
 from pst.SSP import SSPBase
-
+from pst.utils import check_unit
 
 class ChemicalEvolutionModel(ABC):
     """
@@ -217,7 +217,7 @@ class SingleBurstCEM(ChemicalEvolutionModel):
         self.burst_metallicity = kwargs.get("burst_metallicity",
                                             0.02 * u.dimensionless_unscaled)
 
-        super().__init__(self, **kwargs)
+        ChemicalEvolutionModel.__init__(self, **kwargs)
 
     @u.quantity_input
     def stellar_mass_formed(self, time : u.Gyr):
@@ -238,48 +238,120 @@ class ExponentialCEM(ChemicalEvolutionModel):
     Exponentially declining star formation history model.
 
     This class models a galaxy's star formation rate as an exponentially
-    declining function of time.
+    declining function of time:
 
+    .. math::
+        M_\star(t) = M_{inf} \cdot (1 - e^{-t/tau})
+ 
     Attributes
     ----------
     stellar_mass_inf : astropy.Quantity
         Asymptotic stellar mass at infinite time.
     tau : astropy.Quantity
         Timescale of the exponential decline in star formation.
-    Z : float
-        Metallicity of the gas.
+    metallicity : float
+        Metallicity of the gas (constant).
     """
     def __init__(self, **kwargs):
-        self.stellar_mass_inf = kwargs['stellar_mass_inf']
-        if not isinstance(self.stellar_mass_inf, u.Quantity):
-           print("Assuming that input stellar_mass_inf is in Msun")
-           self.stellar_mass_inf *= u.Msun
-
-        self.tau = kwargs['tau']
-        if not isinstance(self.tau, u.Quantity):
-            print("Assuming that input tau is in Gyr")
-            self.tau *= u.Gyr
-
-        self.Z = kwargs['Z']
+        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf'],
+                                           default_unit=u.Msun)
+        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
+        self.metallicity = kwargs['metallicity']
         ChemicalEvolutionModel.__init__(self, **kwargs)
 
-    def stellar_mass_formed(self, time):
+    @u.quantity_input
+    def stellar_mass_formed(self, time : u.Gyr):
       return self.stellar_mass_inf * ( 1 - np.exp(-time/self.tau) )
 
-    def ism_metallicity(self, time):
-        #TODO
-        pass
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.sie, fill_value=self.metallicity)
 
 
 #-------------------------------------------------------------------------------
-class Exponential_SFR_delayed(ChemicalEvolutionModel):
+class ExponentialDelayedCEM(ChemicalEvolutionModel):
     """
-    Exponentially delayed star formation rate (SFR) model.
+    Exponentially delayed star formation history model.
 
-    This class models a galaxy's star formation rate as a delayed exponential
-    function of time, where the SFR rises initially and then decays. This form
-    is useful for modeling galaxies where star formation increases over time before
-    decreasing, a feature seen in certain galaxy formation scenarios.
+    This CEM models a galaxy's star formation rate as a delayed exponential
+    function of time, where the SFR rises initially and then decays.
+
+    .. math::
+        M_\star(t) = t/tau \cdot M_{inf} \cdot (1 - e^{-t/tau})
+ 
+    Attributes
+    ----------
+    stellar_mass_inf : astropy.Quantity
+        Asymptotic stellar mass formed at infinite time.
+    tau : astropy.Quantity
+        Timescale of the delayed exponential star formation rate.
+    metallicity : float
+        Metallicity of the gas (constant).
+    """
+
+    def __init__(self, **kwargs):
+        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf']*u.Msun,
+                                           default_unit=u.Msun)
+        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
+        self.metallicity = kwargs['metallicity']
+        ChemicalEvolutionModel.__init__(self, **kwargs)
+
+    @u.quantity_input
+    def stellar_mass_formed(self, time):
+        return self.stellar_mass_inf * (1 - np.exp(-time / self.tau)
+            * (self.tau + time) / self.tau)
+
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.sie, fill_value=self.metallicity)
+
+
+#-------------------------------------------------------------------------------
+class GaussianBurstCEM(ChemicalEvolutionModel):
+    """
+    Gaussian burst star formation model.
+
+    This class models a galaxy's star formation history as a single gaussian burst
+    occurring at a specific time, after which no further star formation occurs.
+
+    Attributes
+    ----------
+    mass_burst : float or astropy.Quantity
+        Total stellar mass formed in the burst.
+    time_burst : float or astropy.Quantity
+        Time of the starburst in cosmic time.
+    sigma_burst : float or astropy.Quantity
+        Span time of the burst in terms of the standard deviation.
+    burst_metallicity : float or astropy.Quantity
+        Metallicity of the burst.
+    """
+ 
+    def __init__(self, **kwargs):
+        self.mass_burst = check_unit(kwargs["mass_burst"], u.Msun)
+        self.time_burst = check_unit(kwargs["time_burst"], u.Gyr)
+        self.sigma_burst = check_unit(kwargs["sigma_burst"], u.Gyr)
+        self.burst_metallicity = kwargs["burst_metallicity"]
+        ChemicalEvolutionModel.__init__(self, **kwargs)
+
+    @u.quantity_input
+    def stellar_mass_formed(self, time):
+        return self.mass_burst / 2 * (1 + special.erf((time-self.tb) / (np.sqrt(2) * self.sigma_burst)))
+  
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.sie, fill_value=self.metallicity)
+
+
+#-------------------------------------------------------------------------------
+class LogNormalCEM(ChemicalEvolutionModel):
+    """
+    Exponentially delayed star formation history model.
+
+    This CEM models a galaxy's star formation rate as a delayed exponential
+    function of time, where the SFR rises initially and then decays.
+
+    .. math::
+        M_\star(t) = t/tau \cdot M_{inf} \cdot (1 - e^{-t/tau})
 
     Attributes
     ----------
@@ -287,23 +359,29 @@ class Exponential_SFR_delayed(ChemicalEvolutionModel):
         Asymptotic stellar mass formed at infinite time.
     tau : astropy.Quantity
         Timescale of the delayed exponential star formation rate.
-    Z : float
-        Metallicity of the gas.
-
+    metallicity : float
+        Metallicity of the gas (constant).
     """
+    def __init__(self, alpha : float, z_today : u.Quantity,
+                    lnt0: float, scale:float, m_today=1.0 << u.Msun,
+                    **kwargs):
+        super().__init__(**kwargs)
+        self.alpha = alpha
+        self.z_today = z_today
+        self.lnt0 = lnt0
+        self.scale = scale
+        self.m_today = m_today
 
-    def __init__(self, **kwargs):
-        self.stellar_mass_inf = kwargs['stellar_mass_inf']*u.Msun
-        self.tau = kwargs['tau']*u.Gyr
-        self.Z = kwargs['Z']
-        ChemicalEvolutionModel.__init__(self, **kwargs)
+    @u.quantity_input
+    def stellar_mass_formed(self, times: u.Quantity):
+        z = - (np.log(times.to_value("Gyr")) - self.lnt0) / self.scale
+        m = 0.5 * (1 - special.erf(z / np.sqrt(2)))
+        return m / m.max() * self.m_today
 
-    def stellar_mass_formed(self, time):
-        return self.stellar_mass_inf * ( 1 - np.exp(-time/self.tau)*(self.tau+time)/self.tau)
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.sie, fill_value=self.metallicity)
 
-    def ism_metallicity(self, time):
-        #TODO
-        pass
 
 #-------------------------------------------------------------------------------
 class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
@@ -421,50 +499,6 @@ class Polynomial_MFH(ChemicalEvolutionModel):
         else: #If you just want the observable
             return self.M0 * np.matmul(self.coeffs, self.M)
 
-
-#-------------------------------------------------------------------------------
-class Gaussian_burst(ChemicalEvolutionModel):
-
-  def __init__(self, **kwargs):
-    self.stellar_mass_inf = kwargs['M_stars']*u.Msun
-    self.tb = kwargs['t']*u.Gyr             # Born time
-    self.c = kwargs['c']*u.Gyr # En Myr
-    ChemicalEvolutionModel.__init__(self, **kwargs)
-
-  def stellar_mass_formed(self, time):
-    return self.stellar_mass_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
-  
-  def ism_metallicity(self, time):
-      pass
-
-class LogNormal_MFH(ChemicalEvolutionModel):
-    def __init__(self, alpha : float, z_today : u.Quantity,
-                 lnt0: float, scale:float, m_today=1.0 << u.Msun,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.alpha = alpha
-        self.z_today = z_today
-        self.lnt0 = lnt0
-        self.scale = scale
-        self.m_today = m_today
-
-    @property
-    def Z(self):
-        return 
-
-    @Z.setter
-    def Z(self, z):
-        pass
-
-    def stellar_mass_formed(self, times: u.Quantity):
-        z = - (np.log(times.to_value("Gyr")) - self.lnt0) / self.scale
-        m = 0.5 * (1 - special.erf(z / np.sqrt(2)))
-        return m / m.max() * self.m_today
-
-    def integral_Z_SFR(self, times: u.Quantity):
-        m = self.stellar_mass_formed(times)
-        z_star = self.z_today * np.power(m / m.max(), self.alpha)
-        return m * z_star
 
 class LogNormalQuenched_MFH(LogNormal_MFH):
     __slots__ = 'alpha', 'z_today', 'lnt0', 'scale', 't_quench', 'tau_quench'
