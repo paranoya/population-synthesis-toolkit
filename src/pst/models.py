@@ -25,7 +25,6 @@ class ChemicalEvolutionModel(ABC):
     **kwargs : dict, optional
         Optional parameters to initialize the model. The following parameters
         are supported:
-        
         - `M_gas` (astropy.Quantity): Initial gas mass of the galaxy. Default is 0 solar masses.
         - `Z` (float): Initial metallicity of the galaxy. Default is 0.02 (solar metallicity).
 
@@ -55,8 +54,6 @@ class ChemicalEvolutionModel(ABC):
     
     def __init__(self, **kwargs):
         pass
-        #self.M_gas = kwargs.get('M_gas', 0*u.Msun)
-        #self.Z = kwargs.get('Z', 0.02)
 
     @abstractmethod
     def stellar_mass_formed(self, time):
@@ -93,7 +90,7 @@ class ChemicalEvolutionModel(ABC):
             Stellar masses corresponding to each SSP age and metallicity, in units
             of solar masses.
         """
-        
+
         # define age bins from 0 to t_obs
         age_bins = np.hstack(
             [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
@@ -110,7 +107,7 @@ class ChemicalEvolutionModel(ABC):
         bin_mass = mass[:-1] - mass[1:]
         bin_age = (age_bins[1:] + age_bins[:-1]) / 2
         bin_metallicity = self.ism_metallicity(t_obs - bin_age)
-        
+ 
         return ssp.get_weights(ages=bin_age,
                                metallicities=bin_metallicity,
                                masses=bin_mass)
@@ -153,7 +150,7 @@ class ChemicalEvolutionModel(ABC):
 
     def compute_photometry(self, ssp, t_obs, photometry=None):
         """
-        Compute the photometry of the galaxy at a given time.
+        Compute the syntehtic photometry using a SSP at a given time.
 
         This method computes the photometric fluxes associated to
         the SFH by synthesizing the fluxes of the input SSP model.
@@ -193,7 +190,7 @@ class ChemicalEvolutionModel(ABC):
 
 
 #-------------------------------------------------------------------------------
-class Single_burst(ChemicalEvolutionModel):
+class SingleBurstCEM(ChemicalEvolutionModel):
     """
     Single burst star formation model.
 
@@ -206,6 +203,8 @@ class Single_burst(ChemicalEvolutionModel):
         Total stellar mass formed in the burst.
     time_burst : astropy.Quantity
         Time of the starburst in cosmic time.
+    burst_metallicity : astropy.Quantity
+        Metallicity of the burst.
     """
     def __init__(self, **kwargs):
         self.mass_burst = kwargs['mass_burst']
@@ -216,7 +215,7 @@ class Single_burst(ChemicalEvolutionModel):
             self.time_burst *= u.Gyr
 
         self.burst_metallicity = kwargs.get("burst_metallicity",
-                                            0.02)
+                                            0.02 * u.dimensionless_unscaled)
 
         super().__init__(self, **kwargs)
 
@@ -234,7 +233,7 @@ class Single_burst(ChemicalEvolutionModel):
 
 
 #-------------------------------------------------------------------------------
-class Exponential_SFR(ChemicalEvolutionModel):
+class ExponentialCEM(ChemicalEvolutionModel):
     """
     Exponentially declining star formation history model.
 
