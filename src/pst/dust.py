@@ -5,18 +5,6 @@ This module implements dust extinction and emission models for stellar populatio
 including a base class for general dust models and specific implementations such as a dust screen 
 and the Charlot & Fall (2000) extinction model.
 
-Dependencies
-------------
-- `astropy.units`: for handling physical quantities with units.
-- `numpy`: for numerical operations.
-- `extinction`: for dust extinction laws.
-
-Classes
--------
-- DustModelBase: Abstract base class for dust models.
-- DustScreen: Implements a simple dust screen extinction model.
-- CF03DustScreen: Implements the Charlot & Fall (2000) dust screen model for young and old populations.
-
 Usage
 -----
 This module is intended for applying dust extinction or emission to stellar spectra, either
