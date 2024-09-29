@@ -36,13 +36,13 @@ class MassPropMetallicityMixin:
 
     def ism_metallicity(self, times):
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / m[-1], self.alpha)
+        return self.ism_metallicity_today * np.power(m / m[-1], self.alpha_powerlaw)
 
 def sfh_quenching_decorator(stellar_mass_formed):
     """A decorator for including a quenching event in a given SFH."""
     def wrapper_stellar_mass_formed(*args):
         quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
-        stellar_mass = stellar_mass_formed(args[1])
+        stellar_mass = stellar_mass_formed(*args)
         return np.clip(stellar_mass / stellar_mass[args[1] <= quenching_time].max(),
                 0, 1) * stellar_mass[-1]
     return wrapper_stellar_mass_formed
@@ -265,7 +265,7 @@ class ExponentialCEM(ChemicalEvolutionModel):
                                            default_unit=u.Msun)
         self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
         self.metallicity = kwargs['metallicity']
-        ChemicalEvolutionModel.__init__(self, **kwargs)
+        super().__init__(**kwargs)
 
     @u.quantity_input
     def stellar_mass_formed(self, time : u.Gyr):
@@ -273,7 +273,7 @@ class ExponentialCEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.sie, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.metallicity)
 
 
 class ExponentialQuenchedCEM(ExponentialCEM):
@@ -286,7 +286,7 @@ class ExponentialQuenchedCEM(ExponentialCEM):
     """
     def __init__(self, **kwargs):
         self.quenching_time = check_unit(kwargs['quenching_time'], u.Gyr)
-        super().__init__(self, **kwargs)
+        super().__init__(**kwargs)
 
     @sfh_quenching_decorator
     def stellar_mass_formed(self, time : u.Gyr):
