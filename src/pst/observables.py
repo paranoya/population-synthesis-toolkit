@@ -475,7 +475,7 @@ class Filter(object):
 
         return f_lambda, f_lambda_err
 
-    def plot(self):
+    def plot(self, show=False):
         """Plot the filter response curve.
         
         Plot the original filter response curve together with the interpolated
@@ -492,6 +492,10 @@ class Filter(object):
             ax.step(self.wavelength, self.response, label='Interpolated',
                       color='r', where="mid")
         ax.legend()
+        if show:
+            plt.show()
+        else:
+            plt.close()
         return fig
 
 
@@ -503,22 +507,16 @@ class TopHatFilter(Filter):
     :class:`Filter`
     """
     def __init__(self, central_wave, width, **kwargs):
-        if not isinstance(central_wave, u.Quantity):
-            central_wave = central_wave << u.Angstrom
-        if not isinstance(width, u.Quantity):
-            width = width << u.Angstrom
+        central_wave = utils.check_unit(central_wave, u.Angstrom)
+        width = utils.check_unit(width, u.Angstrom)
 
         self.wavelength = kwargs.get('wavelength', None)
-        if not hasattr(self.wavelength, "unit"):
-            self.wavelength *= u.angstrom
-        if not (self.wavelength[1:] > self.wavelength[:-1]).all():
-            raise NameError('Wavelength array must be crescent')
-        
         if self.wavelength is None:
             self.filter_wavelength = np.linspace(central_wave - width,
                                     central_wave + width,
                                     50)
         else:
+            self.wavelength = utils.check_unit(self.wavelength, u.Angstrom)
             self.filter_wavelength = self.wavelength.copy()
 
         self.filter_resp = np.ones(self.filter_wavelength.size)
