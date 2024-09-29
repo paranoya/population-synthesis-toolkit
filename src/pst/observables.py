@@ -476,7 +476,11 @@ class Filter(object):
         return f_lambda, f_lambda_err
 
     def plot(self):
-        """Plot the filter response curve."""
+        """Plot the filter response curve.
+        
+        Plot the original filter response curve together with the interpolated
+        version computed using a new grid of wavelengths.
+        """
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.step(self.filter_wavelength, self.filter_resp, label='Original',
@@ -489,6 +493,7 @@ class Filter(object):
                       color='r', where="mid")
         ax.legend()
         return fig
+
 
 class TopHatFilter(Filter):
     """Top hat photometric filter
