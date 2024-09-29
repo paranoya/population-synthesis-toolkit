@@ -11,6 +11,8 @@ from matplotlib import pyplot as plt
 
 from astropy import units as u
 
+SQRT_2 = np.sqrt(2)
+
 def flux_conserving_interpolation(new_wave, wave, spectra):
     """Interpolate a spectra to a new grid of wavelengths preserving the flux density."""
     wave_limits = 1.5 * wave[[0, -1]] - 0.5 * wave[[1, -2]]
@@ -66,23 +68,3 @@ def check_unit(self, quantity, default_unit=None):
     else:
         return quantity
 
-if __name__ == '__main__':
-    # Small test
-    from ppxf.ppxf_util import gaussian_filter1d
-
-    x = np.linspace(1, 100, 10000)
-    old_sigma = 1
-    f = 1 / old_sigma / np.sqrt(2 * np.pi) * np.exp(- (x - 30)**2
-                                                    / 2 / old_sigma**2)
-    sigma = 3 * np.ones(f.size)
-    # sigma = np.linspace(1, 30, f.size)
-    new_sigma = np.sqrt(3**2 + old_sigma**2)
-    new_gauss = 1 / new_sigma / np.sqrt(2 * np.pi) * np.exp(- (x - 30)**2
-                                                            / 2 / new_sigma**2)
-    conv_f = gaussian1d_conv(f, sigma, deltax=1)
-    ppxf_conv_f = gaussian_filter1d(f, sig=sigma)
-    plt.figure()
-    plt.plot(f, c='r')
-    plt.plot(new_gauss, lw=1, c='k')
-    plt.plot(conv_f, '--', c='b')
-    plt.plot(ppxf_conv_f, '--', c='g')
