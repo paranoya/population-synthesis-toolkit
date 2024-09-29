@@ -18,10 +18,6 @@ Key Features
 - Output synthetic **spectral energy distributions (SEDs)** and broad-band photometry.
 - Fit observed data to estimate parameters like age, metallicity, and dust content.
 
-Scientific Context
-==================
-Stellar population synthesis is a critical tool in astrophysics for understanding the light emitted by galaxies and star clusters. By simulating the properties of stellar populations, MySPS helps derive physical characteristics such as age, metallicity, and star formation rates from observed data.
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents
