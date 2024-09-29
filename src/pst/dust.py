@@ -165,8 +165,8 @@ class DustScreen(DustModelBase):
             Dimensionless extinction factor to be applied to the spectra.
         """
         return 10**(-0.4 * self.extinction_law(
-            wavelength.to_value("angstrom"), a_v, self.r_extinction)
-            ) <<  u.dimensionless_unscaled
+            np.array(wavelength.to_value("angstrom"), dtype=float),
+            a_v, self.r_extinction)) <<  u.dimensionless_unscaled
 
     def get_emission(self, wavelength):
         """
