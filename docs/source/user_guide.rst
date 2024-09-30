@@ -4,47 +4,83 @@
 User Guide
 =====================
 
-This guide covers the detailed usage of PST for varius tasks.
+This guide covers the detailed usage of PST for varius tasks. For practical cases, see the :ref:`tutorials <tutorials>` section.
 
-Concepts
-========
-Before using PST, it's important to understand the following key scientific concepts:
+Simple Stellar Population (SSP) Models
+======================================
 
-- **Simple Stellar Population Model**: Models representing groups of stars with a specific age, metallicity, and initial mass function.
-- **Initial Mass Function (IMF)**: The distribution of star masses at birth, critical to synthesizing stellar populations.
-- **Star Formation Histories (SFH)**: Describes the rate at which stars form over time in a galaxy or stellar cluster.
+**Simple Stellar Population (SSP)** models are an essential tool in understanding the evolution and properties of stellar systems. An SSP represents a group of stars formed at the same time with the same initial chemical composition. By assuming a single age and metallicity, SSPs provide a framework for modeling how these populations evolve over time and allow the synthesis of observables, such as spectra and photometry.
 
-Single Stellar Population (SSP) Models
-=======================================
-An SSP model represents a library of simple stellar populations (i.e. a set of stars formed at the same time with the same metallicity).
-The following example demonstrates how to initialize an SSP model:
+In this section, we'll dive into the SSP models implemented in PST, explore their attributes, and highlight the features that this module provides for astrophysical modeling.
 
-.. code-block:: python
+:class:`SSPBase`: Core Class for SSP Models
 
-    from pst.SSP import PopStar
-    import matplotlib.pyplot as plt
+The class :class:`SSPBase` is the backbone of the SSP models in PST. It provides a flexible and efficient way to represent the spectral energy distributions (SEDs) of stellar populations across a grid of ages and metallicities.
 
-    # Initialize the SSP model
-    ssp_model = PopStar(IMF="cha")
+Key Attributes
+^^^^^^^^^^^^^^
 
-    print("SSP model consisting of: \n",
-    f"{ssp_model.ages.size} ages from {ssp_model.ages[0]} to {ssp_model.ages[-1]}",
-    "\n",
-    f"{ssp_model.metallicities.size} metallicities from {ssp_model.metallicities[0]} to {ssp_model.metallicities[-1]}")
+- **ages** (:class:`astropy.units.Quantity`): An array of SSP ages, representing different stages of stellar evolution.
+- **metallicities** (:class:`astropy.units.Quantity`): The metallicity values (fraction of elements heavier than helium) for the SSPs.
+- **L_lambda** (:class:`astropy.units.Quantity`): The spectral energy distributions (SEDs) of the SSPs. This 3D array holds data for each combination of metallicity, age, and wavelength.
+- **wavelength** (:class:`astropy.units.Quantity`): The wavelength array associated with the SEDs of the SSPs, allowing the user to model the flux over a range of wavelengths.
 
-    print("Wavelength range of the SSP model goes from"
-          f"{ssp_model.wavelength[0]} to {ssp_model.wavelength[-1]}",
-          f"\nSED shape {ssp_model.L_lambda.shape}")
+### Features Provided by PST SSP Models
 
-    # Plot a spectrum
-    metallicity_idx = 2
-    age_idx = 50
-    plt.figure()
-    plt.plot(ssp_model.wavelength, ssp_model.L_lambda[metallicity_idx, age_idx])
-    plt.xlabel('Wavelength (Angstrom)')
-    plt.ylabel('Luminosity')
-    plt.title(f'SSP Spectrum (Z={ssp_model.metallicities[metallicity_idx]}, Age={ssp_model.ages[age_idx]:.1f})')
-    plt.show()
+PST provides a number of features to work with SSP models, allowing users to manipulate and extract various physical and observational quantities:
+
+1. **SSP Interpolation**
+   The `get_weights` method provides a 2D interpolation tool that allows you to compute weights for a given set of ages and metallicities. This method is useful for handling multiple stellar populations simultaneously, especially in galaxy synthesis models where stars form over a range of ages and metallicities.
+
+    Example:
+
+    .. code-block:: python
+
+            weights = ssp_model.get_weights(ages=[1e9, 5e9], metallicities=[0.02, 0.03])
+
+
+2. **Grid Binning and Re-interpolation**
+    The `regrid` method allows you to rebin the SSP model to new grids of ages and metallicities. This is useful if you need to match the SSP model grid to other datasets or models.
+
+    Example:
+
+    .. code-block:: python
+
+            new_age_bins = np.logspace(6, 10, 50) * u.Gyr
+            new_metal_bins = np.logspace(-2, 0, 20)
+            ssp_model.regrid(new_age_bins, new_metal_bins)
+
+3. **Wavelength Handling**
+    The `cut_wavelength` method allows users to cut the SED to specific wavelength ranges, which is useful when focusing on particular bands or wavelengths.
+
+    Example:
+
+    .. code-block:: python
+
+            ssp_model.cut_wavelength(wl_min=3000 * u.AA, wl_max=7000 * u.AA)
+
+    Additionally, `interpolate_sed` provides a way to interpolate the SEDs over new wavelength bins using a flux-conserving interpolation scheme.
+
+4. **Mass-to-Light Ratios**
+    The get_mass_lum_ratio and get_specific_mass_lum_ratio methods calculate the mass-to-light ratio over a specified wavelength range, providing critical information for stellar population synthesis models.
+
+    Example:
+
+    .. code-block:: python
+
+            mass_lum_ratio = ssp_model.get_mass_lum_ratio(wl_range=np.array([4000, 7000]) * u.angstrom)
+
+
+5. **Synthetic Photometry**
+    One of the most powerful features is the ability to compute synthetic photometry using the `compute_photometry` method. This function calculates the flux observed through a set of photometric filters at a given cosmic time.
+
+    Example:
+
+    .. code-block:: python
+
+            filters = load_photometric_filters(["SLOAN_SDSS.g", "SLOAN_SDSS.r"])
+            photometry = ssp_model.compute_photometry(filters, z_obs=0.0)
+
 
 Chemical Evolution Models (CEM)
 ===============================
@@ -76,9 +112,10 @@ A CSP represents a population of stars formed over a range of times, following a
 
 For more options, refer to the :ref:`api_reference`.
 
-observables
+Observables
 ===========
 
-Dust
-====
+
+Dust extinction effects
+=======================
 

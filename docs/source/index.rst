@@ -1,22 +1,21 @@
-.. pst documentation master file, created by
-   sphinx-quickstart on Thu Sep 12 14:29:14 2024.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to PST's Documentation
-==========================================
+==============================
 
 Overview
 ========
-MySPS is a Python package for Stellar Population Synthesis (SPS), designed for astronomers and astrophysicists. It provides tools to model and analyze the integrated light from galaxies, star clusters, and stellar populations.
+The **Population Synthesis Toolkit (PST)** is a Python library designed to provide a user-friendly interface for working with **Simple Stellar Population (SSP)** models and synthesizing a variety of observable quantities such as spectra, photometry, and equivalent widths.
+
+At its core, PST combines individual SSPs to generate **Composite Stellar Populations (CSP)** through the implementation of **Chemical Evolution Models (CEM)**. These models track the evolution of a stellar system, considering both its **Star Formation History (SFH)**—the mass converted into stars over time—and the chemical enrichment of the gas.
+
+PST supports a wide range of SSP models (e.g., **PopStar, XSL, MILES, BC03**) and offers flexible CEMs, allowing users to simulate observable quantities with precision. Additionally, it provides auxiliary tools to include **dust extinction** and **kinematics** effects.
 
 Key Features
-=============
-- Model **Single Stellar Populations (SSP)** or **Composite Stellar Populations (CSP)**.
-- Input **Star Formation Histories (SFH)** and calculate spectra, photometry, or integrated properties.
-- Flexible **Initial Mass Function (IMF)** options, including user-defined IMFs.
-- Output synthetic **spectral energy distributions (SEDs)** and broad-band photometry.
-- Fit observed data to estimate parameters like age, metallicity, and dust content.
+============
+- Intuitive interface to multiple SSP models (e.g., **PopStar**, **XSL**, **MILES**, **BC03**).
+- Implementation of various **Chemical Evolution Models (CEMs)** to simulate **Composite Stellar Populations (CSPs)**.
+- Tools to compute **synthetic spectra, photometry**, and **equivalent widths** from both SSPs and CSPs.
+- Optional integration of **dust extinction** and **kinematics** effects into the model outputs.
+- Modules for additional functionality, such as fitting **Spectral Energy Distributions (SEDs)** to observed data.
 
 .. toctree::
    :maxdepth: 2
@@ -28,11 +27,9 @@ Key Features
    tutorials
    get_ssp_data
    api
-   
 
 Indices and tables
 ==================
-
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
