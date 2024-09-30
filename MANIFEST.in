@@ -8,6 +8,7 @@ recursive-include src *.dat
 recursive-include src *.fits
 recursive-include src *.fits.gz
 recursive-include src *.ctio
+recursive-include src *.json
 
 recursive-include docs *.bat
 recursive-include docs *.py
