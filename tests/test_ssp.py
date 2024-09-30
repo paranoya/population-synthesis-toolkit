@@ -18,10 +18,16 @@ class TestSSP(unittest.TestCase):
         self.ssp_model.cut_wavelength(5000, 9000)
     
     def test_interpolate_sed(self):
-        new_wl = np.arange(5000, 8000, 0.5)
+        new_wl = np.arange(5000, 8000, 5.5)
         self.ssp_model.interpolate_sed(new_wl)
         self.assertEqual(self.ssp_model.wavelength.size, new_wl.size - 1)
         self.assertEqual(self.ssp_model.L_lambda.shape[-1], new_wl.size - 1)
+
+    def test_regrid(self):
+        new_ages = np.array([0.5, 1.0, 5.0])
+        new_metallicities = np.array([0.01, 0.02])
+        copy_ssp = self.ssp_model.copy()
+        copy_ssp.regrid(new_ages, new_metallicities)
 
     def test_get_mass_lum_ratio(self):
         mass_to_lum = self.ssp_model.get_mass_lum_ratio([5000, 5500])
