@@ -1,5 +1,5 @@
 astropy>=5.0.0
-numpy>=1.20
+numpy>=1.20, <2.0.0
 matplotlib>=3.7.0
 extinction>=0.4
 scipy>=1.10
