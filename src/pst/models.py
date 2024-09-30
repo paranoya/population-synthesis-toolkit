@@ -9,7 +9,8 @@ from pst.SSP import SSPBase
 from pst.utils import check_unit, SQRT_2
 
 
-# Utils and mixins
+# CEM utils and mixins
+
 class MassPropMetallicityMixin:
     r"""Model mixin where the metallicity is proportional to the stellar mass
     
@@ -435,7 +436,7 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
 
 
 #-------------------------------------------------------------------------------
-class Tabular_CEM(ChemicalEvolutionModel):
+class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
     
     Description
@@ -520,11 +521,11 @@ class Tabular_CEM(ChemicalEvolutionModel):
         return integral
 
 
-class Tabular_CEM_ZPowerLaw(MassPropMetallicityMixin, Tabular_CEM):
+class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     """
     See Also
     --------
-    :class:`Tabular_CEM`
+    :class:`TabularCEM`
     :class:`MassPropMetallicityMixin`
 
     """
