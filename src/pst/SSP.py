@@ -76,23 +76,24 @@ class SSPBase(object):
         else:
             self._wavelength = wave
        
-    def get_weights(self, ages, metallicities, masses = None):
-        """2D interpolation of a list of ages nd metallicities.
+    def get_weights(self, ages, metallicities, masses=None):
+        """2D interpolation of a list of ages and metallicities.
+        
+        Parameters
+        ----------
+        ages : np.array or astropy.units.Quantity
+            SSP ages to interpolate.
+        metallicites : np.array or astropy.units.Quantity
+            Metallicity associated to each age.
+        masses : np.array, astropy.units.Quantity or None, optional
+            Stellar mass corresponding to each SSP.
         """
-        # ensure it works if single float values are passed
-        # (is it useful?)
-        ages = np.array(ages)
+        ages = check_unit(np.array(ages), u.Gyr)
         metallicities = np.array(metallicities)
         if masses is None:
-            masses = np.ones(ages.size)
+            masses = np.ones(ages.size) * u.Msun
         else:
-            masses = np.array(masses)
-
-        # add units
-        if not isinstance(ages, u.Quantity):
-            ages = ages << u.Gyr
-        if not isinstance(masses, u.Quantity):
-            masses = masses << u.Msun
+            masses = check_unit(np.array(masses), u.Msun)
 
         age_idx = np.clip(self.ages.searchsorted(ages), 1, self.ages.size-1)
         weights_age = np.log(ages / self.ages[age_idx-1])
@@ -124,34 +125,30 @@ class SSPBase(object):
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
         return logmet_bin_edges, logage_bin_edges
 
-    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
-        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
-        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
-        logmet_bin_edges, logage_bin_edges = self.get_ssp_logedges()
+    def regrid(self, age_bins, metallicity_bins):
+        """Interpolate the SSP model to a new grid of input ages and metallicities.
         
-        ssp_age_idx = np.searchsorted(logage_bin_edges, n_logage_bin_edges)
-        age_bins = [slice(ssp_age_idx[i], ssp_age_idx[i+1]) for i in range(len(n_logage_bin_edges) - 1)]
-        ssp_met_idx = np.searchsorted(logmet_bin_edges, n_logmet_bin_edges)
-        met_bins = [slice(ssp_met_idx[i], ssp_met_idx[i+1]) for i in range(len(n_logmet_bin_edges) - 1)]
-
+        Parameters
+        ----------
+        age_bins : np.array or astropy.units.Quantity
+        """
+        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        age_bins = check_unit(age_bins, u.Gyr)
+        metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
         # Bin the SED of the SSPs
-        previous_sed = self.L_lambda.copy()
-        self.L_lambda = np.empty(
-            (len(met_bins), len(age_bins), previous_sed.shape[-1]),
-            dtype=float) * previous_sed.unit
-
-        print("[SSP] New SSP grid dimensions: ", self.L_lambda.shape)
-        for j, m_bin in enumerate(met_bins):
-            met_av_sed = np.exp(np.mean(
-                np.log(previous_sed[m_bin] / previous_sed.unit), axis=0))
+        new_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
+                                 self.wavelength.size)) * self.L_lambda.unit
+        print("New SSP SED shape: ", new_l_lambda.shape)
+        for j, m_bin in enumerate(metallicity_bins):
             for i, a_bin in enumerate(age_bins):
-                self.L_lambda[j, i, :] = np.exp(
-                    np.mean(np.log(met_av_sed[a_bin]), axis=0)) * previous_sed.unit
+                weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
+                new_l_lambda[j, i] = np.sum(
+                    self.L_lambda * weights[:, :, np.newaxis] / u.Msun, axis=(0, 1))
 
-        self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2
-                                  ) * units.dimensionless_unscaled
-        log_ages_yr = (n_logage_bin_edges[:-1] + n_logage_bin_edges[1:]) / 2
-        self.ages = 10**log_ages_yr * u.yr
+        print("Updating SSP model metallicities, ages and SED")
+        self.metallicities = metallicity_bins
+        self.ages = age_bins
+        self.L_lambda = new_l_lambda
 
     def cut_wavelength(self, wl_min=None, wl_max=None):
         """Cut model wavelength edges.
