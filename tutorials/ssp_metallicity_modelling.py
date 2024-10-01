@@ -32,7 +32,7 @@ color_mesh_args = {"vmin": -5, "vmax": 1, "cmap": "nipy_spectral"}
 
 for z_hist, label, z_axs in zip(z_histories, z_labels, axs):
 
-    sfh_model = models.Tabular_CEM(cosmic_time, mass_history, z_hist)
+    sfh_model = models.TabularCEM(cosmic_time, mass_history, z_hist)
 
     #old_masses = models.ChemicalEvolutionModel.interpolate_ssp_masses(sfh_model, ssp, today)
     new_masses = sfh_model.interpolate_ssp_masses(ssp, t_obs=today)
