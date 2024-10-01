@@ -66,7 +66,7 @@ class TestModels(unittest.TestCase):
     def test_tabular(self):
         low_res_time = np.linspace(0, 13.7, 10) * u.Gyr
         masses = 1 - np.exp(-low_res_time / 3.0 / u.Gyr)
-        model = models.Tabular_CEM(
+        model = models.TabularCEM(
             times=low_res_time, masses=masses,
             metallicities=np.full(masses.size, fill_value=0.02))
 
