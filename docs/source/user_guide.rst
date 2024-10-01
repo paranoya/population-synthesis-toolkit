@@ -163,7 +163,7 @@ Currently, PST is able to produce three different types of observable quantities
     Synthetic photometry is produced by means of the :class:`Filter` class, that
     represents the passband of a given photometric band.
 
-    PST uses the :ref:`Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>` to have access to a wide range of photometric filters. If a filter is not found locally, it is downladed automatically and placed in the default filter directory.
+    PST uses the `Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>`_ to have access to a wide range of photometric filters. If a filter is not found locally, it is downladed automatically and placed in the default filter directory.
 
     Example
 
@@ -215,5 +215,12 @@ For more details, refer to the API :ref:`observables`.
 
 Dust extinction effects
 =======================
+
+The dust model module uses the extinctino laws provided by the `extinction <https://extinction.readthedocs.io/en/latest/>`_ library.
+
+Currently, there are two available models for dust extinction:
+
+- Single Dust screen
+- Double dust screen (akin to `Charlot & Fall 2000 <https://ui.adsabs.harvard.edu/abs/2000ApJ...539..718C/abstract>`_)
 
 For more details, refer to the API :ref:`dust`.
