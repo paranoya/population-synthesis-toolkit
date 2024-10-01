@@ -4,7 +4,7 @@
 
 ## Status
 [![Documentation Status](https://readthedocs.org/projects/population-synthesis-toolkit/badge/?version=latest)](https://population-synthesis-toolkit.readthedocs.io/en/latest/?badge=latest)
-![Unit tests](https://github.com/github/docs/actions/workflows/testing.yml/badge.svg)
+![Unit tests](https://github.com/paranoya/population-synthesis-toolkit/actions/workflows/testing.yml/badge.svg)
 
 # Stellar population synthesis
 PST provides the tools for performing stellar population synthesis and computing
