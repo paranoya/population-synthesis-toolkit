@@ -40,7 +40,7 @@ for i, Z in enumerate(metallicities):
     sed_table = Table()
     for j, age in enumerate(logage):
         file = os.path.join(
-            path, IMF, 'SED',
+            path, imf, 'SED',
             'spneb_{0}_0.15_100_z{1:04.0f}_t{2:.2f}'.format(imf, Z*1e4, age))
         star, total = np.loadtxt(
             file, dtype=float, skiprows=0, usecols=(1, 3),
