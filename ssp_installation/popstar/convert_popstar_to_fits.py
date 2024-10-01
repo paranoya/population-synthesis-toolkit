@@ -28,7 +28,7 @@ metallicities = np.array([0.0001, 0.0004, 0.004, 0.008, 0.02,
                                        0.05])
 
 wavelength = np.loadtxt(os.path.join(
-            path, IMF, 'SED', f'spneb_{IMF}_0.15_100_z0500_t9.95'), dtype=float,
+            path, imf, 'SED', f'spneb_{imf}_0.15_100_z0500_t9.95'), dtype=float,
             skiprows=0, usecols=(0,), unpack=True) * u.Angstrom
 
 primary = fits.PrimaryHDU()
@@ -41,7 +41,7 @@ for i, Z in enumerate(metallicities):
     for j, age in enumerate(logage):
         file = os.path.join(
             path, IMF, 'SED',
-            'spneb_{0}_0.15_100_z{1:04.0f}_t{2:.2f}'.format(IMF, Z*1e4, age))
+            'spneb_{0}_0.15_100_z{1:04.0f}_t{2:.2f}'.format(imf, Z*1e4, age))
         star, total = np.loadtxt(
             file, dtype=float, skiprows=0, usecols=(1, 3),
             unpack=True)  # Lsun/Angstrom/Msun
