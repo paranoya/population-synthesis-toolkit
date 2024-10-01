@@ -1,5 +1,6 @@
 """
-Module to compute observable quantities from an input spectra.
+This module contains some tools for computing observable quantities
+(e.g. photometry, equivalent widths) from spectra.
 """
 
 import numpy as np
@@ -14,18 +15,9 @@ from . import utils
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 def list_of_available_filters():
-    filter_dir = os.path.join(os.path.dirname(__file__),
-                              "data", "filters")
-#    print(f"Checking filters available at {filter_dir}")
+    """List the currently available filters in the default directory."""
+    filter_dir = os.path.join(PST_DATA_DIR, "filters")
     return os.listdir(filter_dir)
-
-def find_filt_from_name(name):
-    filters = list_of_available_filters()
-    for f in filters:
-        if name.lower() in f.strip(".dat").lower():
-            return os.path.join(os.path.dirname(__file__),
-                              "data", "filters", f)
-    return None
 
 def load_photometric_filters(filters):
     """Convenience function for constructing a list of photometric filters.
@@ -483,8 +475,12 @@ class Filter(object):
 
         return f_lambda, f_lambda_err
 
-    def plot(self):
-        """Plot the filter response curve."""
+    def plot(self, show=False):
+        """Plot the filter response curve.
+        
+        Plot the original filter response curve together with the interpolated
+        version computed using a new grid of wavelengths.
+        """
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.step(self.filter_wavelength, self.filter_resp, label='Original',
@@ -496,7 +492,12 @@ class Filter(object):
             ax.step(self.wavelength, self.response, label='Interpolated',
                       color='r', where="mid")
         ax.legend()
+        if show:
+            plt.show()
+        else:
+            plt.close()
         return fig
+
 
 class TopHatFilter(Filter):
     """Top hat photometric filter
@@ -506,22 +507,16 @@ class TopHatFilter(Filter):
     :class:`Filter`
     """
     def __init__(self, central_wave, width, **kwargs):
-        if not isinstance(central_wave, u.Quantity):
-            central_wave = central_wave << u.Angstrom
-        if not isinstance(width, u.Quantity):
-            width = width << u.Angstrom
+        central_wave = utils.check_unit(central_wave, u.Angstrom)
+        width = utils.check_unit(width, u.Angstrom)
 
         self.wavelength = kwargs.get('wavelength', None)
-        if not hasattr(self.wavelength, "unit"):
-            self.wavelength *= u.angstrom
-        if not (self.wavelength[1:] > self.wavelength[:-1]).all():
-            raise NameError('Wavelength array must be crescent')
-        
         if self.wavelength is None:
             self.filter_wavelength = np.linspace(central_wave - width,
                                     central_wave + width,
                                     50)
         else:
+            self.wavelength = utils.check_unit(self.wavelength, u.Angstrom)
             self.filter_wavelength = self.wavelength.copy()
 
         self.filter_resp = np.ones(self.filter_wavelength.size)

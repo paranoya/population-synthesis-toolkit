@@ -1,21 +1,15 @@
 # Population Synthesis Toolkit (PST)
 
-[Documentation](https://population-synthesis-toolkit.readthedocs.io/en/latest/)
+PST is a very flexible tool that allows users to perform stellar population synthesis using a variety of SSP models, as well as computing observables quantities such as spectra, photometry or equivalent widths from both synthetic and observational data.
 
-# Stellar population synthesis
-PST provides the tools for performing stellar population synthesis and computing
-composite stellar populations (CSP) spectra.
+## Status
+[![Documentation Status](https://readthedocs.org/projects/population-synthesis-toolkit/badge/?version=latest)](https://population-synthesis-toolkit.readthedocs.io/en/latest/?badge=latest)
+![Unit tests](https://github.com/paranoya/population-synthesis-toolkit/actions/workflows/testing.yml/badge.svg)
 
-## Current available Simple Stellar Population (SSP) models
+## Documentation
 
-This is the list of models that are currenly supported by PST and their original
-websites.
+Check the [documentation page](https://population-synthesis-toolkit.readthedocs.io/en/latest/) for extensive information.
 
-- [Granada-MILES](https://home.iaa.csic.es/~rosa/AYA2010/AYA2010/)
+## Installation
 
-- [(Py)PopStar](https://www.fractal-es.com/PopStar)
-
-- [XSL](http://xsl.u-strasbg.fr/page_ssp_all.html)
-
-# Observables
-- Synthetic photometry
+Follow the instructions at the [installation section](https://population-synthesis-toolkit.readthedocs.io/en/latest/installation.html) in the documentation page for details on installing PST.
