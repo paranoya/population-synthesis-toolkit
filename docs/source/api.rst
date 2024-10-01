@@ -1,5 +1,9 @@
+.. _api:
+
 API Documentation
 =================
+
+.. _SSP:
 
 SSP
 ---
@@ -8,6 +12,8 @@ SSP
    :undoc-members:
    :show-inheritance:
 
+.. _models:
+
 Models
 ------
 .. automodule:: pst.models
@@ -15,12 +21,16 @@ Models
    :undoc-members:
    :show-inheritance:
 
+.. _dust:
+
 Dust
 ----
 .. automodule:: pst.dust
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. _observables:
 
 Observables
 -----------
@@ -35,6 +45,8 @@ Fitting
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. _utils:
 
 Utils
 -----
