@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pst.SSP import PyPopStar, BaseGM, XSL
+from pst.SSP import PopStar
 from pst import models
 from astropy import units as u
 
@@ -9,7 +9,7 @@ from cProfile import Profile
 from pstats import SortKey, Stats
 from time import time as ttime
 
-ssp = PyPopStar(IMF='KRO')
+ssp = PopStar(IMF='cha')
 
 lbtime = np.geomspace(1e-3, 13.7, 300)
 time = 13.7 - lbtime[::-1]
@@ -35,7 +35,7 @@ m1 = exponential_sfh(time, tau)
 z1 = np.ones_like(m1.value) * 0.02 * u.dimensionless_unscaled
 z1 = z_star(time, alpha, z_0, t_0)
 
-model = models.Tabular_MFH(times=time * u.Gyr, masses=m1, Z=z1)
+model = models.TabularCEM(times=time * u.Gyr, masses=m1, metallicities=z1)
 print("PROFILING >>>\n\n")
 t0 = ttime()
 sed  = model.compute_SED(ssp, t_obs=13.7 * u.Gyr, allow_negative=False)
