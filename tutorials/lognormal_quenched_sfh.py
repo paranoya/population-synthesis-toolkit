@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from pst.SSP import PyPopStar, BaseGM, XSL
+from pst.SSP import PopStar
 from pst import models
 from astropy import units as u
 
@@ -9,38 +9,35 @@ from cProfile import Profile
 from pstats import SortKey, Stats
 from time import time as ttime
 
-ssp = PyPopStar(IMF='KRO')
+# Initialise the SSP model
+ssp = PopStar(IMF='cha')
 
-lbtime = np.geomspace(1e-3, 13.7, 300)
-time = 13.7 - lbtime[::-1]
-time[-1] = 13.7
+# Define the parameters of the Chemical Evolution Model
+alpha_powerlaw = -2.0
+ism_metallicity_today = 0.02 * u.dimensionless_unscaled
+lnt0 = np.log(7.0)
+scale = 2.0
+quenching_time = 10 * u.Gyr
+
+model = models.LogNormalQuenchedCEM(
+    alpha_powerlaw=alpha_powerlaw, ism_metallicity_today=ism_metallicity_today,
+    mass_today=1 * u.Msun,
+    lnt0=lnt0, scale=scale, quenching_time=quenching_time)
 
 dummy_t = np.linspace(0, 13.7, 1000) * u.Gyr
 
-tau = 30.0
-alpha = -2.0
-z_0 = 0.02
-t_0 = 7.0
-
-model = models.LogNormalQuenched_MFH(
-    alpha=alpha, z_today=z_0 << u.dimensionless_unscaled,
-    lnt0=np.log(7.0), scale=2.0, t_quench=10 << u.Gyr, tau_quench=1 << u.Gyr)
-
+# Check the mass formation history of the model
 plt.figure()
-plt.plot(dummy_t, model.integral_SFR(dummy_t))
+plt.title("Log-normal SFH with a quenching event")
+plt.plot(dummy_t, model.stellar_mass_formed(dummy_t))
+plt.axvline(quenching_time.to_value(dummy_t.unit), color='r', label="Quenching event")
+plt.legend()
+plt.xlabel("Cosmic time")
+plt.ylabel("Stellar mass formed")
 plt.show()
 
-n_tries = 1
-print("PROFILING >>>\n\n")
+# Estimate the elapsed time when computing the synthetic spectra
 t0 = ttime()
-model.compute_SED(ssp, t_obs=13.7 * u.Gyr, allow_negative=False)
-print(ttime() - t0)
+model.compute_SED(ssp, t_obs=13.7 * u.Gyr)
+print("Time spent computing the SED ", ttime() - t0)
 
-with Profile() as profile:
-    model.compute_SED(ssp, t_obs=13.7 * u.Gyr, allow_negative=False)
-    (
-        Stats(profile)
-        .strip_dirs()
-        .sort_stats(SortKey.CALLS)
-        .print_stats()
-    )
