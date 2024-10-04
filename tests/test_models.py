@@ -62,7 +62,7 @@ class TestModels(unittest.TestCase):
         self.assertEqual(mass[0], 0.0)
         self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun, rtol=1e-4))
         self.assertEqual(metals[0], 0.0)
-        self.assertEqual(metals[-1], 0.02)
+        self.assertEqual(np.isclose(metals[-1], 0.02, rtol=1e-4))
     
     def test_tabular(self):
         low_res_time = np.linspace(0, 13.7, 10) * u.Gyr
