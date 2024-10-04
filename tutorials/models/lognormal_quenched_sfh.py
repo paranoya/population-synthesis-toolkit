@@ -15,14 +15,15 @@ ssp = PopStar(IMF='cha')
 # Define the parameters of the Chemical Evolution Model
 alpha_powerlaw = -2.0
 ism_metallicity_today = 0.02 * u.dimensionless_unscaled
-lnt0 = np.log(7.0)
+t0 = 7.0 * u.Gyr
 scale = 2.0
 quenching_time = 10 * u.Gyr
 
 model = models.LogNormalQuenchedCEM(
     alpha_powerlaw=alpha_powerlaw, ism_metallicity_today=ism_metallicity_today,
-    mass_today=1 * u.Msun,
-    lnt0=lnt0, scale=scale, quenching_time=quenching_time)
+    mass_today=1234 * u.Msun,
+    today=13.7,
+    t0=t0, scale=scale, quenching_time=quenching_time)
 
 dummy_t = np.linspace(0, 13.7, 1000) * u.Gyr
 

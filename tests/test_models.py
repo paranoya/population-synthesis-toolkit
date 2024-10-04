@@ -79,7 +79,7 @@ class TestModels(unittest.TestCase):
         particles_z = 10**(np.random.uniform(-4, 0.3, n_particles))
         particles_t_form = np.random.exponential(3, n_particles)
         particles_mass = 10**(np.random.uniform(5, 6, n_particles))
-        model = models.ParticleGridCEM(
+        model = models.ParticleListCEM(
             time_form=particles_t_form * u.Gyr,
             metallicities=particles_z * u.dimensionless_unscaled,
             masses=particles_mass * u.Msun)
