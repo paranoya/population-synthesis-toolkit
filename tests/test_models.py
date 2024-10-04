@@ -52,7 +52,7 @@ class TestModels(unittest.TestCase):
 
     def test_lognormal_zpowerlaw(self):
         model = models.LogNormalZPowerLawCEM(
-            lnt0=0.5, scale=1.0, mass_today=1.0,
+            t0=3.0, scale=1.0, mass_today=1.0,
             ism_metallicity_today=0.02, alpha_powerlaw=2.0
         )
         mass = model.stellar_mass_formed(self.dummy_times)
