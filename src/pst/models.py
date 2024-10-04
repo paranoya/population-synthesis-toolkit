@@ -37,7 +37,7 @@ class MassPropMetallicityMixin:
 
     def ism_metallicity(self, times):
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / m[-1], self.alpha_powerlaw)
+        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
 
 def sfh_quenching_decorator(stellar_mass_formed):
     """A decorator for including a quenching event in a given SFH."""
@@ -403,7 +403,7 @@ class LogNormalCEM(ChemicalEvolutionModel):
         self.mass_norm = 1
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm = self.mass_today / mtoday
-        self.metallicity_today =  kwargs['metallicity_today']
+        self.ism_metallicity_today =  kwargs['ism_metallicity_today']
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Quantity):
@@ -414,7 +414,7 @@ class LogNormalCEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity_today)
+        return np.full(time.size, fill_value=self.ism_metallicity_today)
 
 
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
