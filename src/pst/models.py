@@ -44,9 +44,9 @@ def sfh_quenching_decorator(stellar_mass_formed):
     def wrapper_stellar_mass_formed(*args):
         quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
         stellar_mass = stellar_mass_formed(*args)
-        final_mass = stellar_mass(args[0], np.asarray(quenching_time))
+        final_mass = stellar_mass_formed(args[0], quenching_time)
         stellar_mass[args[1] > quenching_time] = final_mass
-        return stellar_mass_formed
+        return stellar_mass
     return wrapper_stellar_mass_formed
 
 
@@ -393,22 +393,28 @@ class LogNormalCEM(ChemicalEvolutionModel):
     metallicity : float
         Metallicity of the gas (constant).
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.lnt0 = kwargs['lnt0']
+        self.t0 = kwargs['t0']
         self.scale = kwargs['scale']
+        self.today = check_unit(kwargs['today'], u.Gyr)
         self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
-        self.metallicity = kwargs.get('metallicity', np.nan)
+
+        self.mass_norm = 1
+        mtoday = self.stellar_mass_formed(self.today)
+        self.mass_norm = self.mass_today / mtoday
+        self.metallicity_today = kwargs.get('metallicity_today', np.nan)
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Quantity):
-        z = - (np.log(times.to_value("Gyr")) - self.lnt0) / self.scale
+        z = - np.log(times / self.t0) / self.scale
         m = 0.5 * (1 - special.erf(z / SQRT_2))
-        return m / m.max() * self.mass_today
+        return m * self.mass_norm
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.metallicity_today)
 
 
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
@@ -430,6 +436,8 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.quenching_time = kwargs["quenching_time"]
+        mtoday = self.stellar_mass_formed(self.today)
+        self.mass_norm *= self.mass_today / mtoday
 
     @sfh_quenching_decorator
     def stellar_mass_formed(self, times: u.Quantity):
