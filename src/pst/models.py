@@ -113,7 +113,7 @@ class ChemicalEvolutionModel(ABC):
             + [t_obs])
 
         # find bin properties
-        mass = self.stellar_mass_formed(t_obs - age_bins).to_value(u.Msun)
+        mass = self.stellar_mass_formed(t_obs - age_bins)
         bin_mass = mass[:-1] - mass[1:]
         bin_age = (age_bins[1:] + age_bins[:-1]) / 2
         bin_metallicity = self.ism_metallicity(t_obs - bin_age)
@@ -403,12 +403,13 @@ class LogNormalCEM(ChemicalEvolutionModel):
         self.mass_norm = 1
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm = self.mass_today / mtoday
-        self.metallicity_today = kwargs.get('metallicity_today', np.nan)
+        self.metallicity_today =  kwargs['metallicity_today']
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Quantity):
         z = - np.log(times / self.t0) / self.scale
         m = 0.5 * (1 - special.erf(z / SQRT_2))
+        m[times <= 0] = 0
         return m * self.mass_norm
 
     @u.quantity_input

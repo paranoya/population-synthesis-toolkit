@@ -88,10 +88,10 @@ class SSPBase(object):
         masses : np.array, astropy.units.Quantity or None, optional
             Stellar mass corresponding to each SSP.
         """
-        ages = check_unit(np.array(ages), u.Gyr)
+        ages = check_unit(ages, u.Gyr)
         metallicities = np.array(metallicities)
         if masses is None:
-            masses = np.ones(ages.size) * u.Msun
+            masses = np.ones(ages.size) << u.Msun
         else:
             masses = check_unit(np.array(masses), u.Msun)
 
