@@ -544,7 +544,7 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
         super().__init__(times, masses, **kwargs)
 
 
-class ParticleGridCEM(ChemicalEvolutionModel):
+class ParticleListCEM(ChemicalEvolutionModel):
     """
     Chemical Evolution Model using individual Simple Stellar Population (SSP) data.
     
