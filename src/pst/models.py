@@ -468,11 +468,11 @@ class TabularCEM(ChemicalEvolutionModel):
     """
     def __init__(self, times, masses, metallicities, **kwargs):
         super().__init__(**kwargs)
-        self.table_t = times
+        self.table_t = check_unit(times, u.Gyr)
         # Make sure that time is crescent
         sort_times = np.argsort(self.table_t)
         self.table_t = self.table_t[sort_times]
-        self.table_mass = masses[sort_times]
+        self.table_mass = check_unit(masses[sort_times], u.Msun)
         self.table_metallicity = metallicities[sort_times]
 
     @u.quantity_input
@@ -541,7 +541,10 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today, **kwargs):
         self.ism_metallicity_today = ism_metallicity_today
         self.alpha_powerlaw = alpha_powerlaw
-        super().__init__(times, masses, **kwargs)
+        # Create a dummy metallicity that is passed to the TabularCEM constructor
+        # but never used
+        metallicity = np.zeros(times.size)
+        super().__init__(times, masses, metallicity, **kwargs)
 
 
 class ParticleListCEM(ChemicalEvolutionModel):
