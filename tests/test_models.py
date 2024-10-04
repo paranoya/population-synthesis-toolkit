@@ -68,12 +68,12 @@ class TestModels(unittest.TestCase):
         low_res_time = np.linspace(0, 13.7, 10) * u.Gyr
         masses = 1 - np.exp(-low_res_time / 3.0 / u.Gyr)
         model = models.TabularCEM(
-            times=low_res_time, masses=masses,
+            times=low_res_time, masses=masses * u.Msun,
             metallicities=np.full(masses.size, fill_value=0.02))
 
         mass = model.stellar_mass_formed(self.dummy_times)
         real_mass = 1 - np.exp(- self.dummy_times / 3 / u.Gyr)
-        self.assertTrue(np.allclose(mass, real_mass, rtol=1e-2))
+        self.assertTrue(np.allclose(mass, real_mass * u.Msun, rtol=1e-2))
 
     def test_particle_grid(self):
         n_particles = 10000
