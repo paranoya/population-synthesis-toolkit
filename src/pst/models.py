@@ -44,8 +44,9 @@ def sfh_quenching_decorator(stellar_mass_formed):
     def wrapper_stellar_mass_formed(*args):
         quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
         stellar_mass = stellar_mass_formed(*args)
-        return np.clip(stellar_mass / stellar_mass[args[1] <= quenching_time].max(),
-                0, 1) * stellar_mass[-1]
+        final_mass = stellar_mass(args[0], np.asarray(quenching_time))
+        stellar_mass[args[1] > quenching_time] = final_mass
+        return stellar_mass_formed
     return wrapper_stellar_mass_formed
 
 
