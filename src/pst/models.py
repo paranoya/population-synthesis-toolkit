@@ -329,7 +329,7 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.sie, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.metallicity)
 
 
 #-------------------------------------------------------------------------------
@@ -407,7 +407,7 @@ class LogNormalCEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.sie, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.metallicity)
 
 
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
