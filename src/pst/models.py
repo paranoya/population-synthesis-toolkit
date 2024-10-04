@@ -396,11 +396,10 @@ class LogNormalCEM(ChemicalEvolutionModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.t0 = kwargs['t0']
+        self.t0 = check_unit(kwargs['t0'], u.Gyr)
         self.scale = kwargs['scale']
         self.today = check_unit(kwargs['today'], u.Gyr)
         self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
-
         self.mass_norm = 1
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm = self.mass_today / mtoday
