@@ -52,14 +52,15 @@ class TestModels(unittest.TestCase):
 
     def test_lognormal_zpowerlaw(self):
         model = models.LogNormalZPowerLawCEM(
-            lnt0=0.5, scale=1.0, mass_today=1.0,
+            t0=3.0, scale=1.0, mass_today=1.0,
+            today=13.7,
             ism_metallicity_today=0.02, alpha_powerlaw=2.0
         )
         mass = model.stellar_mass_formed(self.dummy_times)
         metals = model.ism_metallicity(self.dummy_times)
 
         self.assertEqual(mass[0], 0.0)
-        self.assertEqual(mass[-1], 1.0 * u.Msun)
+        self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun, rtol=1e-4))
         self.assertEqual(metals[0], 0.0)
         self.assertEqual(metals[-1], 0.02)
     
@@ -79,7 +80,7 @@ class TestModels(unittest.TestCase):
         particles_z = 10**(np.random.uniform(-4, 0.3, n_particles))
         particles_t_form = np.random.exponential(3, n_particles)
         particles_mass = 10**(np.random.uniform(5, 6, n_particles))
-        model = models.ParticleGridCEM(
+        model = models.ParticleListCEM(
             time_form=particles_t_form * u.Gyr,
             metallicities=particles_z * u.dimensionless_unscaled,
             masses=particles_mass * u.Msun)
