@@ -14,6 +14,12 @@ from astropy.io import fits
 import random
 import extinction
 
+vizier_AB_logtau_5 = [0.368, 0.724,	1.168, 1.577, 1.861]
+vizier_AB_logtau_6 = [0.186,	0.548,	0.992,	1.403,	1.689]
+vizier_AB_logtau_7 = [0.941,	0.846,	0.786,	0.659,	0.554]
+vizier_AB_logtau_8 = [3.314,	2.635,	2.665,	2.659,	2.600]
+vizier_AB_logtau_9 = [5.966,	4.557,	4.204,	4.009,	3.886]
+vizier_AB_logtau_10 = [9.539,	7.546,	6.825,	6.350,	6.069]
 t0 = 13.7*u.Gyr
 t_hat = np.logspace(-3, 0, 1001)[::-1] #t_hat from 1 --> 0
 t = t0*(1-t_hat) #time from 0Gyr --> 13.7Gyr
@@ -78,32 +84,33 @@ AB_mag = -2.5*np.log10(f/3631)
 
 print('Fnu ', Fnu_model)
 print('SDSS ', mag)
-print('AB ', AB_mag)
+print('poly AB ', AB_mag)
+print('vizier AB ', vizier_AB_logtau_8)
 
 #%%
 #Sum o 3 bursts
-log_tb2 =  np.log10(13*1e9)
-log_tb3 = 8.1
+log_tb2 =  10
+log_tb3 = 5
+
+w1 = .2
+w2 = .4
+w3 = .4
 
 single_burst_fit_2 = pst.models.Single_burst(Z = Z_i, M_stars = M_stars, t_burst = 10**log_tb2*1e-9)
 single_burst_fit_3 = pst.models.Single_burst(Z = Z_i, M_stars = M_stars, t_burst = 10**log_tb3*1e-9)
 
-sum_of_mass = single_burst_fit_1.integral_SFR(t) + single_burst_fit_2.integral_SFR(t) + single_burst_fit_3.integral_SFR(t)
+sum_of_mass = w1*single_burst_fit_1.integral_SFR(t) + w2*single_burst_fit_2.integral_SFR(t) + w3*single_burst_fit_3.integral_SFR(t)
 
 sum_of_bursts_model = pst.models.Tabular_MFH(t, 
                             sum_of_mass, 
-                            Z = np.ones(len(t))*Z_i) #Generating test-model
+                            Z = np.ones(len(t))*Z_i*u.dimensionless_unscaled) #Generating test-model
 
 
 Fnu_total = get_flux_densities(sum_of_bursts_model, ssp, obs_filters, Z_i, t)*dust_extinction
 
-L_lambda = (Fnu_model*c_speed/(obs_filters_wl*u.Angstrom)**2*4*np.pi*(10*u.pc)**2).to(u.Lsun/u.Angstrom)
-f = Fnu_model.to_value() #Jy
-mag = (-2.5/np.log(10))*(np.arcsinh((f/f0)/2*b)+np.log(b))
+f = Fnu_total.to_value() #Jy
 AB_mag = -2.5*np.log10(f/3631)
 
-
-
-
-
+print('poly AB ', AB_mag)
+print('vizier AB ', (np.array(vizier_AB_logtau_5) + np.array(vizier_AB_logtau_8) + np.array(vizier_AB_logtau_10))/3)
 
