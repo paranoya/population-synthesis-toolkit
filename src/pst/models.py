@@ -216,8 +216,8 @@ class SingleBurstCEM(ChemicalEvolutionModel):
         Metallicity of the burst.
     """
     def __init__(self, **kwargs):
-        self.mass_burst = check_units(kwargs['mass_burst'], u.Msun)
-        self.time_burst = check_units(kwargs['time_burst'], u.Gyr)
+        self.mass_burst = check_unit(kwargs['mass_burst'], u.Msun)
+        self.time_burst = check_unit(kwargs['time_burst'], u.Gyr)
         self.burst_metallicity = kwargs.get("burst_metallicity",
                                             0.02 * u.dimensionless_unscaled)
         ChemicalEvolutionModel.__init__(self, **kwargs)
