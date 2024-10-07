@@ -37,7 +37,7 @@ class MassPropMetallicityMixin:
 
     def ism_metallicity(self, times):
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / m[-1], self.alpha_powerlaw)
+        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
 
 def sfh_quenching_decorator(stellar_mass_formed):
     """A decorator for including a quenching event in a given SFH."""
@@ -45,8 +45,7 @@ def sfh_quenching_decorator(stellar_mass_formed):
         quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
         stellar_mass = stellar_mass_formed(*args)
         final_mass = stellar_mass_formed(args[0], quenching_time)
-        stellar_mass[args[1] > quenching_time] = final_mass
-        return stellar_mass
+        return np.where(args[1] < quenching_time, stellar_mass, final_mass)
     return wrapper_stellar_mass_formed
 
 
@@ -113,7 +112,7 @@ class ChemicalEvolutionModel(ABC):
             + [t_obs])
 
         # find bin properties
-        mass = self.stellar_mass_formed(t_obs - age_bins).to_value(u.Msun)
+        mass = self.stellar_mass_formed(t_obs - age_bins)
         bin_mass = mass[:-1] - mass[1:]
         bin_age = (age_bins[1:] + age_bins[:-1]) / 2
         bin_metallicity = self.ism_metallicity(t_obs - bin_age)
@@ -217,16 +216,10 @@ class SingleBurstCEM(ChemicalEvolutionModel):
         Metallicity of the burst.
     """
     def __init__(self, **kwargs):
-        self.mass_burst = kwargs['mass_burst']
-        if not isinstance(self.mass_burst, u.Quantity):
-            self.mass_burst *= u.Msun
-        self.time_burst = kwargs['time_burst']
-        if not isinstance(self.time_burst, u.Quantity):
-            self.time_burst *= u.Gyr
-
+        self.mass_burst = check_unit(kwargs['mass_burst'], u.Msun)
+        self.time_burst = check_unit(kwargs['time_burst'], u.Gyr)
         self.burst_metallicity = kwargs.get("burst_metallicity",
                                             0.02 * u.dimensionless_unscaled)
-
         ChemicalEvolutionModel.__init__(self, **kwargs)
 
     @u.quantity_input
@@ -403,17 +396,18 @@ class LogNormalCEM(ChemicalEvolutionModel):
         self.mass_norm = 1
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm = self.mass_today / mtoday
-        self.metallicity_today = kwargs.get('metallicity_today', np.nan)
+        self.ism_metallicity_today =  kwargs['ism_metallicity_today']
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Quantity):
-        z = - np.log(times / self.t0) / self.scale
-        m = 0.5 * (1 - special.erf(z / SQRT_2))
+        z = - np.log(times[times > 0] / self.t0) / self.scale
+        m = np.zeros(times.shape)
+        m[times > 0] = 0.5 * (1 - special.erf(z / SQRT_2))
         return m * self.mass_norm
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity_today)
+        return np.full(time.size, fill_value=self.ism_metallicity_today)
 
 
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
@@ -434,7 +428,7 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.quenching_time = kwargs["quenching_time"]
+        self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm *= self.mass_today / mtoday
 
