@@ -1,6 +1,7 @@
 src/pst/data/ssp/*
 tutorials/*output*
-
+tutorials/*
+tutorials/Illustris/Illustris_output.csv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
