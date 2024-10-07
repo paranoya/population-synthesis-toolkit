@@ -216,16 +216,10 @@ class SingleBurstCEM(ChemicalEvolutionModel):
         Metallicity of the burst.
     """
     def __init__(self, **kwargs):
-        self.mass_burst = kwargs['mass_burst']
-        if not isinstance(self.mass_burst, u.Quantity):
-            self.mass_burst *= u.Msun
-        self.time_burst = kwargs['time_burst']
-        if not isinstance(self.time_burst, u.Quantity):
-            self.time_burst *= u.Gyr
-
+        self.mass_burst = check_units(kwargs['mass_burst'], u.Msun)
+        self.time_burst = check_units(kwargs['time_burst'], u.Gyr)
         self.burst_metallicity = kwargs.get("burst_metallicity",
                                             0.02 * u.dimensionless_unscaled)
-
         ChemicalEvolutionModel.__init__(self, **kwargs)
 
     @u.quantity_input
@@ -434,7 +428,7 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.quenching_time = kwargs["quenching_time"]
+        self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm *= self.mass_today / mtoday
 
