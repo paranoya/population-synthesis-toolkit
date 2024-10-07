@@ -1,444 +1,450 @@
-import numpy as np
-#import pylab as plt
-from astropy import units as u
-from astropy.io import fits
-from scipy import special
-import pst
-
-from scipy import interpolate
 from abc import ABC, abstractmethod
 
-class ChemicalEvolutionModel(ABC):
-    """TODO
+import numpy as np
+from astropy import units as u
+from scipy import special
+from scipy import interpolate
 
-    Description
-    -----------
+from pst.SSP import SSPBase
+from pst.utils import check_unit, SQRT_2
 
-    Attributes
-    ----------
 
-    Methods
-    -------
+# CEM utils and mixins
 
+class MassPropMetallicityMixin:
+    r"""Model mixin where the metallicity is proportional to the stellar mass
+    
+    .. math::
+        Z(t) = Z_{today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(today)}\right)^\alpha
     """
-    def __init__(self, **kwargs):
-        self.M_gas = kwargs.get('M_gas', 0*u.Msun)
-        self.Z = kwargs.get('Z', 0.02)
+    @property
+    def ism_metallicity_today(self):
+        """ISM metals mass fraction at present."""
+        return self._ism_metallicity_today
+    
+    @ism_metallicity_today.setter
+    def ism_metallicity_today(self, value):
+        self._ism_metallicity_today = value
+    
+    @property
+    def alpha_powerlaw(self):
+        """Stellar mass power-law exponent."""
+        return self._alpha_powerlaw
 
-    def compute_SED(self, SSP : pst.SSP.SSPBase, t_obs : u.Quantity,
-                    allow_negative=True):
-        """Compute the SED of a given model observed at a given time.
-        
-        Description
-        -----------
-        This method computes the spectra energy distribution resulting from the
-        chemical evolution model observed at a given time.
+    @alpha_powerlaw.setter
+    def alpha_powerlaw(self, value):
+        self._alpha_powerlaw = value
+
+    def ism_metallicity(self, times):
+        m = self.stellar_mass_formed(times)
+        return self.ism_metallicity_today * np.power(m / m[-1], self.alpha_powerlaw)
+
+def sfh_quenching_decorator(stellar_mass_formed):
+    """A decorator for including a quenching event in a given SFH."""
+    def wrapper_stellar_mass_formed(*args):
+        quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
+        stellar_mass = stellar_mass_formed(*args)
+        final_mass = stellar_mass_formed(args[0], quenching_time)
+        stellar_mass[args[1] > quenching_time] = final_mass
+        return stellar_mass
+    return wrapper_stellar_mass_formed
+
+
+class ChemicalEvolutionModel(ABC):
+    """
+    Abstract base class for chemical evolution models.
+
+    This class provides an interface for modeling the chemical and stellar
+    evolution of a galaxy over time. It includes methods for computing the 
+    Spectral Energy Distribution (SED), stellar mass, and photometry from 
+    a given Simple Stellar Population (SSP) model. The specific methods for 
+    computing the star formation rate (SFR) and the metallicity evolution 
+    (Z-SFR) need to be implemented in a subclass.
+    """
+    
+    def __init__(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def stellar_mass_formed(self, time):
+        """Total stellar mass formed at a given time."""
+        return
+
+    @abstractmethod
+    def ism_metallicity(self, time):
+        """ISM metals mass fraction at a given time."""
+        return
+
+    @u.quantity_input
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr, oversample_factor=10):
+        """
+        Interpolate the star formation history to compute the SSP stellar masses.
+
+        This method computes the star formation history of a galaxy over time
+        and uses it to interpolate the stellar masses for a given Simple Stellar
+        Population (SSP) model at the time of observation.
 
         Parameters
         ----------
-        - SSP: pst.SSP.SSP
-            The SSP model to used for synthezising the SED.
-        - t_obs: astropy.Quantity
-            Cosmic time at which the galaxy is observed. This will prevent the
-            use the SSP with ages older than `t_obs`.
-        - allow_negative: bool, default=True
-            Allow for some SSPs to have negative masses during the computation
-            of the resulting SED.
-        
+        SSP : pst.SSP.SSPBase
+            The Simple Stellar Population (SSP) model used for synthesizing the SED.
+        t_obs : astropy.Quantity
+            The cosmic time at which the galaxy is observed. Only SSPs with ages
+            younger than `t_obs` are used.
+        oversample_factor : int
+            Ages oversampling factor. 
+
         Returns
         -------
-        - sed: astropy.Quantity
-            Spectral energy distribution in the same units as `SSP.L_lambda`.
+        weights : astropy.Quantity
+            Stellar masses corresponding to each SSP age and metallicity, in units
+            of solar masses.
         """
+
+        # define age bins from 0 to t_obs
         age_bins = np.hstack(
-            [0 << u.yr, np.sqrt(SSP.ages[1:] * SSP.ages[:-1]), 1e12 << u.yr])
-        t_bins = t_obs - age_bins
-        t_bins = t_bins[t_bins >= 0]
-        M_t = self.integral_SFR(t_bins)
-        M_bin = np.hstack([M_t[:-1]-M_t[1:], M_t[-1]])
-        MZ_t = self.integral_Z_SFR(t_bins)
-        MZ_bin = np.hstack([MZ_t[:-1]-MZ_t[1:], MZ_t[-1]])
-        z_bin = np.clip(MZ_bin / (M_bin + 1 * u.kg),
-                        SSP.metallicities[0],
-                        SSP.metallicities[-1]) << u.dimensionless_unscaled
-        sed = np.zeros(SSP.wavelength.size) << u.Lsun / u.Angstrom
-        weights = np.zeros((SSP.metallicities.size, SSP.ages.size))
-        z_indices = np.searchsorted(
-            SSP.metallicities, z_bin).clip(
-            min=1, max=SSP.metallicities.size - 1)
-        t_indices = np.arange(0, M_bin.size, dtype=int)
-        weight_Z = np.log(
-                    z_bin / SSP.metallicities[z_indices - 1]) / np.log(
-                    SSP.metallicities[z_indices] / SSP.metallicities[z_indices-1]
-                    )
-        weights[z_indices, t_indices] = weight_Z
-        weights[z_indices - 1, t_indices] = 1 - weight_Z
-        weights[:, t_indices] = weights[:, t_indices] * M_bin[np.newaxis, :]
-        weights = weights << u.Msun
+            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
+        age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
+        age_bins[-1] = t_obs
+        # oversample
+        w1 = np.arange(oversample_factor) / oversample_factor
+        age_bins = np.hstack(
+            [(1-w1) * age_bins[i] + w1 * age_bins[i + 1] for i in range(age_bins.size - 1)]
+            + [t_obs])
+
+        # find bin properties
+        mass = self.stellar_mass_formed(t_obs - age_bins).to_value(u.Msun)
+        bin_mass = mass[:-1] - mass[1:]
+        bin_age = (age_bins[1:] + age_bins[:-1]) / 2
+        bin_metallicity = self.ism_metallicity(t_obs - bin_age)
+ 
+        return ssp.get_weights(ages=bin_age,
+                               metallicities=bin_metallicity,
+                               masses=bin_mass)
+
+    def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
+                    allow_negative=False):
+        """
+        Compute the Spectral Energy Distribution (SED) resulting from the SFH.
+
+        This method synthesizes the SED resulting from the chemical evolution model,
+        observed at a given time, using the provided SSP model.
+
+        Parameters
+        ----------
+        SSP : pst.SSP.SSPBase
+            The Simple Stellar Population (SSP) model used for synthesizing the SED.
+        t_obs : astropy.Quantity
+            The cosmic time at which the galaxy is observed.
+        allow_negative : bool, optional
+            Whether to allow SSPs with negative masses in the SED computation.
+            Default is True.
+
+        Returns
+        -------
+        sed : astropy.Quantity
+            The spectral energy distribution, in the same units as `SSP.L_lambda`.
+        
+        See also
+        --------
+        :func:`interpolate_ssp_masses`
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
         if not allow_negative:
             mask = (weights > 0) & np.isfinite(weights)
         else:
             mask = np.isfinite(weights)
-        sed = np.sum(weights[mask, np.newaxis] * SSP.L_lambda[mask, :],
+        sed = np.sum(weights[mask, np.newaxis] * ssp.L_lambda[mask, :],
                     axis=(0))
         return sed
 
-    @abstractmethod
-    def integral_SFR(self):
-       pass
+    def compute_photometry(self, ssp, t_obs, photometry=None):
+        """
+        Compute the syntehtic photometry using a SSP at a given time.
 
-    @abstractmethod
-    def integral_Z_SFR(self):
-       pass
+        This method computes the photometric fluxes associated to
+        the SFH by synthesizing the fluxes of the input SSP model.
+        the galaxy using the input SSP model and optionally  
+        photometric filters.
+
+        Parameters
+        ----------
+        ssp : pst.SSP.SSPBase
+            The Simple Stellar Population (SSP) model used for generating the
+            synthetic photometry.
+        t_obs : astropy.Quantity
+            The cosmic time at which the galaxy is observed.
+        photometry : np.ndarray, optional
+            A grid of luminosities in multiple photometric bands. If None, the 
+            default SSP photometry will be used. The last two dimensions must 
+            match the metallicity and age grid of the SSP model.
+
+        Returns
+        -------
+        model_photometry : astropy.Quantity
+            The photometry of the galaxy in the same units as the input photometry.
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        if photometry is None:
+            photometry = ssp.photometry
+        if not isinstance(photometry, u.Quantity):
+            print("Assuming input photometry array in Jy/Msun")
+            photometry *= u.Jy / u.Msun
+        extra_dim = photometry.ndim - weights.ndim
+        if extra_dim > 0:
+            new_dims = tuple(np.arange(extra_dim))
+            np.expand_dims(weights, new_dims)
+        
+        model_photometry = np.sum(photometry * weights, axis=(-1, -2))
+        return model_photometry
+
 
 #-------------------------------------------------------------------------------
-class Single_burst(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
+class SingleBurstCEM(ChemicalEvolutionModel):
+    """
+    Single-burst star formation model.
 
+    This class models a galaxy's star formation history as a single burst
+    occurring at a specific time, after which no further star formation occurs.
+
+    Attributes
+    ----------
+    mass_burst : astropy.Quantity
+        Total stellar mass formed in the burst.
+    time_burst : astropy.Quantity
+        Time of the starburst in cosmic time.
+    burst_metallicity : astropy.Quantity
+        Metallicity of the burst.
+    """
     def __init__(self, **kwargs):
-        self.M_stars = kwargs['M_stars']*u.Msun
-        self.tb = kwargs['t_burst']*u.Gyr
+        self.mass_burst = kwargs['mass_burst']
+        if not isinstance(self.mass_burst, u.Quantity):
+            self.mass_burst *= u.Msun
+        self.time_burst = kwargs['time_burst']
+        if not isinstance(self.time_burst, u.Quantity):
+            self.time_burst *= u.Gyr
+
+        self.burst_metallicity = kwargs.get("burst_metallicity",
+                                            0.02 * u.dimensionless_unscaled)
+
         ChemicalEvolutionModel.__init__(self, **kwargs)
 
-# TODO: do this using np.select(); actually, does tb exist at all?
-    def integral_SFR(self, time):
-        M_t = []
-        if type(time)==float:
-            time=[time]
-        for  t in time:
-          if t<=self.tb:
-               M_t.append(0)
-          else:
-              M_t.append( 1)
-        return M_t*self.M_stars
-    
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-#-------------------------------------------------------------------------------
-class Exponential_SFR(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
+    @u.quantity_input
+    def stellar_mass_formed(self, time : u.Gyr):
+        """Total stellar mass formed at a given time."""
+        mass = np.zeros(time.size, dtype=float) * self.mass_burst.unit
+        mass[time >= self.time_burst] = self.mass_burst
+        return mass
 
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        """ISM metals mass fraction at a given time."""
+        return np.full(time.size, fill_value=self.burst_metallicity)
+
+
+#-------------------------------------------------------------------------------
+class ExponentialCEM(ChemicalEvolutionModel):
+    r"""
+    Exponentially declining star formation history model.
+
+    This class models a galaxy's star formation rate as an exponentially
+    declining function of time:
+
+    .. math::
+        M_\star(t) = M_{inf} \cdot (1 - e^{-t/\tau})
+ 
+    Attributes
+    ----------
+    stellar_mass_inf : astropy.Quantity
+        Asymptotic stellar mass at infinite time.
+    tau : astropy.Quantity
+        Timescale of the exponential decline in star formation.
+    metallicity : float
+        Metallicity of the gas (constant).
+    """
     def __init__(self, **kwargs):
-        self.M_inf = kwargs['M_inf']
-        if not isinstance(self.M_inf, u.Quantity):
-           print("Assuming that input M_inf is in Msun")
-           self.M_inf *= u.Msun
-        self.tau = kwargs['tau']
-        if not isinstance(self.tau, u.Quantity):
-            print("Assuming that input tau is in Gyr")
-            self.tau *= u.Gyr
-
-        self.Z = kwargs['Z']
-        ChemicalEvolutionModel.__init__(self, **kwargs)
-
-    def integral_SFR(self, time):
-      return self.M_inf * ( 1 - np.exp(-time/self.tau) )
-
-    def SFR(self, time):
-      return self.M_inf*(np.exp(-time/self.tau))/self.tau
-
-    def dot_SFR(self,time):
-      return -self.M_inf*(np.exp(-time/self.tau))/(self.tau**2)
-
-
-    def ddot_SFR(self,time):
-      return self.M_inf*(np.exp(-time/self.tau))/(self.tau**3)
-
-
-    def integral_Z_SFR(self, time):
-      return self.Z * self.integral_SFR(time)
-
-
-#-------------------------------------------------------------------------------
-class Exponential_SFR_delayed(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
-
-  def __init__(self, **kwargs):
-    self.M_inf = kwargs['M_inf']*u.Msun
-    self.tau = kwargs['tau']*u.Gyr
-    self.Z = kwargs['Z']
-    ChemicalEvolutionModel.__init__(self, **kwargs)
-
-  def integral_SFR(self, time):
-    return self.M_inf * ( 1 - np.exp(-time/self.tau)*(self.tau+time)/self.tau)
-
-  def SFR(self,time):
-      return self.M_inf*(time/self.tau**2)*np.exp(-time/self.tau)
-
-  def dot_SFR(self,time):
-      return -self.M_inf*((time-self.tau)/self.tau**3)*np.exp(-time/self.tau)
-
-  def ddot_SFR(self,time):
-      return self.M_inf*((time-2*self.tau)/self.tau**4)*np.exp(-time/self.tau)
-
-  def integral_Z_SFR(self, time):
-    return self.Z * self.integral_SFR(time)
-
-
-#-------------------------------------------------------------------------------
-class Polynomial_MFH_fit: #Generates the basis for the Polynomial MFH
-#-------------------------------------------------------------------------------
-    def __init__(self, N, ssp, obs_filters, obs_filters_wl, t, t_obs, Z_i, dust_extinction, 
-                 error_Fnu_obs, **kwargs):
-        self.t_obs = t_obs.to_value()
-        self.t_hat_start = kwargs.get('t_hat_start', 1.)
-        self.t_hat_end = kwargs.get('t_hat_end', 0.)
-        
-        primordial_coeffs = []
-        primordial_Fnu = []
-        for n in range(N):
-            
-            c = np.zeros(N)
-            c[n] = 1
-            
-            primordial_coeffs.append(c)
-            
-            fnu = []
-            p = pst.models.Polynomial_MFH(Z=Z_i, t_hat_start = self.t_hat_start,
-                                          t_hat_end = self.t_hat_end,
-                                          coeffs=c)
-
-            # cum_mass = np.cumsum(p.integral_SFR(t))
-            z_array = Z_i*np.ones(len(t))
-            # print(ssp)
-            sed = p.compute_SED(SSP = ssp, t_obs = t_obs)
-
-            for i, filter_name in enumerate(obs_filters):
-                photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-                spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
-                fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err = None)
-                fnu.append( fnu_Jy )
-
-            primordial_Fnu.append(u.Quantity(fnu))
-        primordial_Fnu = np.array(primordial_Fnu)*dust_extinction / error_Fnu_obs
-        
-        self.p = p
-        self.sed = sed
-        self.lstsq_solution = np.matmul(
-            np.linalg.pinv(np.matmul(primordial_Fnu, np.transpose(primordial_Fnu))),
-            primordial_Fnu)
-        self.primordial_coeffs = np.array(primordial_coeffs)
-        self.primordial_Fnu = np.array(primordial_Fnu)
-        self.primordial_Fnu = primordial_Fnu
-
-    def fit(self, Fnu_obs, **kwargs):
-
-        c = np.matmul(self.lstsq_solution,
-                      Fnu_obs)              
-        return c
-
-
-#-------------------------------------------------------------------------------
-class Polynomial_MFH(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, **kwargs):
-        self.t0 = kwargs.get('t0', 13.7*u.Gyr)
-        self.M0 = kwargs.get('M_end', 1*u.Msun)
-        self.t_hat_start = kwargs.get('t_hat_start', 1.)
-        self.t_hat_end = kwargs.get('t_hat_end', 0.)
-        self.coeffs = kwargs['coeffs']
-        self.S = kwargs.get('S', False)
-        
-        ChemicalEvolutionModel.__init__(self, **kwargs)
-    
-    #If you want the raw components: model.xxxx(t, get_components=True)
-    #If you want the observable + error: model.xxxx(t, get_sigma=True)
-    #If you want only the observable: model.xxxx(t)
-    def mass_formed_since(self, cosmic_time, **kwargs):
-        t_hat_present_time = (1 - self.t0/self.t0).clip(self.t_hat_end, self.t_hat_start)
-        t_hat_since = (1 - cosmic_time/self.t0).clip(self.t_hat_end, self.t_hat_start)
-        self.get_sigma = kwargs.get('get_sigma', False)
-        self.get_components = kwargs.get('get_components', False)
-        self.fit_components = kwargs.get('fit_components', None)
-        
-        if self.fit_components is None:  
-            M=[]
-            N = len(self.coeffs)
-            for n in range(1, N+1):
-                M.append(t_hat_since**n - t_hat_present_time**n)
-
-            self.M = u.Quantity(M)
-        else:
-            c, M, S = self.fit_components
-            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
-        
-        if self.get_components: #if you want the raw components c, M, S
-            return self.coeffs, self.M0 *self.M, self.S
-        elif self.get_sigma: #If you want the observable + sigma
-            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
-        else: #If you just want the observable
-            return self.M0 * np.matmul(self.coeffs, self.M)
-        
-    def integral_SFR(self, time, **kwargs):
-        self.get_sigma = kwargs.get('get_sigma', False)
-        self.get_components = kwargs.get('get_components', False)
-        self.fit_components = kwargs.get('fit_components', None)
-        t_hat = (1 - time/self.t0).clip(self.t_hat_end, self.t_hat_start)
-        
-        if self.fit_components is None:              
-            M=[]
-            N = len(self.coeffs)
-            for n in range(1, N+1):
-                M.append(self.t_hat_start**n - t_hat**n)
-            self.M = u.Quantity(M)
-        
-        else:
-            c, M, S = self.fit_components
-            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
-        
-        if self.get_components: #if you want the raw components c, M, S
-            return self.coeffs, self.M0 *self.M, self.S
-        elif self.get_sigma: #If you want the observable + sigma
-            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
-        else: #If you just want the observable
-            return self.M0 * np.matmul(self.coeffs, self.M)
-        
-       
-    def SFR(self, time, **kwargs):       
-        t_hat = (1 - time/self.t0)
-        self.get_sigma = kwargs.get('get_sigma', False)
-        self.get_components = kwargs.get('get_components', False)
-        self.fit_components = kwargs.get('fit_components', None)
-        
-        if self.fit_components is None:   
-            M=[]
-            N = len(self.coeffs)
-            for n in range(1, N+1):      
-                m=(n*t_hat**(n-1))/self.t0
-                
-                m[t_hat > self.t_hat_start] = 0.
-                m[t_hat < self.t_hat_end] = 0.
-                M.append(m)
-            self.M = u.Quantity(M)
-        else:
-            c, M, S = self.fit_components
-            return self.M0 * np.matmul(c, M), self.M0 * np.sqrt(((np.matmul(S.T, M))**2).sum(axis=0))
-        
-        if self.get_components: #if you want the raw components c, M, S
-            return self.coeffs, self.M0 *self.M, self.S
-        elif self.get_sigma: #If you want the observable + sigma
-            return self.M0 * np.matmul(self.coeffs, self.M), self.M0 * np.sqrt(((np.matmul(self.S.T, self.M))**2).sum(axis=0))
-        else: #If you just want the observable
-            return self.M0 * np.matmul(self.coeffs, self.M)
-        
-    #The derivatives are not up to date
-    def dot_SFR(self, time):
-        t_hat = (1 - time/self.t0)
-        
-        M=[]
-        N = len(self.coeffs)
-        
-        for n in range(0, N):
-            m =(n*(n-1)*t_hat**(n-2))/self.t0**2
-            m[t_hat > self.t_hat_start] = 0.
-            m[t_hat < self.t_hat_end] = 0.
-            M.append(m)
-      
-        if self.compute_sigma:
-            
-            return self.M0*self.coeffs, M, self.S
-        else:
-            return self.M0 * np.matmul(self.coeffs, M)
-    
-    def ddot_SFR(self, time):
-        t_hat = (1 - time/self.t0)
-        
-        M=[]
-        N = len(self.coeffs)
-        for n in range(0, N):
-            m=-(n*(n-1)*(n-2)*t_hat**(n-3))/self.t0**3
-            m[t_hat > self.t_hat_start] = 0.
-            m[t_hat < self.t_hat_end] = 0.
-            M.append(m)
-
-        if self.compute_sigma:
-            return self.M0*self.coeffs, M, self.S
-        else:
-            return self.M0 * np.matmul(self.coeffs, M)
-
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-
-#-------------------------------------------------------------------------------
-class Gaussian_burst(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, **kwargs):
-      self.M_inf = kwargs['M_stars']*u.Msun
-      self.tb = kwargs['t']*u.Gyr  # Born time
-      self.c = kwargs['c']*u.Gyr #fwhm
-      ChemicalEvolutionModel.__init__(self, **kwargs)
-    
-    def integral_SFR(self, time):
-      return self.M_inf/2*( -special.erf((-self.tb)/(np.sqrt(2)*self.c)) +  special.erf((time-self.tb)/(np.sqrt(2)*self.c)) )
-    
-    def SFR(self, time):
-      a = self.M_inf/(2*self.c*np.sqrt(np.pi/2))
-      return a * np.exp(-(time-self.tb)**2/(2*self.c**2))
-    
-    def dot_SFR(self,time):
-      a = self.M_inf/(self.c*np.sqrt(np.pi/2))
-      return -a/self.c**2 * (time-self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
-    
-    def ddot_SFR(self,time):
-      a = self.M_inf/(self.c*np.sqrt(np.pi/2))
-      return a/self.c**4 * (time -self.c -self.tb)*(time +self.c -self.tb) * np.exp(-(time-self.tb)**2/(2*self.c**2))
-    
-    def integral_Z_SFR(self, time):
-        return self.Z * self.integral_SFR(time)
-    
-class LogNormal_MFH(ChemicalEvolutionModel):
-    def __init__(self, alpha : float, z_today : u.Quantity,
-                 lnt0: float, scale:float, m_today=1.0 << u.Msun,
-                 **kwargs):
+        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf'],
+                                           default_unit=u.Msun)
+        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
+        self.metallicity = kwargs['metallicity']
         super().__init__(**kwargs)
-        self.alpha = alpha
-        self.z_today = z_today
-        self.lnt0 = lnt0
-        self.scale = scale
-        self.m_today = m_today
 
-    @property
-    def Z(self):
-        return 
+    @u.quantity_input
+    def stellar_mass_formed(self, time : u.Gyr):
+      return self.stellar_mass_inf * ( 1 - np.exp(-time/self.tau) )
 
-    @Z.setter
-    def Z(self, z):
-        pass
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.size, fill_value=self.metallicity)
 
-    def integral_SFR(self, times: u.Quantity):
-        z = - (np.log(times.to_value("Gyr")) - self.lnt0) / self.scale
-        m = 0.5 * (1 - special.erf(z / np.sqrt(2)))
-        return m / m.max() * self.m_today
 
-    def integral_Z_SFR(self, times: u.Quantity):
-        m = self.integral_SFR(times)
-        z_star = self.z_today * np.power(m / m.max(), self.alpha)
-        return m * z_star
+class ExponentialQuenchedCEM(ExponentialCEM):
+    """
+    Exponentially declining CEM model including a quenching event.
 
-class LogNormalQuenched_MFH(LogNormal_MFH):
-    __slots__ = 'alpha', 'z_today', 'lnt0', 'scale', 't_quench', 'tau_quench'
-    def __init__(self, alpha : float, z_today : u.Quantity,
-                 lnt0: float, scale:float,
-                 t_quench: u.Quantity, tau_quench: u.Quantity, **kwargs):
-        super().__init__(alpha, z_today, lnt0, scale, **kwargs)
-        self.alpha = alpha
-        self.z_today = z_today
-        self.lnt0 = lnt0
-        self.scale = scale
-        self.t_quench = t_quench
-        self.tau_quench = tau_quench
+    See also
+    --------
+    :class:`ExponentialCEM`
+    """
+    def __init__(self, **kwargs):
+        self.quenching_time = check_unit(kwargs['quenching_time'], u.Gyr)
+        super().__init__(**kwargs)
 
-    def integral_SFR(self, times: u.Quantity):
-        lognorm = super().integral_SFR(times)
-        q = times >= self.t_quench
-        if q.any():
-            lognorm[q] = lognorm[q][0] * (1 - np.exp(-times[q] / self.tau_quench))
-        return lognorm / lognorm.max() * self.m_today
+    @sfh_quenching_decorator
+    def stellar_mass_formed(self, time : u.Gyr):
+        return super().stellar_mass_formed(time)
+
 
 #-------------------------------------------------------------------------------
-class Tabular_MFH(ChemicalEvolutionModel):
+class ExponentialDelayedCEM(ChemicalEvolutionModel):
+    r"""
+    Exponentially delayed star formation history model.
+
+    This CEM models a galaxy's star formation rate as a delayed exponential
+    function of time, where the SFR rises initially and then decays.
+
+    .. math::
+        M_\star(t) = M_{inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
+ 
+    Attributes
+    ----------
+    stellar_mass_inf : astropy.Quantity
+        Asymptotic stellar mass formed at infinite time.
+    tau : astropy.Quantity
+        Timescale of the delayed exponential star formation rate.
+    metallicity : float
+        Metallicity of the gas (constant).
+    """
+
+    def __init__(self, **kwargs):
+        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf']*u.Msun,
+                                           default_unit=u.Msun)
+        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
+        self.metallicity = kwargs['metallicity']
+        ChemicalEvolutionModel.__init__(self, **kwargs)
+
+    @u.quantity_input
+    def stellar_mass_formed(self, time):
+        return self.stellar_mass_inf * (1 - np.exp(-time / self.tau)
+            * (self.tau + time) / self.tau)
+
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.size, fill_value=self.metallicity)
+
+
+#-------------------------------------------------------------------------------
+class GaussianBurstCEM(ChemicalEvolutionModel):
+    """
+    Gaussian burst star formation model.
+
+    This class models a galaxy's star formation history as a single gaussian burst
+    occurring at a specific time, after which no further star formation occurs.
+
+    Attributes
+    ----------
+    mass_burst : float or astropy.Quantity
+        Total stellar mass formed in the burst.
+    time_burst : float or astropy.Quantity
+        Time of the starburst in cosmic time.
+    sigma_burst : float or astropy.Quantity
+        Span time of the burst in terms of the standard deviation.
+    burst_metallicity : float or astropy.Quantity
+        Metallicity of the burst.
+    """
+ 
+    def __init__(self, **kwargs):
+        self.mass_burst = check_unit(kwargs["mass_burst"], u.Msun)
+        self.time_burst = check_unit(kwargs["time_burst"], u.Gyr)
+        self.sigma_burst = check_unit(kwargs["sigma_burst"], u.Gyr)
+        self.burst_metallicity = kwargs["burst_metallicity"]
+        ChemicalEvolutionModel.__init__(self, **kwargs)
+
+    @u.quantity_input
+    def stellar_mass_formed(self, time):
+        return self.mass_burst / 2 * (1 + special.erf(
+            (time-self.tb) / (SQRT_2 * self.sigma_burst))
+            )
+  
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.size, fill_value=self.metallicity)
+
+
+class LogNormalCEM(ChemicalEvolutionModel):
+    r"""
+    Log-normal star formation history model.
+
+    This CEM models a galaxy's star formation rate as a log-normal
+    function of time (e.g. Gladders et al 2013), where the SFR rises initially
+    and then decays:
+
+    .. math::
+        M_\star(t) = \frac{M_{today}}{2} \cdot \left(1 - erf\left(\frac{ln(t) - ln(t_0)}{\sigma \sqrt{2}}\right) \right)
+
+    Attributes
+    ----------
+    lnt0 : float
+        Mean of the lognormal SFH.
+    tau : astropy.Quantity
+        Standard deviation of the lognormal SFH.
+    mass_today : float or astropy.Quantity
+        Total stellar mass formed at present.
+    metallicity : float
+        Metallicity of the gas (constant).
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.t0 = check_unit(kwargs['t0'], u.Gyr)
+        self.scale = kwargs['scale']
+        self.today = check_unit(kwargs['today'], u.Gyr)
+        self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
+        self.mass_norm = 1
+        mtoday = self.stellar_mass_formed(self.today)
+        self.mass_norm = self.mass_today / mtoday
+        self.metallicity_today = kwargs.get('metallicity_today', np.nan)
+
+    @u.quantity_input
+    def stellar_mass_formed(self, times: u.Quantity):
+        z = - np.log(times / self.t0) / self.scale
+        m = 0.5 * (1 - special.erf(z / SQRT_2))
+        return m * self.mass_norm
+
+    @u.quantity_input
+    def ism_metallicity(self, time : u.Gyr):
+        return np.full(time.size, fill_value=self.metallicity_today)
+
+
+class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
+    """A :class:`LogNormalCEM` with a Mass-dependent Metallicity chemical model.
+    
+    See also
+    --------
+    :class:`MassPropMetallicityMixin`
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.ism_metallicity_today = kwargs["ism_metallicity_today"]
+        self.alpha_powerlaw = kwargs["alpha_powerlaw"]
+
+
+class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
+    """A :class:`LogNormalCEM` with a quenching event.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.quenching_time = kwargs["quenching_time"]
+        mtoday = self.stellar_mass_formed(self.today)
+        self.mass_norm *= self.mass_today / mtoday
+
+    @sfh_quenching_decorator
+    def stellar_mass_formed(self, times: u.Quantity):
+        return super().stellar_mass_formed(times)
+
+
+#-------------------------------------------------------------------------------
+class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
     
     Description
@@ -448,38 +454,29 @@ class Tabular_MFH(ChemicalEvolutionModel):
 
     Attributes
     ----------
-    - table_t: astropy.Quantity
+    table_t: astropy.Quantity
         Tabulated cosmic time.
-    - table_M: astropy.Quantity
+    table_M: astropy.Quantity
         Total stellar mass at each cosmic time step.
-    - Z: astropy.Quantity
-        Average stellar metallicity at each cosmic time step.
+    table_metallicity: astropy.Quantity
+        ISM metallicity at each cosmic time step.
 
-    Methods
-    -------
-    See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
-
+    See also
+    --------
+    :class:`pst.models.ChemicalEvolutionModel` documentation.
     """
-    def __init__(self, times, masses, **kwargs):
+    def __init__(self, times, masses, metallicities, **kwargs):
         super().__init__(**kwargs)
-        self.table_t = times
-        # Make sure that time is cresscent
+        self.table_t = check_unit(times, u.Gyr)
+        # Make sure that time is crescent
         sort_times = np.argsort(self.table_t)
         self.table_t = self.table_t[sort_times]
-        self.table_M = masses[sort_times]
-        # 
-        self.Z = self.Z[sort_times]
-        # FIXME: this variables should not be declared here
-        self.t_hat_start = kwargs.get('t_hat_start', 1.)
-        self.t_hat_end = kwargs.get('t_hat_end', 0.)
-        # FIXME: are we using this quantities?
-        self.table_SFR = np.gradient(masses, times)
-        self.table_dot_SFR = np.gradient(self.table_SFR, times)
-        self.table_ddot_SFR = np.gradient(self.table_dot_SFR, times)
+        self.table_mass = check_unit(masses[sort_times], u.Msun)
+        self.table_metallicity = metallicities[sort_times]
 
-
-    def integral_SFR(self, times: u.Quantity):
-        """Evaluate the integral of the SFR over a given set of times.
+    @u.quantity_input
+    def stellar_mass_formed(self, times: u.Gyr):
+        r"""Evaluate the integral of the SFR over a given set of times.
         
         Description
         -----------
@@ -490,242 +487,167 @@ class Tabular_MFH(ChemicalEvolutionModel):
         ``
         Parameters
         ----------
-        - times: astropy.units.Quantity
-            Cosmic times at which the integral will be evaluated.
+        times : astropy.Quantity
+            Array of cosmic times at which the integral will be evaluated.
 
         Returns
         -------
-        - integral: astropy.units.Quantity
-            Integral evaluated at each input time.
+        integral : astropy.Quantity
+            The cumulative stellar mass formed at each input time.
         """
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t, self.table_M)
-        integral = interpolator(times) << self.table_M.unit
-        integral[times > self.table_t[-1]] = self.table_M[-1]
+           self.table_t, self.table_mass)
+        integral = interpolator(times) << self.table_mass.unit
+        integral[times > self.table_t[-1]] = self.table_mass[-1]
         integral[times < self.table_t[0]] = 0
-
-        # integral = np.interp(times.to(self.table_t.unit).value,
-        #                      self.table_t.value, self.table_M.value,
-        #                      left=0, right=self.table_M[-1].value) * self.table_M.unit
         return integral
     
-    def integral_Z_SFR(self, times):
-        """Evaluate the integral of the average metallicity over a given set of times.
+    @u.quantity_input
+    def ism_metallicity(self, times: u.Gyr):
+        """Evaluate the integral of the SFR over a given set of times.
         
         Description
         -----------
-        This method evaluates the integral:
-            math::
-            \int_{0}^{t} Z(t') SFR(t') dt'
-        at each time input time :math:`t`.
-        ``
+        Return the metallicity Z(t) of the interstellar medium (gas and dust)
+        at a certain set of cosmic times (i.e. since the Big Bang).
+        
         Parameters
         ----------
-        - times: astropy.units.Quantity
-            Cosmic times at which the integral will be evaluated.
+        times: astropy.units.Quantity
+            Cosmic times at which the metallicity will be evaluated.
 
         Returns
         -------
-        - integral: astropy.units.Quantity
-            Integral evaluated at each input time.
+        z_t: astropy.units.Quantity
+            Vector with the ISM metallicity at each input time.
         """
         interpolator = interpolate.Akima1DInterpolator(
-           self.table_t, self.table_M * self.Z)
-        integral = interpolator(times) << self.table_M.unit * self.Z.unit
-        integral[times > self.table_t[-1]] = self.table_M[-1] * self.Z[-1].value
-        integral[times < self.table_t[0]] = 0
-        idx = np.where((times > self.table_t[0]) & (times < self.table_t[1]))
-        integral[idx] *= np.sqrt((
-           times[idx] - self.table_t[0]) / (self.table_t[1] - self.table_t[0]))
+           self.table_t, self.table_metallicity)
+        integral = interpolator(times)
+        integral[times > self.table_t[-1]] = self.table_metallicity[-1]
+        integral[times < self.table_t[0]] = self.table_metallicity[0]
         return integral
 
-    def SFR(self, times):
-        return np.interp(times, self.table_t, self.table_SFR, left=0, right=0)
 
-    def dot_SFR(self, times):
-        return np.interp(times, self.table_t, self.table_dot_SFR, left=0, right=0)
+class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
+    """
+    See Also
+    --------
+    :class:`TabularCEM`
+    :class:`MassPropMetallicityMixin`
+
+    """
+    def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today, **kwargs):
+        self.ism_metallicity_today = ism_metallicity_today
+        self.alpha_powerlaw = alpha_powerlaw
+        # Create a dummy metallicity that is passed to the TabularCEM constructor
+        # but never used
+        metallicity = np.zeros(times.size)
+        super().__init__(times, masses, metallicity, **kwargs)
+
+
+class ParticleListCEM(ChemicalEvolutionModel):
+    """
+    Chemical Evolution Model using individual Simple Stellar Population (SSP) data.
     
-    def ddot_SFR(self, times):
-        return np.interp(times, self.table_t, self.table_ddot_SFR, left=0, right=0)
+    This model represents the chemical evolution of a galaxy by reconstructing 
+    a composite stellar population (CSP) using individual stellar population (SSP) 
+    particles, each of which is defined by its formation time, metallicity, and mass.
 
-
-class Tabular_ZPowerLaw(Tabular_MFH):
-    """Chemical evolution model based on a grid of times and metallicities.
-    
-    Description
-    -----------
-    This model represents the chemical evolution of a galaxy by means of a
-    discrete grid of ages and metallicities
+    Parameters
+    ----------
+    time_form : numpy.array or astropy.units.Quantity
+        Array representing the formation times of each SSP particle. If the input 
+        is a `numpy.array`, it is assumed to be in Gyr. Otherwise, an `astropy.units.Quantity` 
+        with appropriate units is required.
+    metallicities : numpy.array or astropy.units.Quantity
+        Array representing the metallicities of each SSP particle. If the input 
+        is a `numpy.array`, it is assumed to be dimensionless (i.e., no units).
+    masses : numpy.array or astropy.units.Quantity
+        Array representing the masses of each SSP particle. If the input is a 
+        `numpy.array`, it is assumed to be in solar masses.
 
     Attributes
     ----------
-    - table_t: astropy.Quantity
-        Tabulated cosmic time.
-    - table_M: astropy.Quantity
-        Total stellar mass at each cosmic time step.
-    - Z: astropy.Quantity
-        Average stellar metallicity at each cosmic time step.
-
-    Methods
-    -------
-    See `pst.models.ChemicalEvolutionModel` documentation. #FIXME
-
+    time_form : astropy.units.Quantity
+        Array of SSP formation times in Gyr.
+    metallicities : astropy.units.Quantity
+        Array of SSP metallicities, assumed to be dimensionless.
+    masses : astropy.units.Quantity
+        Array of SSP masses in solar masses.
     """
-    def __init__(self, times, masses, alpha, z_today, **kwargs):
-        self.z_today = z_today
-        self.alpha = alpha
-        super().__init__(times, masses, **kwargs)
-        
+    def __init__(self, time_form, metallicities, masses):
+        self.time_form, self.metallicities, self.masses = (
+            time_form, metallicities, masses)
 
     @property
-    def Z(self):
-        return self.z_today * np.power(self.table_M / self.table_M[-1], self.alpha)
+    def time_form(self):
+        return self._time_form
 
-    @Z.setter
-    def Z(self, z):
-        pass
-
-#-------------------------------------------------------------------------------
-class Tabular_Illustris(Tabular_MFH):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, filename, t0, **kwargs):
-        # TODO: get rid of t0 !
-        with fits.open(filename) as hdul:
-            lb_time = hdul[1].data['lookback_time'] * u.Gyr
-            mass_formed = np.sum(hdul[3].data, axis=1) *u.Msun # sum over metallicities
-            t_sorted = (t0-lb_time)[::-1]
-            mfh_sorted = np.cumsum(mass_formed[::-1])
-            #print('aqui', t_sorted, mfh_sorted)
-            Tabular_MFH.__init__(self, t_sorted, mfh_sorted, **kwargs) # t [Gyr], M[Msun]
-
-#-------------------------------------------------------------------------------
-class Tabular_CIGALE(Tabular_MFH):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, filename, t0, **kwargs):
-        f=open(filename,"r")
-        lines=f.readlines()
-        time=[]
-        mass=[]
-        for x in lines:
-            time.append(float(x.strip().split(' ')[0])*1e-3) #Myr -> Gyr
-            mass.append(float(x.strip().split(' ')[1])*1e6) #Msun/year -> Msun/Myr
-        f.close()
-        time = 13.7*u.Gyr-time*u.Gyr
-        cum_mass = np.cumsum(mass[::-1])*u.Msun #Msun/Myr -> Msun
-        Tabular_MFH.__init__(self, time[::-1], cum_mass, **kwargs)
-        
-
-#-------------------------------------------------------------------------------
-class Tabular_CIGALE_models(Tabular_MFH):
-#-------------------------------------------------------------------------------
-
-    def __init__(self, hdul, factor, best_sfh_age, t0, free_age, **kwargs):
-        
-        if free_age:
-            age_start = 13699- best_sfh_age
+    @time_form.setter
+    def time_form(self, values):
+        if not isinstance(values, u.Quantity):
+            self._time_form = values << u.Gyr
         else:
-            age_start = 0
-            
-        #print('a',age_start)
-        time = age_start*1e-3*u.Gyr +hdul[1].data['time']*1e-3*u.Gyr
-        cum_mass = np.cumsum(factor*hdul[1].data['SFR'])*1e6*u.Msun #Msun/Myr -> Msun
-        Tabular_MFH.__init__(self, time, cum_mass, **kwargs)
+            self._time_form = values
 
-            
-#-------------------------------------------------------------------------------
-class Tabular_Prospector(Tabular_MFH):
-#-------------------------------------------------------------------------------
+    @property
+    def metallicities(self):
+        return self._metallicities
 
-    def __init__(self, prospector_model, t0, **kwargs):
-        # TODO: get rid of t0 !
-        x_bins_prospector = np.power(10, prospector_model['agebins'][()]).flatten()*1e-9 #Gyrs
-            
-        y_prospector=prospector_model['best_log_mass'][()]
-        y_prospector = 10**y_prospector #Pasamos a mass = Msun
-        y_prospector = np.cumsum(y_prospector[::-1]) #Masa acumulada
-        y_prospector=np.vstack((y_prospector,y_prospector)).T.flatten() #Msun // Msun/year // Se añade lbt = 0 (ojo con el log)
-        #print('prospector', x_bins_prospector*u.Gyr, y_prospector*u.Msun)
-        Tabular_MFH.__init__(self, x_bins_prospector*u.Gyr, y_prospector*u.Msun, **kwargs)
-            
-#-------------------------------------------------------------------------------
-class Exponential_quenched_SFR(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
-
-  def __init__(self, **kwargs):
-    self.M_inf = kwargs['M_inf']*u.Msun
-    self.tau = kwargs['tau']*u.Gyr
-    self.Z = kwargs['Z']
-    self.t_q = kwargs['t_quench']*u.Gyr
-    ChemicalEvolutionModel.__init__(self, **kwargs)
-
-
-  def integral_SFR(self, time):
-     if type(time) is float:
-        if time<self.t_q:
-              M_stars=self.M_inf * ( 1 - np.exp(-time/self.tau) )
-                #M _inf is the mass for large t ;  M(t)=M_inf[1-exp(-t/tau)
+    @metallicities.setter
+    def metallicities(self, values):
+        if not isinstance(values, u.Quantity):
+            self._metallicities = values << u.dimensionless_unscaled
         else:
-            M_stars=self.M_inf * ( 1 - np.exp(-self.t_q/self.tau) )
+            self._metallicities = values
 
-     else:
-         M_stars=[]
-         for t in time:
-             if t<self.t_q:
-                 M=self.M_inf * ( 1 - np.exp(-t/self.tau) )
-                #M _inf is the mass for large t ;  M(t)=M_inf[1-exp(-t/tau)
-             else:
-                 M=self.M_inf * ( 1 - np.exp(-self.t_q/self.tau) )
-             M_stars.append(M)
-         M_stars=np.array(M_stars)
+    @property
+    def masses(self):
+        return self._masses
 
-     return M_stars
+    @masses.setter
+    def masses(self, values):
+        if not isinstance(values, u.Quantity):
+            self._masses = values << u.Msun
+        else:
+            self._masses = values
 
-  def integral_Z_SFR(self, time):
-    return self.Z * self.integral_SFR(time)
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
+        """
+        Interpolate the SSP particles onto an SSP base model at the observed time.
+        
+        This method interpolates the stellar masses of the SSP particles based on 
+        their ages and metallicities at the observed cosmic time `t_obs` using an 
+        SSP model grid.
 
+        Parameters
+        ----------
+        ssp : pst.SSP.SSPBase
+            SSP model providing the ages and metallicities for interpolation.
+        t_obs : astropy.units.Quantity
+            The age of the Universe at the time of the observation.
 
-#-------------------------------------------------------------------------------
-class ASCII_file(ChemicalEvolutionModel):
-#-------------------------------------------------------------------------------
+        Returns
+        -------
+        ssp_weights : astropy.units.Quantity
+            A 2D array representing the stellar mass associated with each SSP 
+            particle in the base SSP grid. Units are in solar masses.
+        """
+        valid_particles = self.time_form <= t_obs
+        return ssp.get_weights(ages=t_obs - self.time_form[valid_particles],
+                               metallicities=self.metallicities[valid_particles],
+                               masses=self.masses[valid_particles])
 
-  def __init__(self, file,
-           time_column = 0,
-           Z_column    = 1,
-           SFR_column  = 2,
-           time_units  = u.Gyr,
-           SFR_units   = u.Msun/u.yr ):
-    print("> Reading SFR file: '"+ file +"'")
-    t, Z, SFR = np.loadtxt( file, dtype=np.float, usecols=(time_column,Z_column,SFR_column), unpack=True)
-    self.t_table   = np.append( [0], t*time_units )
-    self.Z_table   = np.append( [0], Z )
+    def stellar_mass_formed(self, time):
+        sort_idx = np.argsort(self.time_form)
+        mass_history = np.cumsum(self.masses[sort_idx])
+        return np.interp(time, self.time_form[sort_idx], mass_history)
 
-    dt = np.ediff1d( self.t_table, to_begin=0 )
-    dm = np.append( [0], SFR*SFR_units )*dt
-    self.integral_SFR_table = np.cumsum( dm )
-    self.integral_Z_SFR_table = np.cumsum( self.Z_table*dm )
+    def ism_metallicity(self, time):
+        return np.full(time.size, fill_value=np.nan)
 
-  def set_current_state(self, galaxy):
-    galaxy.M_stars = self.integral_SFR( galaxy.today ) #TODO: account for stellar death
-    Z = np.interp( galaxy.today, self.t_table, self.Z_table )
-    galaxy.M_gas = galaxy.M_stars*max(.03/(Z+1e-6)-1,1e-6) # TODO: read from files
-    galaxy.Z = Z
-
-  def integral_SFR(self, time):
-    return np.interp( time, self.t_table, self.integral_SFR_table )
-
-  def integral_Z_SFR(self, time):
-    return np.interp( time, self.t_table, self.integral_Z_SFR_table )
-
-  #def plot(self):
-    #plt.semilogy( self.t_table/units.Gyr, self.SFR_table/(units.Msun/units.yr) )
-    #plt.semilogy( self.t_table/units.Gyr, self.integral_SFR_table/units.Msun )
-    #plt.semilogy( self.t_table/units.Gyr, self.Z_table )
-    #plt.show()
-
-
-# %%
 # -----------------------------------------------------------------------------
 #                                                    ... Paranoy@ Rulz! ;^D
+# Mr Krtxo \(ﾟ▽ﾟ)/
 # -----------------------------------------------------------------------------

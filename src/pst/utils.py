@@ -1,22 +1,39 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Sun Jun  5 16:18:39 2022
-
-@author: pablo
+Module containing generic utility functions
 """
 
 import numpy as np
-from matplotlib import pyplot as plt
+from astropy import units as u
+
+
+SQRT_2 = np.sqrt(2)
 
 def flux_conserving_interpolation(new_wave, wave, spectra):
-    """Interpolate a spectra to a new grid of wavelengths preserving the flux density."""
+    """Interpolate a spectra to a new grid of wavelengths preserving the flux density.
+    
+    Parameters
+    ----------
+    new_wave : np.ndarray
+        New grid of wavelengths
+    wave : np.ndarray
+        Original grid of wavelengths
+    spectra : np.ndarray
+        Spectra associated to `wave`.
+    
+    Returns
+    -------
+    interp_spectra : np.ndarray
+        Interpolated spectra to `new_wave`
+    """
     wave_limits = 1.5 * wave[[0, -1]] - 0.5 * wave[[1, -2]]
     wave_edges = np.hstack([wave_limits[0], (wave[1:] + wave[:-1])/2, wave_limits[1]])
 
     new_wave_limits = 1.5 * new_wave[[0, -1]] - 0.5 * new_wave[[1, -2]]
     new_wave_edges = np.hstack([new_wave_limits[0], (new_wave[1:] + new_wave[:-1])/2, new_wave_limits[1]])
-    interp_spectra = np.diff(np.interp(new_wave_edges, wave, np.cumsum(spectra * np.diff(wave_edges)))) / np.diff(new_wave_edges)
+    cumulative_spectra = np.cumsum(spectra * np.diff(wave_edges))
+    cumulative_spectra = np.insert(cumulative_spectra, 0, 0)
+    new_cumulative_spectra = np.interp(new_wave_edges, wave_edges, cumulative_spectra)
+    interp_spectra = np.diff(new_cumulative_spectra) / np.diff(new_wave_edges)
     return interp_spectra
 
 def gaussian1d_conv(f, sigma, deltax):
@@ -24,9 +41,12 @@ def gaussian1d_conv(f, sigma, deltax):
 
     params
     ------
-    - f: (array) 1D array containing the data to be convolved with.
-    - sigma (array) 1D array containing the values of sigma at each value of x
-    - deltax: (float) Step size of x in "physical" units.
+    f : np.array
+        1D array containing the data to be convolved with.
+    sigma : np.array
+        1D array containing the values of sigma at each value of x
+    deltax : float
+        Step size of x in "physical" units.
     """
     sigma_pixels = sigma / deltax
     pix_range = np.arange(0, f.size, 1)
@@ -47,24 +67,28 @@ def gaussian1d_conv(f, sigma, deltax):
             f_convolved[pixel] = np.sum(f * g)
     return f_convolved
 
+def check_unit(quantity, default_unit=None):
+    """Check the units of an input quantity.
+    
+    Parameters
+    ----------
+    quantity : np.ndarray or astropy.units.Quantity
+        Input quantity.
+    default_unit : astropy.units.Quantity, default=None
+        If `quantity` has not units, it corresponds to the unit assigned to it.
+        Otherwise, it is used to check the equivalency with `quantity`.
+    """
+    isq = isinstance(quantity, u.Quantity)
+    if isq and default_unit is not None:
+        if not quantity.unit.is_equivalent(default_unit):
+            raise u.UnitTypeError(
+                "Input quantity does not have the appropriate units")
+        else:
+            return quantity
+    elif not isq and default_unit is not None:
+        return quantity * default_unit
+    elif not isq and default_unit is None:
+        raise ValueError("Input value must be a astropy.units.Quantity")
+    else:
+        return quantity
 
-if __name__ == '__main__':
-    # Small test
-    from ppxf.ppxf_util import gaussian_filter1d
-
-    x = np.linspace(1, 100, 10000)
-    old_sigma = 1
-    f = 1 / old_sigma / np.sqrt(2 * np.pi) * np.exp(- (x - 30)**2
-                                                    / 2 / old_sigma**2)
-    sigma = 3 * np.ones(f.size)
-    # sigma = np.linspace(1, 30, f.size)
-    new_sigma = np.sqrt(3**2 + old_sigma**2)
-    new_gauss = 1 / new_sigma / np.sqrt(2 * np.pi) * np.exp(- (x - 30)**2
-                                                            / 2 / new_sigma**2)
-    conv_f = gaussian1d_conv(f, sigma, deltax=1)
-    ppxf_conv_f = gaussian_filter1d(f, sig=sigma)
-    plt.figure()
-    plt.plot(f, c='r')
-    plt.plot(new_gauss, lw=1, c='k')
-    plt.plot(conv_f, '--', c='b')
-    plt.plot(ppxf_conv_f, '--', c='g')

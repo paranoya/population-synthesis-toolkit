@@ -5,10 +5,9 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table
 from astropy import units as u
-from astropy import constants as c
 from astropy import units
 
-from scipy import interpolate
+from pst.utils import check_unit
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
@@ -21,19 +20,15 @@ class SSPBase(object):
 
     Attributes
     ----------
-    - ages: astropy.units.Quantity
+    ages: astropy.units.Quantity
         Ages of the SSPs.
-    - metallicities: astropy.units.Quantity
+    metallicities: astropy.units.Quantity
         Metallicities of the SSPs.
-    - L_lambda: astropy.units.Quantity
+    L_lambda: astropy.units.Quantity
         Spectral energy distribution of each SSP. Each dimension correspond to
         (metallicity, ages, wavelength).
-    - wavelength: astroy.units.Quantity
+    wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
-    
-    Methods
-    -------
-    #TODO
     """
     default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
 
@@ -80,32 +75,42 @@ class SSPBase(object):
             raise NameError("wavelength must be an astropy.Quantity")
         else:
             self._wavelength = wave
+       
+    def get_weights(self, ages, metallicities, masses=None):
+        """2D interpolation of a list of ages and metallicities.
+        
+        Parameters
+        ----------
+        ages : np.array or astropy.units.Quantity
+            SSP ages to interpolate.
+        metallicites : np.array or astropy.units.Quantity
+            Metallicity associated to each age.
+        masses : np.array, astropy.units.Quantity or None, optional
+            Stellar mass corresponding to each SSP.
+        """
+        ages = check_unit(ages, u.Gyr)
+        metallicities = metallicities
+        if masses is None:
+            masses = np.ones(ages.size) * u.Msun
+        else:
+            masses = check_unit(masses, u.Msun)
 
+        age_idx = np.clip(self.ages.searchsorted(ages), 1, self.ages.size-1)
+        weights_age = np.log(ages / self.ages[age_idx-1])
+        weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
+        weights_age = np.clip(weights_age, 0., 1.)
 
-    # def compute_burstSED(self, age, Z):
-    #     """Compute the SED of a stellar burst of age t and metallicity Z."""
-    #     log_age = np.log10(age)
-    #     index_Z_hi = self.metallicities.searchsorted(Z).clip(
-    #         1, len(self.metallicities)-1)
-    #     weight_Z_hi = (np.log(Z/self.metallicities[index_Z_hi-1])
-    #                    / np.log(self.metallicities[index_Z_hi]
-    #                             / self.metallicities[index_Z_hi-1]))
-    #     index_tage_hi = self.log_ages_yr.searchsorted(log_age).clip(
-    #         1, len(self.log_ages_yr)-1)
-    #     weight_tage_hi = (log_age - self.log_ages_yr[index_tage_hi-1])/(
-    #         self.log_ages_yr[index_tage_hi]
-    #         - self.log_ages_yr[index_tage_hi-1])
-    #     sed = (
-    #         self.L_lambda[index_Z_hi][index_tage_hi]
-    #         * weight_Z_hi * weight_tage_hi
-    #         + self.L_lambda[index_Z_hi][index_tage_hi - 1]
-    #         * weight_Z_hi * (1 - weight_tage_hi)
-    #         + self.L_lambda[index_Z_hi-1][index_tage_hi]
-    #         * (1 - weight_Z_hi) * weight_tage_hi
-    #         + self.L_lambda[index_Z_hi-1][index_tage_hi-1]
-    #         * (1 - weight_Z_hi) * (1 - weight_tage_hi)
-    #         )
-    #     return sed
+        z_idx = np.clip(self.metallicities.searchsorted(metallicities), 1, self.metallicities.size-1)
+        weights_z = np.log(metallicities / self.metallicities[z_idx-1])
+        weights_z /= np.log(self.metallicities[z_idx] / self.metallicities[z_idx-1])
+        weights_z = np.clip(weights_z, 0., 1.)
+
+        weights = np.zeros((self.metallicities.size, self.ages.size)) << masses.unit
+        np.add.at(weights, (z_idx, age_idx), masses * weights_age * weights_z)
+        np.add.at(weights, (z_idx-1, age_idx), masses * weights_age * (1-weights_z))
+        np.add.at(weights, (z_idx-1, age_idx-1), masses * (1-weights_age) * (1-weights_z))
+        np.add.at(weights, (z_idx, age_idx-1), masses * (1-weights_age) * weights_z)
+        return weights
 
     def get_ssp_logedges(self):
         """Get the edges of the SSP metallicities and ages."""
@@ -120,47 +125,49 @@ class SSPBase(object):
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
         return logmet_bin_edges, logage_bin_edges
 
-    def regrid(self, n_logage_bin_edges, n_logmet_bin_edges):
-        """Reinterpolate the SSP model to a new grid of input ages and metallicities."""
-        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
-        logmet_bin_edges, logage_bin_edges = self.get_ssp_logedges()
+    def regrid(self, age_bins, metallicity_bins):
+        """Interpolate the SSP model to a new grid of input ages and metallicities.
         
-        ssp_age_idx = np.searchsorted(logage_bin_edges, n_logage_bin_edges)
-        age_bins = [slice(ssp_age_idx[i], ssp_age_idx[i+1]) for i in range(len(n_logage_bin_edges) - 1)]
-        ssp_met_idx = np.searchsorted(logmet_bin_edges, n_logmet_bin_edges)
-        met_bins = [slice(ssp_met_idx[i], ssp_met_idx[i+1]) for i in range(len(n_logmet_bin_edges) - 1)]
-
+        Parameters
+        ----------
+        age_bins : np.array or astropy.units.Quantity
+        """
+        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        age_bins = check_unit(age_bins, u.Gyr)
+        metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
         # Bin the SED of the SSPs
-        previous_sed = self.L_lambda.copy()
-        self.L_lambda = np.empty(
-            (len(met_bins), len(age_bins), previous_sed.shape[-1]),
-            dtype=float) * previous_sed.unit
-
-        print("[SSP] New SSP grid dimensions: ", self.L_lambda.shape)
-        for j, m_bin in enumerate(met_bins):
-            met_av_sed = np.exp(np.mean(
-                np.log(previous_sed[m_bin] / previous_sed.unit), axis=0))
+        new_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
+                                 self.wavelength.size)) * self.L_lambda.unit
+        print("New SSP SED shape: ", new_l_lambda.shape)
+        for j, m_bin in enumerate(metallicity_bins):
             for i, a_bin in enumerate(age_bins):
-                self.L_lambda[j, i, :] = np.exp(
-                    np.mean(np.log(met_av_sed[a_bin]), axis=0)) * previous_sed.unit
+                weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
+                new_l_lambda[j, i] = np.sum(
+                    self.L_lambda * weights[:, :, np.newaxis] / u.Msun, axis=(0, 1))
 
-        self.metallicities = 10**((n_logmet_bin_edges[:-1] + n_logmet_bin_edges[1:]) / 2
-                                  ) * units.dimensionless_unscaled
-        log_ages_yr = (n_logage_bin_edges[:-1] + n_logage_bin_edges[1:]) / 2
-        self.ages = 10**log_ages_yr * u.yr
+        print("Updating SSP model metallicities, ages and SED")
+        self.metallicities = metallicity_bins
+        self.ages = age_bins
+        self.L_lambda = new_l_lambda
 
     def cut_wavelength(self, wl_min=None, wl_max=None):
-        """Cut model wavelength edges."""
+        """Cut model wavelength edges.
+        
+        Parameters
+        ----------
+        wl_min : float or astropy.units.Quantity, optional
+            Minimum wavelength value.
+        wl_max : float or astropy.units.Quantity, optional
+            Maximum wavelength value.
+        """
         if wl_min is None:
             wl_min = self.wavelength[0]
-        elif not isinstance(wl_min, u.Quantity):
-            print("Assuming minimum wavelenth in the same units as wavelength")
-            wl_min *= self.wavelength.unit
+        else:
+            wl_min = check_unit(wl_min, self.wavelength.unit)
         if wl_max is None:
             wl_max = self.wavelength[0]
-        elif not isinstance(wl_max, u.Quantity):
-            print("Assuming minimum wavelenth in the same units as wavelength")
-            wl_max *= self.wavelength.unit
+        else:
+            wl_max = check_unit(wl_max, self.wavelength.unit)
 
         cut_pts = np.where((self.wavelength >= wl_min) &
                            (self.wavelength <= wl_max))[0]
@@ -252,17 +259,21 @@ class SSPBase(object):
         """
         print("Computing synthetic photometry for SSP model")
         self.photometry = np.zeros((len(filter_list),
-                                    *self.L_lambda.shape[:-1]))
+                                    *self.L_lambda.shape[:-1])) * u.Jy / u.Msun
         self.photometry_filters = filter_list
         for ith, f in enumerate(filter_list):
             f.interpolate(self.wavelength * (1 + z_obs))
-            self.photometry[ith], _ = f.get_fnu(
+            flux, _ = f.get_fnu(
                     self.L_lambda  * u.Msun / 4 / np.pi / (10 * u.pc)**2,
                     mask_nan=False)
+            flux /= 1 + z_obs
+            self.photometry[ith] = flux.to('Jy') / u.Msun
+        return self.photometry
 
     def copy(self):
         """Return a copy of the SSP model."""
         return deepcopy(self)
+
 
 class PopStar(SSPBase):
     """PopStar SSP models (Mollá+09)."""
@@ -291,32 +302,32 @@ class PopStar(SSPBase):
                                      10.04, 10.08, 10.11, 10.12, 10.13, 10.14,
                                      10.15, 10.18]) * units.dimensionless_unscaled
         self.ages = 10**self.log_ages_yr * units.yr
-
-        # isochrone age in delta [log(tau)]=0.01
-        self.wavelength = np.loadtxt(os.path.join(
-            self.path, IMF, 'SED', f'spneb_{IMF}_0.15_100_z0500_t9.95'), dtype=float,
-            skiprows=0, usecols=(0,), unpack=True) * units.Angstrom
-
         print("> Initialising Popstar models (IMF='"+IMF+"')")
-        self.L_lambda = np.empty(
-            shape=(self.metallicities.size, self.log_ages_yr.size,
-                   self.wavelength.size), dtype=np.float32
-                   ) * units.Lsun / units.Angstrom / units.Msun
+        # isochrone age in delta [log(tau)]=0.01
         if nebular:
-            column = 3
+            column = "_total"
             print('--> Including NEBULAR emission')
         else:
-            column = 1
+            column = "_stellar"
             print('--> Only stellar continuum')
-        for i, Z in enumerate(self.metallicities.value):
-            for j, age in enumerate(self.log_ages_yr.value):
-                file = os.path.join(
-                    self.path, IMF, 'SED',
-                    'spneb_{0}_0.15_100_z{1:04.0f}_t{2:.2f}'.format(IMF, Z*1e4, age))
-                spec = np.loadtxt(
-                    file, dtype=float, skiprows=0, usecols=(column),
-                    unpack=True)  # Lsun/Angstrom/Msun
-                self.L_lambda[i][j] = spec * self.L_lambda.unit
+
+        with fits.open(
+            os.path.join(self.path, f"popstar_{IMF.lower()}_0.15_100.fits.gz")
+            ) as hdul:
+            self.wavelength = hdul[1].data["wavelength"] * u.Unit(
+                hdul[1].header["TUNIT1"])
+
+            self.L_lambda = np.empty(
+                shape=(self.metallicities.size, self.log_ages_yr.size,
+                    self.wavelength.size), dtype=np.float32
+                    ) * u.Unit(hdul[2].header["TUNIT1"])
+
+            for i, Z in enumerate(self.metallicities.value):
+                table = hdul["SED_Z_0.{:04.0f}".format(Z*1e4)].data
+                for j, age in enumerate(self.log_ages_yr.value):
+                    self.L_lambda[i][j] = table[
+                        "logage_yr_{:02.2f}".format(age)
+                        + column] * self.L_lambda.unit
 
 
 class PyPopStar(SSPBase):
@@ -376,6 +387,162 @@ class PyPopStar(SSPBase):
                     hdul.close()
         # Avoid 0 flux
         self.L_lambda[self.L_lambda <= 0] += self.L_lambda[self.L_lambda > 0].min()
+
+
+class BC03_2003(SSPBase):
+
+    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+     # Padova1994
+    'm22': 0.0001,
+    'm32': 0.0004,
+    'm42': 0.004,
+    'm52': 0.008,
+    'm62': 0.02,
+    'm72': 0.05,
+    #'m82': 0.1  Not available in the 2003 version
+    }
+    resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
+    
+    def __init__(self, isochrone='Padova1994', model='BaSeL',
+                 imf='Chabrier', path=None) -> None:
+        self.isochrone = isochrone
+        self.model, model_key = self.parse_model(model)
+        self.imf, imf_key = self.parse_imf(imf)
+
+        if path is None:
+            self.path = os.path.join(self.default_path,
+                                     'BC03', 'bc03_2003ver', "bc03",
+                                     self.isochrone, self.imf)
+        else:
+            self.path = path
+
+        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        self.metallicities = np.array(list(self.metallicity_map.values())
+                                      ) * units.dimensionless_unscaled
+        self.ages = np.loadtxt(
+            os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
+            ) * units.yr
+
+        self.log_ages_yr = np.log10(self.ages / units.yr)
+
+        load_wavelength = False
+        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+            fits_path = os.path.join(
+                self.path, f"bc2003_{self.resolution[model_key]}_{metallicity_key}_{imf_key}_ssp.fits")
+            table = Table.read(fits_path)
+            if not load_wavelength:
+                self.wavelength = table['wavelength'].value * u.angstrom
+                self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
+                                          self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
+                load_wavelength = True
+            table.remove_column("wavelength")
+            for j, column in enumerate(table.itercols()):
+                self.L_lambda[i, j] = column.value * self.L_lambda.unit
+
+    def parse_model(self, model):
+        if 'basel' in model.lower():
+            model = 'BaSeL'
+            key = 'BaSeL'
+        elif 'stelib' in model.lower():
+            model = 'stelib'
+            key = 'stelib'
+        else:
+            raise NameError(f"Unrecognized model: {model}.\n"
+                             + "Select Basel, Stelib, Miles")
+        return model, key
+
+    def parse_imf(self, imf):
+        if 'cha' in imf.lower():
+            imf = 'chabrier'
+            key = 'chab'
+        elif 'sal' in imf.lower():
+            imf = 'salpeter'
+            key = 'salp'
+        elif 'kro' in imf.lower():
+            imf = 'kroupa'
+            key = 'kro'
+        else:
+            raise NameError(f"Unrecognized IMF: {imf}.\n"
+                             + "Select Chabrier, Salpeter or Kroupa")
+        return imf, key
+
+
+class BC03_2013(SSPBase):
+
+    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+     # Padova1994
+    'm22': 0.0001,
+    'm32': 0.0004,
+    'm42': 0.004,
+    'm52': 0.008,
+    'm62': 0.02,
+    'm72': 0.05,
+    'm82': 0.1}
+    resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
+    
+    def __init__(self, isochrone='Padova1994', model='BaSeL',
+                 imf='Chabrier', path=None) -> None:
+        self.isochrone = isochrone
+        self.model, model_key = self.parse_model(model)
+        self.imf, imf_key = self.parse_imf(imf)
+
+        if path is None:
+            self.path = os.path.join(self.default_path,
+                                     'BC03', 'bc03_2013ver', "bc03",
+                                     self.isochrone, self.imf)
+        else:
+            self.path = path
+
+        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        self.metallicities = np.array(list(self.metallicity_map.values())
+                                      ) * units.dimensionless_unscaled
+        self.ages = np.loadtxt(
+            os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
+            ) * units.yr
+
+        self.log_ages_yr = np.log10(self.ages / units.yr)
+
+        load_wavelength = False
+        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+            fits_path = os.path.join(
+                self.path, f"bc2003_{self.resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+            table = Table.read(fits_path)
+            if not load_wavelength:
+                self.wavelength = table['wavelength'].value * u.angstrom
+                self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
+                                          self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
+                load_wavelength = True
+            table.remove_column("wavelength")
+            for j, column in enumerate(table.itercols()):
+                self.L_lambda[i, j] = column.value * self.L_lambda.unit
+
+    def parse_model(self, model):
+        if 'basel' in model.lower():
+            model = 'BaSeL'
+            key = 'BaSeL'
+        elif 'stelib' in model.lower():
+            model = 'stelib'
+            key = 'stelib'
+        else:
+            raise NameError(f"Unrecognized model: {model}.\n"
+                             + "Select Basel, Stelib, Miles")
+        return model, key
+
+    def parse_imf(self, imf):
+        if 'cha' in imf.lower():
+            imf = 'chabrier'
+            key = 'chab'
+        elif 'sal' in imf.lower():
+            imf = 'salpeter'
+            key = 'salp'
+        elif 'kro' in imf.lower():
+            imf = 'kroupa'
+            key = 'kro'
+        else:
+            raise NameError(f"Unrecognized IMF: {imf}.\n"
+                             + "Select Chabrier, Salpeter or Kroupa")
+        return imf, key
+
 
 class BC03_2016(SSPBase):
 

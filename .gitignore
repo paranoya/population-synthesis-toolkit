@@ -1,5 +1,9 @@
 src/pst/data/ssp/*
+!*src/pst/data/ssp/PopStar/popstar_cha_0.15_100.fits
+src/pst/data/filters/*
+tutorials/output/*
 tutorials/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
