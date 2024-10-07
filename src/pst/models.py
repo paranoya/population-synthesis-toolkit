@@ -45,8 +45,7 @@ def sfh_quenching_decorator(stellar_mass_formed):
         quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
         stellar_mass = stellar_mass_formed(*args)
         final_mass = stellar_mass_formed(args[0], quenching_time)
-        stellar_mass[args[1] > quenching_time] = final_mass
-        return stellar_mass
+        return np.where(args[1] < quenching_time, stellar_mass, final_mass)
     return wrapper_stellar_mass_formed
 
 
@@ -407,9 +406,9 @@ class LogNormalCEM(ChemicalEvolutionModel):
 
     @u.quantity_input
     def stellar_mass_formed(self, times: u.Quantity):
-        z = - np.log(times / self.t0) / self.scale
-        m = 0.5 * (1 - special.erf(z / SQRT_2))
-        m[times <= 0] = 0
+        z = - np.log(times[times > 0] / self.t0) / self.scale
+        m = np.zeros(times.shape)
+        m[times > 0] = 0.5 * (1 - special.erf(z / SQRT_2))
         return m * self.mass_norm
 
     @u.quantity_input
