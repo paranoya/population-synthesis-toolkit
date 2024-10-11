@@ -47,10 +47,10 @@ def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
     return u.Quantity(fnu)
 
 #%%
-# pst.fitting_module.compute_polynomial_models(input_file, output_file, obs_filters,
-#                                             ti_grid = ti_grid, tf_grid = tf_grid,
-#                                             z_grid = z_grid, av_grid = av_grid,
-#                                             N_range = N_range)
+pst.fitting_module.compute_polynomial_models(input_file, output_file, obs_filters,
+                                            ti_grid = ti_grid, tf_grid = tf_grid,
+                                            z_grid = z_grid, av_grid = av_grid,
+                                            N_range = N_range)
 
 #%%
 ssp = pst.SSP.PopStar(IMF="sal")
