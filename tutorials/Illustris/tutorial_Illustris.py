@@ -19,7 +19,7 @@ t = t0*(1-t_hat) #time from 0Gyr --> 13.7Gyr
 lookback_time = t0*t_hat
 test_lookback_time = lookback_time[::-1]
 
-obs_filters = ['SLOAN/SDSS.u', 'SLOAN/SDSS.g', 'SLOAN/SDSS.r', 'SLOAN/SDSS.i', 'SLOAN/SDSS.z']
+obs_filters = ['SLOAN_SDSS.u', 'SLOAN_SDSS.g', 'SLOAN_SDSS.r', 'SLOAN_SDSS.i', 'SLOAN_SDSS.z']
 N_range = np.arange(1, 4)
 
 ti_grid = [0]*u.Gyr
