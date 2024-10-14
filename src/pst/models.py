@@ -531,9 +531,11 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     :class:`MassPropMetallicityMixin`
 
     """
-    def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today, **kwargs):
+    def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today,
+                 mass_today, **kwargs):
         self.ism_metallicity_today = ism_metallicity_today
         self.alpha_powerlaw = alpha_powerlaw
+        self.mass_today = mass_today
         # Create a dummy metallicity that is passed to the TabularCEM constructor
         # but never used
         metallicity = np.zeros(times.size)
