@@ -10,7 +10,6 @@ from astropy import units as u
 import numpy as np
 from matplotlib import pyplot as plt
 import csv
-from astropy.io import fits
 import extinction
 
 t0 = 13.7 * u.Gyr  # time of observation 
@@ -38,9 +37,10 @@ output_file = os.path.join(os.getcwd(), '{}_output.csv'.format(test_subject))
 
 def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
     fnu = []
-    sed = model.compute_SED(SSP = ssp, t_obs = t0)
-    for i, filter_name in enumerate(obs_filters):
-        photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
+    sed = model.compute_SED(ssp, t_obs=13.7 * u.Gyr)
+    for filter_name in obs_filters:
+        photo = pst.observables.Filter.from_svo(filter_name)
+        photo.interpolate(ssp.wavelength)
         spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
         fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err=None)
         fnu.append( fnu_Jy )
@@ -53,13 +53,12 @@ pst.fitting_module.compute_polynomial_models(input_file, output_file, obs_filter
                                             N_range = N_range)
 
 #%%
-ssp = pst.SSP.PopStar(IMF="sal")
+ssp = pst.SSP.PopStar(IMF="cha")
 ssp.cut_wavelength(1000, 1600000)
-obs_filters_wl = []
-for name in obs_filters:
-    photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = name)
+obs_filters_wl  = []
+for filter_name in obs_filters:
+    photo = pst.observables.Filter.from_svo(filter_name)
     obs_filters_wl.append(photo.effective_wavelength().to_value())
-obs_filters_wl = np.array(obs_filters_wl)
 
 
 #%%
@@ -70,15 +69,7 @@ illustris_ssfr = []
 
 illustris_data_path = 'F:/population-synthesis-toolkit-pst_2/pst/examples/data/Illustris'
 # illustris_data_path = '/media/danieljl/SSD/population-synthesis-toolkit-pst_2/pst/examples/data/Illustris'
-dust_polynomial = []
-dust_polynomial_error = []
-total_mass = []
-av_poly = []
-av_poly_error = []
-z_poly = []
-z_poly_error = []
-ab_mags = []
-id_list = []
+
 #Order written in old method:
     
         # f_output.write(mass_fraction +',')
@@ -90,75 +81,95 @@ id_list = []
         # f_output.write('{}'.format(av_model +','))
         # f_output.write('{}'.format(av_model_error +','))
 
+f_illustris_data = csv.reader(open('Illustris_mfh_data.csv', 'r'))
+Illustris_data_ID = []
+Illustris_data_mass_formed = []
+Illustris_data_total_mass = []
+Illustris_data_metallicity = []
 
+for i, row in enumerate(f_illustris_data):
+    ID = int(row[0])   
+    Illustris_data_ID.append(ID)
+    Illustris_time = np.array([float(k) for k in row[1].split()])
+    Illustris_data_mass_formed.append(np.array([float(k) for k in row[2].split()]))
+    Illustris_data_total_mass.append(float(row[3]))
+    Illustris_data_metallicity.append(float(row[4]))
+    
+dust_polynomial = []
+dust_polynomial_error = []
+av_poly = []
+av_poly_error = []
+z_poly = []
+z_poly_error = []
+ab_mags = []
+id_list = []    
 output_data = csv.reader(open(output_file, 'r'))
 for i, row in enumerate(output_data):
     
-    if len(row) == 10: #Temporal patch to avoid corrupted inputs
-        #Illustris input sSFR
-        poly_mass_fraction = np.array([float(k) for k in row[2].split()])
-        ID = int(row[0])   
-        id_list.append(ID)
-        poly_mass_fraction_error = np.array([float(k) for k in row[3].split()])
-        poly_dust = np.array([float(k) for k in row[6].split()])
-        dust_polynomial.append(poly_dust)
-        dust_polynomial_error.append(np.array([float(k) for k in row[7].split()]))
-        poly_met = np.array([float(k) for k in row[8].split()])
-        z_poly.append(poly_met)
-        z_poly_error.append(np.array([float(k) for k in row[9].split()]))
-        
-        model = pst.models.Tabular_MFH(t0-test_lookback_time, 
-                                    (1-poly_mass_fraction)*u.Msun, 
-                                    Z = np.ones(len(t))*poly_met*u.dimensionless_unscaled)
-        Fnu_total = get_flux_densities(model, ssp, obs_filters, poly_met, t)
-        f = Fnu_total.to_value() #Jy
-        AB_mag = -2.5*np.log10(f/3631)
-        ab_mags.append(AB_mag)
-        
-        with fits.open(os.path.join(illustris_data_path, 'subhalo_{}_sfh.fits'.format(ID))) as hdul:
-            lb_time = hdul[1].data['lookback_time']*u.Gyr
-            Illustris_time = (t0-lb_time)[::-1]
-            mass_formed = np.sum(hdul[3].data, axis=1)*u.Msun # sum over metallicities
-            Illustris_mass_formed = np.cumsum(mass_formed[::-1])
-            Illustris_Z = hdul[0].header['HIERARCH starmetallicity']
-            total_star_mass = hdul[0].header['HIERARCH mass_stars']*10**10
-            number_stars = hdul[0].header['HIERARCH len_stars']
-        
-        model_test = pst.models.Tabular_MFH(Illustris_time, 
-                                    Illustris_mass_formed, 
-                                    Z = np.ones(len(Illustris_time))*Illustris_Z) #Generating test-model
-        fraction = np.logspace(-3, 0, len(t))
-        real_fraction = 1- model_test.integral_SFR((t0-test_lookback_time))/model_test.integral_SFR(t0)
-        real_age_of_fraction = np.interp(fraction, real_fraction, test_lookback_time) 
-        
-        lbt= .3
-        lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
-        r = real_fraction[lbt_index]
-        
-        #Polynomial output sSFR
-        
-        A_lambda_obs = np.log10(poly_dust[4])/(-0.4)
-        A_V_grid = np.linspace(0, 3, 301)
-        R_V = 3.1        
-        A_g = []
-        for j in A_V_grid:
-        	A_g.append( extinction.ccm89(obs_filters_wl, j, R_V)[4])       
-        
+    # if len(row) == 10: #Temporal patch to avoid corrupted inputs
+    #Illustris input sSFR
+    poly_mass_fraction = np.array([float(k) for k in row[2].split()])
+    ID = int(row[0])   
+    id_list.append(ID)
+    poly_mass_fraction_error = np.array([float(k) for k in row[3].split()])
+    poly_dust = np.array([float(k) for k in row[6].split()])
+    dust_polynomial.append(poly_dust)
+    dust_polynomial_error.append(np.array([float(k) for k in row[7].split()]))
+    poly_met = np.array([float(k) for k in row[8].split()])
+    z_poly.append(poly_met)
+    z_poly_error.append(np.array([float(k) for k in row[9].split()]))
     
-        lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
-        if len(poly_mass_fraction)>1000:
-            p = poly_mass_fraction[lbt_index]
-            # poly_mass_fraction_error = np.array([float(k) for k in row[4].split()])
-            # p_error = poly_mass_fraction_error[lbt_index]
-            poly_ssfr_i = p/lbt/1e9
-            # poly_ssfr_error_i = p_error/lbt/1e9
-            
-            poly_ssfr.append( poly_ssfr_i)
-            illustris_ssfr.append( r/lbt/1e9 )
-            total_mass.append(mass_formed)
-            if poly_ssfr_i<3e-12 and r/lbt/1e9>2e-10:
-                bad_index = i
-            AV_poly.append(np.interp(A_lambda_obs, A_g, A_V_grid) )
+    masses = (1-poly_mass_fraction)
+    model = pst.models.TabularCEM(times = t0-test_lookback_time, 
+                                masses = masses*u.Msun, 
+                                metallicities = np.full(masses.size, fill_value=poly_met))
+    
+    
+    Fnu_total = get_flux_densities(model, ssp, obs_filters, poly_met, t)
+    f = Fnu_total.to_value() #Jy
+    AB_mag = -2.5*np.log10(f/3631)
+    ab_mags.append(AB_mag)
+    
+    index = int(np.where(np.array(Illustris_data_ID) == ID)[0])
+
+    Illustris_mass_formed = Illustris_data_mass_formed[index]
+    Illustris_Z = Illustris_data_metallicity[index]
+    total_star_mass = Illustris_data_total_mass[index]
+    model_test = pst.models.TabularCEM(times = Illustris_time*u.Gyr, 
+                                masses = Illustris_mass_formed*u.Msun, 
+                                metallicities=np.full(Illustris_mass_formed.size, fill_value=Illustris_Z))
+                                
+    fraction = np.logspace(-3, 0, len(t))
+    real_fraction = 1- model_test.stellar_mass_formed((t0-test_lookback_time))/model_test.stellar_mass_formed(t0)
+    real_age_of_fraction = np.interp(fraction, real_fraction, test_lookback_time) 
+    
+    lbt= .3
+    lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
+    r = real_fraction[lbt_index]
+    
+    #Polynomial output sSFR
+    
+    A_lambda_obs = np.log10(poly_dust[4])/(-0.4)
+    A_V_grid = np.linspace(0, 3, 301)
+    R_V = 3.1        
+    A_g = []
+    for j in A_V_grid:
+    	A_g.append( extinction.ccm89(np.array(obs_filters_wl), j, R_V)[4])       
+    
+
+    lbt_index = abs(test_lookback_time.to_value()-lbt).argmin()
+    if len(poly_mass_fraction)>1000:
+        p = poly_mass_fraction[lbt_index]
+        # poly_mass_fraction_error = np.array([float(k) for k in row[4].split()])
+        # p_error = poly_mass_fraction_error[lbt_index]
+        poly_ssfr_i = p/lbt/1e9
+        # poly_ssfr_error_i = p_error/lbt/1e9
+        
+        poly_ssfr.append( poly_ssfr_i)
+        illustris_ssfr.append( r/lbt/1e9 )
+        if poly_ssfr_i<3e-12 and r/lbt/1e9>2e-10:
+            bad_index = i
+        AV_poly.append(np.interp(A_lambda_obs, A_g, A_V_grid) )
 #%%
 plt.figure()
 plt.xlabel('sSFR poly')
