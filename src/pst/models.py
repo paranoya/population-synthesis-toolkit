@@ -470,7 +470,8 @@ class PolynomialCEM_fit: #Generates the basis for the Polynomial MFH
 
             for i, filter_name in enumerate(obs_filters):
                 photo = pst.observables.Filter.from_svo(filter_name)
-                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed, spectra_err = None)
+                photo.interpolate(ssp.wavelength)
+                fnu_Jy, fnu_Jy_err = photo.get_fnu(sed)
                 fnu.append( fnu_Jy )
 
             primordial_Fnu.append(u.Quantity(fnu))
