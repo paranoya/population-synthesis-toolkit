@@ -26,7 +26,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     N_range = kwargs.get('N_grid', np.arange(1, 4))
     
     # SSPs
-    ssp_pop = pst.SSP.PopStar(IMF="sal")
+    ssp_pop = pst.SSP.PopStar(IMF="cha")
     ssp = ssp_pop
     
     #%%    
@@ -43,7 +43,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     ssp.cut_wavelength(1000, 1600000)
     obs_filters_wl = []
     for name in obs_filters:
-        photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = name)
+        photo = pst.observables.Filter.from_svo(name)
         obs_filters_wl.append(photo.effective_wavelength().to_value())
     obs_filters_wl = np.array(obs_filters_wl)     
     # print('effective_wavelengths: ', obs_filters_wl)       
@@ -102,13 +102,13 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     
                 for N in N_range:
                     for t_initial, t_final in t_grid:
-                        basis = pst.models.Polynomial_MFH_fit(N, ssp, obs_filters, obs_filters_wl, t, t0, Z_i,                                                  
+                        basis = pst.models.PolynomialCEM_fit(N, ssp, obs_filters, obs_filters_wl, t, t0, Z_i,                                                  
                                                    dust_extinction, error_Fnu_obs,
                                                    t_hat_start=1-t_initial/t0, 
                                                    t_hat_end = 1-t_final/t0)    #Creating the basis               
                         #True polynomia
                         coeffs = basis.fit(Fnu_obs) #Generating the coefficients c
-                        poly_fit = pst.models.Polynomial_MFH(Z=Z_i,
+                        poly_fit = pst.models.PolynomialCEM(Z=Z_i,
                                                    coeffs=coeffs,
                                                    S=basis.lstsq_solution,
                                                    t_hat_start=1-t_initial/t0, 
@@ -138,7 +138,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
                                 Fnu_model = uncorrected_Fnu_model
                                 
                             else:     
-                                poly_fit = pst.models.Polynomial_MFH(Z=Z_i, 
+                                poly_fit = pst.models.PolynomialCEM(Z=Z_i, 
                                             t_hat_start=(1-t_start/t0), t_hat_end=(1-t_end/t0), 
                                             coeffs=coeffs, S=basis.lstsq_solution) #New polynomial fit with the new time-limits
                                                                     
@@ -157,7 +157,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
                                 norm = np.sum(Fnu_obs*Fnu_model) / np.sum(Fnu_model**2) #Normalization factor for the coefficients
                                 chi2 = np.sum((Fnu_model*norm-Fnu_obs)**2)
                             
-                            polynomial_model = pst.models.Polynomial_MFH(Z=Z_i, 
+                            model = pst.models.PolynomialCEM(Z=Z_i, 
                                             t_hat_start=(1-t_start/t0), 
                                             t_hat_end=(1-t_end/t0), coeffs=coeffs*norm, 
                                             compute_sigma=True, S=basis.lstsq_solution)
