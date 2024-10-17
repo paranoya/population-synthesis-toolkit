@@ -61,15 +61,14 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
     
     def get_flux_densities(model, ssp, obs_filters, Z_i, t, **kwargs):
         fnu = []
-        sed = model.compute_SED(SSP = ssp, t_obs = t0)
+        sed = model.compute_SED(ssp = ssp, t_obs = t0)
         for i, filter_name in enumerate(obs_filters):
-            photo = pst.observables.Filter( wavelength = ssp.wavelength, filter_name = filter_name)
-            spectra_flambda = ( sed/(4*np.pi*(10*u.pc)**2) )
-            fnu_Jy, fnu_Jy_err = photo.get_fnu(spectra_flambda, spectra_err=None)
+            photo = pst.observables.Filter.from_svo(filter_name)
+            photo.interpolate(ssp.wavelength)
+            fnu_Jy, fnu_Jy_err = photo.get_fnu(sed)
             fnu.append( fnu_Jy )
         return u.Quantity(fnu)
 
-    
     #%% 
     ##################################################################################
     ##################################################################################
@@ -113,7 +112,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
                                                    S=basis.lstsq_solution,
                                                    t_hat_start=1-t_initial/t0, 
                                                    t_hat_end = 1-t_final/t0) #Generating the polynomial model
-    
+                        
                         Fnu_model = get_flux_densities(poly_fit, ssp, obs_filters, Z_i, t)*dust_extinction / error_Fnu_obs #Luminosities of the model
                         
                         #Saving the uncorrected models (before positive-SFR fit)
@@ -121,7 +120,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
                         uncorrected_Fnu_model = Fnu_model
                         
                         t_cut = t.clip(t_initial, t_final) #Time limited by the free initial-final time parameters
-                        sfr = uncorrected.SFR(t_cut)
+                        sfr = np.diff(uncorrected.stellar_mass_formed(t_cut))/u.Gyr
                         zeros = np.where(sfr[:-1]*sfr[1:] < 0)[0] #Locating zeros of the uncorrected SFR
                         t_zeros = np.r_[t_initial,np.sqrt(t_cut[zeros]*t_cut[zeros+1]),t_final]
                         
@@ -157,7 +156,7 @@ def compute_polynomial_models(input_file, output_file, obs_filters,
                                 norm = np.sum(Fnu_obs*Fnu_model) / np.sum(Fnu_model**2) #Normalization factor for the coefficients
                                 chi2 = np.sum((Fnu_model*norm-Fnu_obs)**2)
                             
-                            model = pst.models.PolynomialCEM(Z=Z_i, 
+                            polynomial_model = pst.models.PolynomialCEM(Z=Z_i, 
                                             t_hat_start=(1-t_start/t0), 
                                             t_hat_end=(1-t_end/t0), coeffs=coeffs*norm, 
                                             compute_sigma=True, S=basis.lstsq_solution)
