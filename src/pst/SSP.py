@@ -243,7 +243,7 @@ class SSPBase(object):
                 mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
         return mass_to_lum
     
-    def compute_photometry(self, filter_list, z_obs=0.0):
+    def compute_photometry(self, filter_list, z_obs=0.0, verbose=True):
         """Compute the SSP synthetic photometry of a set of filters.
         
         Paramteres
@@ -257,7 +257,8 @@ class SSPBase(object):
             Array storing the photometry. The dimensions correspond to
             filter, metallicity and age.
         """
-        print("Computing synthetic photometry for SSP model")
+        if verbose:
+            print("Computing synthetic photometry for SSP model")
         self.photometry = np.zeros((len(filter_list),
                                     *self.L_lambda.shape[:-1])) * u.Jy / u.Msun
         self.photometry_filters = filter_list
