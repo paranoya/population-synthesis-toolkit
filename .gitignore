@@ -3,6 +3,7 @@ src/pst/data/ssp/*
 src/pst/data/filters/*
 tutorials/salim/*
 tutorials/Illustris/Illustris_output.csv
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
