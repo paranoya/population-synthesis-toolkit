@@ -489,7 +489,7 @@ class TabularCEM(ChemicalEvolutionModel):
         integral : astropy.Quantity
             The cumulative stellar mass formed at each input time.
         """
-        interpolator = interpolate.Akima1DInterpolator(
+        interpolator = interpolate.PchipInterpolator(
            self.table_t, self.table_mass)
         integral = interpolator(times) << self.table_mass.unit
         integral[times > self.table_t[-1]] = self.table_mass[-1]
@@ -515,7 +515,7 @@ class TabularCEM(ChemicalEvolutionModel):
         z_t: astropy.units.Quantity
             Vector with the ISM metallicity at each input time.
         """
-        interpolator = interpolate.Akima1DInterpolator(
+        interpolator = interpolate.PchipInterpolator(
            self.table_t, self.table_metallicity)
         integral = interpolator(times)
         integral[times > self.table_t[-1]] = self.table_metallicity[-1]
