@@ -68,7 +68,7 @@ def download_svo_filter(name: str, dest_dir: str, verbose=True):
     if verbose:
         print(f"Querying SVO Filter: {url}")
     r = requests.get(url, stream=True)
-    if r.ok:
+    if len(r.text) > 0:
         if verbose:
             print(f"Saving new filter {name} to ", os.path.abspath(file_path))
         with open(file_path, 'wb') as f:
