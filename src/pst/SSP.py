@@ -125,32 +125,35 @@ class SSPBase(object):
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
         return logmet_bin_edges, logage_bin_edges
 
-    def regrid(self, age_bins, metallicity_bins):
+    def regrid(self, age_bins, metallicity_bins, verbose=True):
         """Interpolate the SSP model to a new grid of input ages and metallicities.
         
         Parameters
         ----------
         age_bins : np.array or astropy.units.Quantity
         """
-        print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        if verbose:
+            print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
         age_bins = check_unit(age_bins, u.Gyr)
         metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
         # Bin the SED of the SSPs
         new_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
                                  self.wavelength.size)) * self.L_lambda.unit
-        print("New SSP SED shape: ", new_l_lambda.shape)
+        if verbose:
+            print("New SSP SED shape: ", new_l_lambda.shape)
         for j, m_bin in enumerate(metallicity_bins):
             for i, a_bin in enumerate(age_bins):
                 weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
                 new_l_lambda[j, i] = np.sum(
                     self.L_lambda * weights[:, :, np.newaxis] / u.Msun, axis=(0, 1))
 
-        print("Updating SSP model metallicities, ages and SED")
+        if verbose:
+            print("Updating SSP model metallicities, ages and SED")
         self.metallicities = metallicity_bins
         self.ages = age_bins
         self.L_lambda = new_l_lambda
 
-    def cut_wavelength(self, wl_min=None, wl_max=None):
+    def cut_wavelength(self, wl_min=None, wl_max=None, verbose=True):
         """Cut model wavelength edges.
         
         Parameters
@@ -180,9 +183,10 @@ class SSPBase(object):
         else:
             self.wavelength = self.wavelength[cut_pts]
             self.L_lambda = self.L_lambda[:, :, cut_pts]
-            print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
+            if verbose:
+                print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
-    def interpolate_sed(self, new_wl_edges):
+    def interpolate_sed(self, new_wl_edges, verbose=True):
         """Flux-conserving interpolation.
 
         params
@@ -196,7 +200,8 @@ class SSPBase(object):
         dwl = np.diff(new_wl_edges)
         ori_dwl = np.hstack((np.diff(self.wavelength),
                              self.wavelength[-1] - self.wavelength[-2]))
-        print('[SSP] Interpolating SSP SEDs')
+        if verbose:
+            print('[SSP] Interpolating SSP SEDs')
         new_l_lambda = np.empty(
             shape=(self.metallicities.size, self.log_ages_yr.size,
                    new_wl.size), dtype=np.float32) * self.L_lambda.unit
@@ -243,7 +248,7 @@ class SSPBase(object):
                 mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
         return mass_to_lum
     
-    def compute_photometry(self, filter_list, z_obs=0.0):
+    def compute_photometry(self, filter_list, z_obs=0.0, verbose=True):
         """Compute the SSP synthetic photometry of a set of filters.
         
         Paramteres
@@ -257,7 +262,8 @@ class SSPBase(object):
             Array storing the photometry. The dimensions correspond to
             filter, metallicity and age.
         """
-        print("Computing synthetic photometry for SSP model")
+        if verbose:
+            print("Computing synthetic photometry for SSP model")
         self.photometry = np.zeros((len(filter_list),
                                     *self.L_lambda.shape[:-1])) * u.Jy / u.Msun
         self.photometry_filters = filter_list
@@ -278,7 +284,7 @@ class SSPBase(object):
 class PopStar(SSPBase):
     """PopStar SSP models (Mollá+09)."""
 
-    def __init__(self, IMF, nebular=False, path=None):
+    def __init__(self, IMF, nebular=False, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'PopStar')
         else:
@@ -302,14 +308,17 @@ class PopStar(SSPBase):
                                      10.04, 10.08, 10.11, 10.12, 10.13, 10.14,
                                      10.15, 10.18]) * units.dimensionless_unscaled
         self.ages = 10**self.log_ages_yr * units.yr
-        print("> Initialising Popstar models (IMF='"+IMF+"')")
+        if verbose:
+            print("> Initialising Popstar models (IMF='"+IMF+"')")
         # isochrone age in delta [log(tau)]=0.01
         if nebular:
             column = "_total"
-            print('--> Including NEBULAR emission')
+            if verbose:
+                print('--> Including NEBULAR emission')
         else:
             column = "_stellar"
-            print('--> Only stellar continuum')
+            if verbose:
+                print('--> Only stellar continuum')
 
         with fits.open(
             os.path.join(self.path, f"popstar_{IMF.lower()}_0.15_100.fits.gz")
@@ -333,7 +342,7 @@ class PopStar(SSPBase):
 class PyPopStar(SSPBase):
     """PyPopStar SSP models (Millán-Irigoyen+21)."""
 
-    def __init__(self, IMF, nebular=False, path=None):
+    def __init__(self, IMF, nebular=False, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
         else:
@@ -362,12 +371,14 @@ class PyPopStar(SSPBase):
         #                              ) * u.Angstrom
         header = 'SSP-{}'.format(IMF)
         if nebular:
-            print("> Initialising Popstar models (neb em) (IMF='"
-                  + IMF + "')")
+            if verbose:
+                print("> Initialising Popstar models (neb em) (IMF='"
+                      + IMF + "')")
             column = 'flux_total'
         else:
-            print("> Initialising Popstar models (no neb em) (IMF='"
-                  + IMF + "')")
+            if verbose:
+                print("> Initialising Popstar models (no neb em) (IMF='"
+                      + IMF + "')")
             column = 'flux_stellar'
         with fits.open(os.path.join(self.path, header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(
                 self.metallicities.value[0], self.log_ages_yr.value[0]))
@@ -404,7 +415,7 @@ class BC03_2003(SSPBase):
     resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
     
     def __init__(self, isochrone='Padova1994', model='BaSeL',
-                 imf='Chabrier', path=None) -> None:
+                 imf='Chabrier', path=None, verbose=True) -> None:
         self.isochrone = isochrone
         self.model, model_key = self.parse_model(model)
         self.imf, imf_key = self.parse_imf(imf)
@@ -416,7 +427,8 @@ class BC03_2003(SSPBase):
         else:
             self.path = path
 
-        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        if verbose:
+            print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
         self.metallicities = np.array(list(self.metallicity_map.values())
                                       ) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
@@ -481,7 +493,7 @@ class BC03_2013(SSPBase):
     resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
     
     def __init__(self, isochrone='Padova1994', model='BaSeL',
-                 imf='Chabrier', path=None) -> None:
+                 imf='Chabrier', path=None, verbose=True) -> None:
         self.isochrone = isochrone
         self.model, model_key = self.parse_model(model)
         self.imf, imf_key = self.parse_imf(imf)
@@ -493,7 +505,8 @@ class BC03_2013(SSPBase):
         else:
             self.path = path
 
-        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        if verbose:
+            print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
         self.metallicities = np.array(list(self.metallicity_map.values())
                                       ) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
@@ -557,7 +570,7 @@ class BC03_2016(SSPBase):
     'm82': 0.1}
     resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
     
-    def __init__(self, model='BaSeL', imf='Kroupa', path=None) -> None:
+    def __init__(self, model='BaSeL', imf='Kroupa', path=None, verbose=True) -> None:
         self.model, model_key = self.parse_model(model)
         self.imf, imf_key = self.parse_imf(imf)
 
@@ -567,7 +580,8 @@ class BC03_2016(SSPBase):
         else:
             self.path = path
 
-        print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
+        if verbose:
+            print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
         self.metallicities = np.array(list(self.metallicity_map.values())) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
             os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')) * units.yr
@@ -622,7 +636,7 @@ class BC03_2016(SSPBase):
 class BaseGM(SSPBase):
     """Granada models..."""
 
-    def __init__(self, path=None):
+    def __init__(self, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'BaseGM',
                                      'gsd01_156.fits')
@@ -639,7 +653,8 @@ class BaseGM(SSPBase):
         self.ages = np.loadtxt(self.ssp_properties_path, usecols=(0)) * units.yr
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
-        print("> Initialising GRANADA models (IMF=Salpeter)")
+        if verbose:
+            print("> Initialising GRANADA models (IMF=Salpeter)")
         ssp_fits = fits.open(self.path)
         wl0 = ssp_fits[0].header['CRVAL1']
         deltawl = ssp_fits[0].header['CDELT1']
@@ -720,9 +735,10 @@ class XSL(SSPBase):
 
     C_imf = dict(salpeter=9799552.50, kroupa=5567946.09)
 
-    def __init__(self, IMF, ISO, path=None):
-        print("> Initialising X-Shooter (XSL) models (IMF={}, ISO={})".format(
-            IMF, ISO))
+    def __init__(self, IMF, ISO, path=None, verbose=True):
+        if verbose:
+            print("> Initialising X-Shooter (XSL) models (IMF={}, ISO={})".format(
+                IMF, ISO))
         if (IMF != 'Kroupa') & (IMF != 'Salpeter'):
             raise NameError('IMF not valid (use Kroupa | Salpeter)')
         if (ISO != 'P00') & (ISO != 'PC'):

@@ -42,7 +42,7 @@ def load_photometric_filters(filters):
             filters_out.append(Filter.from_svo(f))
     return filters_out
 
-def download_svo_filter(name: str, dest_dir: str):
+def download_svo_filter(name: str, dest_dir: str, verbose=True):
     """Download a filter from the Spanish Virtual Observatory (SVO) Filter Profile Service.
     
     Parameters
@@ -65,10 +65,12 @@ def download_svo_filter(name: str, dest_dir: str):
     url = base_url + name.replace("_", "/")
     filename = name + ".dat"
     file_path = os.path.join(dest_dir, filename)
-    print(f"Querying SVO Filter: {url}")
+    if verbose:
+        print(f"Querying SVO Filter: {url}")
     r = requests.get(url, stream=True)
-    if r.ok:
-        print(f"Saving new filter {name} to ", os.path.abspath(file_path))
+    if len(r.text) > 0:
+        if verbose:
+            print(f"Saving new filter {name} to ", os.path.abspath(file_path))
         with open(file_path, 'wb') as f:
             for chunk in r.iter_content(chunk_size=1024 * 8):
                 if chunk:
