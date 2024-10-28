@@ -8,3 +8,6 @@ __version__ = get_versions()["version"]
 
 __all__ = ["SSP", "observables", "models", "fitting_module"]
 
+
+from . import _version
+__version__ = _version.get_versions()['version']
