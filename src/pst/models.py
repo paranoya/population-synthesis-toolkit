@@ -301,30 +301,61 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
  
     Attributes
     ----------
-    stellar_mass_inf : astropy.Quantity
-        Asymptotic stellar mass formed at infinite time.
     tau : astropy.Quantity
         Timescale of the delayed exponential star formation rate.
+    today : float or astropy.Quantity
+        Cosmic time at the the time of the observation.
+    mass_today : float or astropy.Quantity
+        Total stellar mass formed at present.
     metallicity : float
         Metallicity of the gas (constant).
     """
 
     def __init__(self, **kwargs):
-        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf']*u.Msun,
-                                           default_unit=u.Msun)
         self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
-        self.metallicity = kwargs['metallicity']
+        self.today = check_unit(kwargs['today'], u.Gyr)
+        self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
+        self._mass_norm = 1
+        mtoday = self.stellar_mass_formed(self.today)
+        self._mass_norm = self.mass_today / mtoday
+
+        self.ism_metallicity_today =  kwargs['ism_metallicity_today']
         ChemicalEvolutionModel.__init__(self, **kwargs)
 
     @u.quantity_input
     def stellar_mass_formed(self, time):
-        return self.stellar_mass_inf * (1 - np.exp(-time / self.tau)
-            * (self.tau + time) / self.tau)
+        return self.mass_today * (1 - np.exp(-time / self.tau)
+            * (self.tau + time) / self.tau) * self._mass_norm
 
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.ism_metallicity_today)
 
+
+class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelayedCEM):
+    """A :class:`ExponentialDelayedCEM` with a Mass-dependent Metallicity chemical model.
+    
+    See also
+    --------
+    :class:`MassPropMetallicityMixin`
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.ism_metallicity_today = kwargs["ism_metallicity_today"]
+        self.alpha_powerlaw = kwargs["alpha_powerlaw"]
+
+
+class ExponentialDelayedQuenchedCEM(ExponentialDelayedZPowerLawCEM):
+    """A :class:`ExponentialDelayedZPowerLawCEM` with a quenching event."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
+        mtoday = self.stellar_mass_formed(self.today)
+        self._mass_norm *= self.mass_today / mtoday
+
+    @sfh_quenching_decorator
+    def stellar_mass_formed(self, times: u.Quantity):
+        return super().stellar_mass_formed(times)
 
 #-------------------------------------------------------------------------------
 class GaussianBurstCEM(ChemicalEvolutionModel):
@@ -424,8 +455,7 @@ class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
 
 
 class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
-    """A :class:`LogNormalCEM` with a quenching event.
-    """
+    """A :class:`LogNormalCEM` with a quenching event."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
