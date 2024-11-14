@@ -50,6 +50,53 @@ class TestModels(unittest.TestCase):
         z = model.ism_metallicity(self.dummy_times)
         self.assertTrue(np.allclose(z, 0.02))
 
+    def test_delayed_tau(self):
+        model = models.ExponentialDelayedCEM(tau= 10 * u.Gyr,
+                                    today=13.7 * u.Gyr,
+                                    mass_today = 1.0 * u.Msun,
+                                    ism_metallicity_today=0.02)
+        mass = model.stellar_mass_formed(self.dummy_times)
+        mass = model.stellar_mass_formed(self.dummy_times)
+        self.assertTrue(np.isclose(mass[0], 0 * u.Msun, rtol=1e-4))
+        self.assertTrue(np.isclose(mass[-1], 1 * u.Msun, rtol=1e-4))
+
+        z = model.ism_metallicity(self.dummy_times)
+        self.assertTrue(np.allclose(z, 0.02))
+
+    def test_delayed_tau_powerlaw(self):
+        model = models.ExponentialDelayedZPowerLawCEM(
+            tau= 10 * u.Gyr,
+            today=13.7 * u.Gyr,
+            mass_today = 1 * u.Msun,
+            ism_metallicity_today=0.02,
+            alpha_powerlaw=1)
+        mass = model.stellar_mass_formed(self.dummy_times)
+        mass = model.stellar_mass_formed(self.dummy_times)
+        self.assertTrue(np.isclose(mass[0], 0 * u.Msun, rtol=1e-4))
+        self.assertTrue(np.isclose(mass[-1], 1 * u.Msun, rtol=1e-4))
+
+        z = model.ism_metallicity(self.dummy_times)
+        print(z[-1])
+        self.assertTrue(np.isclose(z[-1], 0.02, rtol=1e-4))
+
+    def test_delayed_tau_quenched(self):
+        model = models.ExponentialDelayedQuenchedCEM(
+            tau= 10 * u.Gyr,
+            today=13.7 * u.Gyr,
+            mass_today = 1 * u.Msun,
+            ism_metallicity_today=0.02,
+            alpha_powerlaw=1,
+            quenching_time=13.0 * u.Gyr)
+        
+        quenched_times = self.dummy_times >= 13.0 * u.Gyr
+        mass = model.stellar_mass_formed(self.dummy_times)
+
+        self.assertTrue(np.isclose(mass[0], 0 * u.Msun, rtol=1e-4))
+        self.assertTrue((mass[quenched_times] == mass[-1]).all())
+
+        z = model.ism_metallicity(self.dummy_times)
+        self.assertTrue(np.isclose(z[-1].value, 0.02, rtol=1e-4))
+
     def test_lognormal_zpowerlaw(self):
         model = models.LogNormalZPowerLawCEM(
             t0=3.0, scale=1.0, mass_today=1.0,
