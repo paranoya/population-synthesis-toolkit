@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 
 from astropy.io import fits
+from astropy.wcs import WCS
 from astropy.table import Table
 from astropy import units as u
 from astropy import units
@@ -112,6 +113,41 @@ class SSPBase(object):
         np.add.at(weights, (z_idx, age_idx-1), masses * (1-weights_age) * weights_z)
         return weights
 
+    def get_ssp_l_lambda(self, age, metallicity):
+        """Compute the SED associated to an SSP of a given age and metallicity.
+        
+        Parameters
+        ----------
+        age : float or u.Quantity
+            SSP age.
+        metallicity : float or u.Quantity
+            SSP metallicity
+        
+        Returns
+        -------
+        sed : u.Quantity
+            Spectra energy distribution associated to the SSP.
+        """
+        age = check_unit(age, u.Gyr)
+        metallicity = check_unit(metallicity, u.dimensionless_unscaled)
+
+        age_idx = np.clip(self.ages.searchsorted(age), 1, self.ages.size-1)
+        weights_age = np.log(age / self.ages[age_idx-1])
+        weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
+        weights_age = np.clip(weights_age, 0., 1.)
+
+        z_idx = np.clip(self.metallicities.searchsorted(metallicity), 1,
+                        self.metallicities.size-1)
+        weights_z = np.log(metallicity / self.metallicities[z_idx-1])
+        weights_z /= np.log(self.metallicities[z_idx] / self.metallicities[z_idx-1])
+        weights_z = np.clip(weights_z, 0., 1.)
+
+        sed = self.L_lambda[z_idx, age_idx] *  weights_age * weights_z
+        sed += self.L_lambda[z_idx-1, age_idx] * weights_age * (1-weights_z)
+        sed += self.L_lambda[z_idx-1, age_idx-1] * (1-weights_age) * (1-weights_z)
+        sed += self.L_lambda[z_idx-1, age_idx] * (1-weights_age) * weights_z
+        return sed
+
     def get_ssp_logedges(self):
         """Get the edges of the SSP metallicities and ages."""
         logages = np.log10(self.ages / units.yr)
@@ -203,7 +239,7 @@ class SSPBase(object):
         if verbose:
             print('[SSP] Interpolating SSP SEDs')
         new_l_lambda = np.empty(
-            shape=(self.metallicities.size, self.log_ages_yr.size,
+            shape=(self.metallicities.size, self.ages.size,
                    new_wl.size), dtype=np.float32) * self.L_lambda.unit
 
         for i in range(self.L_lambda.shape[0]):
@@ -788,6 +824,100 @@ class XSL(SSPBase):
                     hdul.close()
                 self.L_lambda[i][j] = spec * self._L_lambda.unit
 
+
+class EMILES(SSPBase):
+    """E-MILES models from Vazdekis+16 and Röck+16."""
+    lib_isochrones = {"BASTI": "iTp",
+                  "PADOVA00": "iPp"}
+    lib_imfs = {"KROUPA_UNIVERSAL": "ku1.30",
+                "UNIMODAL": "un",
+                "BIMODAL": "bi",
+                "CHABRIER": "ch1.30"}
+
+    
+    _n_wavelength = 53689  # Spectra size
+
+    _iso_logmetals = {
+        "BASTI": np.array([-2.27, -1.79, -1.49, -1.26, -0.96, -0.66, -0.35,
+                           -0.25, 0.06, 0.15, 0.26, 0.4]),
+        "PADOVA00": np.array([-2.32, -1.71 , -1.31 , -0.71, -0.40, 0.00, 0.22])
+    }
+    _iso_ages = {
+        "BASTI": np.array(
+            [0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25,
+            0.30, 0.35, 0.40, 0.45, 0.50, 0.60, 0.70, 0.80, 0.90, 1.0, 1.250,
+            1.500, 1.750, 2.000, 2.25, 2.50, 2.75, 3.0, 3.25, 3.50, 3.75, 4.0,
+            4.5, 5.0, 5.5, 6.0, 6.5, 7., 7.5, 8., 8.5, 9.0, 9.5, 10., 10.5, 11.,
+            11.5, 12., 12.5, 13., 13.5, 14.]) << u.Gyr,
+        "PADOVA00": np.array([0.063, 0.071, 0.079, 0.089, 0.10, 0.11, 0.13,
+                              0.14, 0.16, 0.18, 0.20, 0.22, 0.25, 0.28, 0.32,
+                              0.35, 0.40, 0.45, 0.50, 0.56, 0.63, 0.71, 0.79,
+                              0.89, 1.00, 1.12, 1.26, 1.41, 1.58, 1.78, 2.00,
+                              2.24, 2.51, 2.82, 3.16, 3.55, 3.98, 4.47, 5.01,
+                              5.62, 6.31, 7.08, 7.94, 8.91, 10.00, 11.22, 12.59,
+                              14.13, 15.85, 17.78]) << u.Gyr
+        }
+
+    def __init__(self, iso, imf, path=None, verbose=True):
+        if verbose:
+            print("> Initialising E-MILES models (IMF={}, ISO={})".format(
+                imf, iso))
+        if path:
+            self.path = path
+        else:
+            self.path = os.path.join(self.default_path, 'EMILES')
+        model_name = self._get_models_prefix(iso, imf)
+        self._load_models(model_name)
+
+    def _get_models_prefix(self, iso, imf):
+        """Get the file prefix used to load the model files."""
+        model_name = os.path.join(self.path, "E")
+        # IMF
+        if not imf.upper() in self.lib_imfs.keys():
+            raise NameError(f"Input IMF {imf} not recognized"
+                            + f"\nThe available isochrones are: {self.lib_imfs.keys()}")
+        else:
+            model_name += self.lib_imfs[imf.upper()]
+        # Metallicity and age
+        model_name += r"Z{}{:.2f}T{:07.4f}_"
+
+        # Isochrone
+        if not iso.upper() in self.lib_isochrones:
+            raise NameError(f"Input isochrone {iso} not recognized"
+                            + f"\nThe available isochrones are: {list(self.lib_isochrones.keys())}")
+        else:
+            model_name += self.lib_isochrones[iso.upper()]
+            self._ages = self._iso_ages[iso.upper()]
+            self.log_ages_yr = np.log10(self._ages / units.yr)
+            # Solar metallicity defined in V+16.
+            self._logmetals = self._iso_logmetals[iso.upper()]
+            self._metallicities = 10**self._logmetals * 0.019
+        # Alpha over iron
+        model_name += "0.00_baseFe.fits"
+        return model_name
+
+    def _load_models(self, model_name):
+        """Load the SSP models from individual FITS files."""
+        self.L_lambda = np.zeros(
+            (self.metallicities.size, self.ages.size,
+             self._n_wavelength))  * u.Lsun / u.Angstrom / u.Msun
+
+        for met_idx, metal in enumerate(self._logmetals):
+            if metal < 0:
+                m_prefix = "m"
+            else:
+                m_prefix = "p"
+
+            for age_idx, age in enumerate(self.ages.to_value("Gyr")):
+                file = model_name.format(m_prefix, np.abs(metal), age)
+                assert os.path.isfile(file), f"File {file} not found"
+                with fits.open(file) as hdul:
+                    self.L_lambda[met_idx, age_idx] = hdul[0].data << self.L_lambda.unit
+        
+        with fits.open(file) as hdul:
+            wcs = WCS(hdul[0].header)
+            self.wavelength = wcs.array_index_to_world_values(
+                np.arange(0, self._n_wavelength)) << u.AA
 
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
