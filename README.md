@@ -13,3 +13,11 @@ Check the [documentation page](https://population-synthesis-toolkit.readthedocs.
 ## Installation
 
 Follow the instructions at the [installation section](https://population-synthesis-toolkit.readthedocs.io/en/latest/installation.html) in the documentation page for details on installing PST.
+
+## Tutorials
+
+The [tutorials](./tutorials) illustrate the basic functionality of PST through simple example use cases.
+
+## Contributing
+
+If you want to contribute to the project, feel free to report any [issues](https://github.com/paranoya/population-synthesis-toolkit/issues) you may find and/or fork this repository and open a pull request.
