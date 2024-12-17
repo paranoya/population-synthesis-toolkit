@@ -239,7 +239,7 @@ class SSPBase(object):
         if verbose:
             print('[SSP] Interpolating SSP SEDs')
         new_l_lambda = np.empty(
-            shape=(self.metallicities.size, self.log_ages_yr.size,
+            shape=(self.metallicities.size, self.ages.size,
                    new_wl.size), dtype=np.float32) * self.L_lambda.unit
 
         for i in range(self.L_lambda.shape[0]):
@@ -858,11 +858,14 @@ class EMILES(SSPBase):
                               14.13, 15.85, 17.78]) << u.Gyr
         }
 
-    def __init__(self, iso, imf, verbose=True):
+    def __init__(self, iso, imf, path=None, verbose=True):
         if verbose:
             print("> Initialising E-MILES models (IMF={}, ISO={})".format(
                 imf, iso))
-        self.path = os.path.join(self.default_path, 'EMILES')
+        if path:
+            self.path = path
+        else:
+            self.path = os.path.join(self.default_path, 'EMILES')
         model_name = self._get_models_prefix(iso, imf)
         self._load_models(model_name)
 
@@ -885,6 +888,7 @@ class EMILES(SSPBase):
         else:
             model_name += self.lib_isochrones[iso.upper()]
             self._ages = self._iso_ages[iso.upper()]
+            self.log_ages_yr = np.log10(self._ages / units.yr)
             # Solar metallicity defined in V+16.
             self._logmetals = self._iso_logmetals[iso.upper()]
             self._metallicities = 10**self._logmetals * 0.019
