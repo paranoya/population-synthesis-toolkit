@@ -1,4 +1,5 @@
 import os
+from glob import glob
 from copy import deepcopy
 import numpy as np
 
@@ -771,6 +772,23 @@ class XSL(SSPBase):
 
     C_imf = dict(salpeter=9799552.50, kroupa=5567946.09)
 
+    _initial_mass_functions = ["Kroupa", "Salpeter"]
+    _iso_ages = {
+            "PC": 10**np.arange(7.7, 10.1, 0.1) << u.yr,
+            "P00": np.array([8.91e8, 1e9, 1.12e9, 1.26e9, 1.41e9, 1.58e9,
+                             1.78e9, 2e9, 2.24e9, 2.51e9, 2.82e9, 3.16e9, 3.55e9,
+                             3.98e9, 4.47e9, 5.01e9, 5.62e9, 6.31e9,
+                             7.08e9, 7.94e9, 8.91e9, 1e10, 1.12e10, 1.26e10,
+                             1.41e10, 1.59e10, 1.78e10]) << u.yr
+            }
+    _iso_metals = {
+            "P00": np.array([0.0004, 0.001, 0.004, 0.008, 0.019, 0.03]
+                           ) << u.dimensionless_unscaled,
+            "PC": 10**np.array([-2.2, -2.0, -1.8, -1.6, -1.4, -1.2, -1.0, -0.8,
+                             -0.6, -0.4, -0.2, 0, 0.2]) * 0.019 << u.dimensionless_unscaled
+            }
+    _n_wavelength = 58642
+
     def __init__(self, IMF, ISO, path=None, verbose=True):
         if verbose:
             print("> Initialising X-Shooter (XSL) models (IMF={}, ISO={})".format(
@@ -780,50 +798,59 @@ class XSL(SSPBase):
         if (ISO != 'P00') & (ISO != 'PC'):
             raise NameError('ISO not valid (use P00 for Padova2000 or PC for PARSEC/COLIBRI)')
         if path:
-            self.path = os.path.join(path, '_'.join([IMF, ISO]))
+            self.path = path 
         else:
-            self.path = os.path.join(self.default_path, 'XSL',
-                                     '_'.join([IMF, ISO]))
-        files = os.listdir(self.path)
-        if len(files) == 0:
-            raise NameError('No files found at:\n {}'.format(self.path))
-        ages = []
-        metallicities = []
-        for file in files:
-            ages.append(float(file[file.find('T') + 1: file.find('_Z')]))
-            metallicities.append(
-                float(file[file.find('Z') + 1: file.find('_' + IMF)]))
-        self.ages = np.unique(np.array(ages)) * units.yr
-        self.log_ages_yr = np.log10(self.ages / units.yr)
-        self.metallicities = np.unique(np.array(metallicities)
-                                       ) * units.dimensionless_unscaled
+            self.path = os.path.join(self.default_path, 'XSL', IMF)
 
-        header = 'XSL_SSP_T'
-        c_solar = self.C_imf[IMF.lower()]  # Convert to solar units
+        self._get_ssps(ISO)
+        self._fetch_files(ISO, IMF)
+ 
+    def _get_ssps(self, iso):
+        self.ages = self._iso_ages[iso]
+        self.log_ages_yr = np.log10(self.ages.to_value("yr"))
+        self.metallicities = self._iso_metals[iso]
+        self.L_lambda = np.empty(
+            shape=(self.metallicities.size, self.ages.size,
+                   self._n_wavelength), dtype=np.float32
+                   ) * units.Lsun / units.Msun / units.Angstrom
+ 
+    def _fetch_files(self, iso, imf):
+        c_solar = self.C_imf[imf.lower()]  # Convert to solar units
+        if iso == "P00":
+            file_fmt = r"XSL_SSP_T{:2.2e}_Z{}_Kroupa_P00.fits"
+            for age_idx, age in enumerate(self.ages):
+                for met_idx, met in enumerate(self.metallicities):
+                    filename = file_fmt.format(age.to_value("yr"), met.value)
+                    path_to_file = os.path.join(self.path, filename)
+                    print(path_to_file)
+                    if not os.path.isfile(path_to_file):
+                        raise FileNotFoundError(f"{path_to_file} not found")
+                    with fits.open(path_to_file) as hdul:
+                        spec = hdul[0].data * c_solar
+                        self.L_lambda[met_idx][age_idx] = spec * self._L_lambda.unit
+        elif iso == "PC":
+            file_fmt = r"XSL_SSP_logT{:.1f}_MH{:.1f}_Kroupa_PC.fits"
+            for age_idx, age in enumerate(self.ages):
+                for met_idx, met in enumerate(self.metallicities):
+                    filename = file_fmt.format(np.log10(age.to_value("yr")),
+                                               np.log10(met.value / 0.019))
+                    if met == 0.019:
+                        filename = file_fmt.format(np.log10(age.to_value("yr")),
+                                               np.log10(met.value / 0.019 - 1e-3))
+                    path_to_file = os.path.join(self.path, filename)
+                    print(path_to_file)
+                    if not os.path.isfile(path_to_file):
+                        raise FileNotFoundError(f"{path_to_file} not found")
+                    with fits.open(path_to_file) as hdul:
+                        spec = hdul[0].data * c_solar
+                        self.L_lambda[met_idx][age_idx] = spec * self._L_lambda.unit
 
-        with fits.open(os.path.join(self.path,
-                                     header+'{:.2e}_Z{:}_{}_{}.fits'.format(
-                self.ages.value[0], self.metallicities.value[0], IMF, ISO))) as hdul:
+        # Use the last file to load the wavelenth array
+        with fits.open(path_to_file) as hdul:
             self.wavelength = 10**(
                 (np.arange(0, hdul[0].data.size, 1) - hdul[0].header['CRPIX1'])
                 * hdul[0].header['CDELT1'] + hdul[0].header['CRVAL1'] + 1
                 ) * units.Angstrom
-
-        self.L_lambda = np.empty(
-            shape=(self.metallicities.size, self.log_ages_yr.size,
-                   self.wavelength.size), dtype=np.float32
-                   ) * units.Lsun / units.Msun / units.Angstrom
-
-        for i, Z in enumerate(self.metallicities.value):
-            for j, age in enumerate(self.ages.value):
-                filename = header+'{:.2e}_Z{:}_{}_{}.fits'.format(age, Z, IMF,
-                                                                  ISO)
-                file = os.path.join(self.path, filename)
-                with fits.open(file) as hdul:
-                    spec = hdul[0].data * c_solar
-                    hdul.close()
-                self.L_lambda[i][j] = spec * self._L_lambda.unit
-
 
 class EMILES(SSPBase):
     """E-MILES models from Vazdekis+16 and Röck+16."""
