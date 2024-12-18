@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 dynamic = ["version", "dependencies"]
-name = "pst"
+name = "population-synthesis-toolkit"
 authors = [
   { name="Yago Ascasibar", email="yago.ascasibar@uam.es" },
   { name="Pablo Corcho-Caballero", email="p.corcho.caballero@rug.nl" },
@@ -12,7 +12,7 @@ authors = [
 ]
 description = "Population Synthesis Toolkit"
 readme = "README.md"
-keywords = ["astronomy", "stellar populations synthesis", "SED fitting"]
+keywords = ["astronomy", "stellar population synthesis", "SED fitting"]
 license = {file="LICENSE"}
 classifiers = [
     'Development Status :: 3 - Alpha',
