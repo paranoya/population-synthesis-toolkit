@@ -3,12 +3,11 @@ include src/pst/_version.py
 
 include *.toml
 include LICENSE
-include tox.ini
 
-#recursive-include src *.dat
-#recursive-include src *.fits
+exclude src/pst/data/ssp/*
+exclude src/pst/data/lick/*
+exclude src/pst/data/filters/*
 include src/pst/data/ssp/PopStar/popstar_cha_0.15_100.fits.gz
-#recursive-include src *.ctio
 include src/pst/data/lick/lick_ha.json
 
 recursive-include docs *.bat
