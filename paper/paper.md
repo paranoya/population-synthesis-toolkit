@@ -38,36 +38,46 @@ aas-journal: Astrophysical Journal <- The name of the AAS journal.
 ---
 
 # Summary
+
+Stellar population synthesis (SPS) is a crucial methodology in astrophysics, enabling the interpretation of the integrated light of galaxies and stellar clusters. By combining the light emitted by single stellar populations (SSPs) with models of star formation history (SFH) and chemical enrichment, SPS facilitates the estimation of essential galaxy properties such as stellar metallicity, age, and mass. However, the vast variety of SSP models and the diversity of approaches for modeling galaxy SFHs can introduce significant complexity.
+
+To address these challenges, PST is a Python library that offers a comprehensive and flexible framework for stellar population synthesis. PST supports the synthesis of spectra using multiple SSP models, incorporates additional effects such as dust extinction, and computes observable quantities, including photometric fluxes and equivalent widths, with ease and efficiency.
+
 # Statement of need
 
-# Mathematics
+PST provides a highly flexible framework for synthesizing stellar populations and deriving key observational quantities. Its design is built around two core components:
 
-# Citations
+- SSP Module: This module allows for the uniform use and manipulation of arbitrary SSP models, enabling seamless ingestion of SSP data from various sources in the literature.
+- ChemicalEvolutionModel Classes: These classes represent the chemical evolution and SFH models used to produce composite spectra and additional derived quantities. They simplify the creation and implementation of custom prescriptions for chemical enrichment and SFH modeling.
 
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
+In addition, PST features a dedicated module for computing observables, offering a user-friendly interface to predict additional quantities from spectra, such as photometric fluxes and equivalent widths. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Servive](http://svo2.cab.inta-csic.es/theory/fps/) for synthetic photometry calculations.
 
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
+# Features and functionality
 
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
+PST includes interfaces to a range of SSP models, including:
 
-# Figures
+- PopStar [@molla+09]
+- Bruzual and Charlote 03 [@bc+03]
+- E-MILES [@vazdekis+16]
+- XSL [@verro+21b] SSP models.
 
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
+For any SSP model integrated into PST, the library provides tools for straightforward interpolation across stellar ages, metallicities, and wavelengths. Users can easily compare key quantities of SSP models such as the stellar-mass-to-light ratio.
 
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
+PST also includes several widely-used analytic prescriptions for modeling SFHs, such as exponentially declining or log-normal models. Additionally, it supports complex SFH representations, such as table-based SFHs, and particle-like data models, making it particularly suitable for interpreting data from cosmological hydrodynamical simulations.
+
+# Tutorials
+
+To facilitate the use of PST, we provide a comprehensive set of tutorials in the form of Jupyter notebooks. These tutorials cover the following topics:
+
+- Interacting with SSP models and exploring their fundamental properties.
+- Producing composite spectra using:
+  - Analytic SFH models.
+  - Table-based SFH models.
+  - Particle-like data representations.
+- Predicting observable quantities for a grid of models.
 
 # Acknowledgements
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
+?
 
 # References
