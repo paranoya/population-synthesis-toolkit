@@ -55,7 +55,7 @@ PST is a Python library that offers a comprehensive and flexible framework for s
 Compared to alternative approaches in the literature, the user-friendly modular framework of PST is conceived to address the following challenges:
 - To handle a broad variety of SSP libraries, publicly available in heterogeneous native formats.
 - To model arbitrarily complex galaxy star formation and chemical evolution histories.
-- To model both photomteric and spectroscopic data.
+- To model both photometric and spectroscopic data.
 
 # Features and functionality
 
