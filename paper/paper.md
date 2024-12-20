@@ -11,30 +11,25 @@ authors:
     orcid: 0000-0001-6327-7080
     corresponding: true
     equal-contrib: true
-    affiliation: "1" # (Multiple affiliations must be quoted)
+    affiliation: 1 # (Multiple affiliations must be quoted)
   - name: Yago Ascasibar 
     orcid: 0000-0003-1577-2479
     corresponding: true
     equal-contrib: true
     affiliation: "2, 3"
-  - name: Author Without ORCID
+  - name: Daniel Jiménez-López
+    corresponding: true
     equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
-    affiliation: 2
-  - name: Author with no affiliation
-    corresponding: true # (This is how to denote the corresponding author)
-    affiliation: 3
-  - given-names: Ludwig
-    dropping-particle: van
-    surname: Beethoven
-    affiliation: 3
+    affiliation: 4 
 affiliations:
  - name: Kapteyn Astronomical Institute, University of Groningen, the Netherlands
    index: 1
-   ror: 00hx57361
  - name: Department of Theoretical Physics, Universidad Autónoma de Madrid (UAM), Spain
    index: 2
  - name: Centro de Investigación Avanzada en Física Fundamental (CIAFF-UAM), Spain
    index: 3
+ - name: Observatorio Astronómico Nacional (OAN), Spain
+   index: 4
 date: 18 December 2024
 bibliography: paper.bib
 
