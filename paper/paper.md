@@ -56,8 +56,6 @@ Compared to alternative approaches in the literature, the user-friendly modular 
 PST is currently a dependency of [PyKOALA](https://github.com/pykoala/pykoala), another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
 It is also at the core of the Bayesian Estimator for Stellar Population Analysis ([BESTA](https://github.com/PabloCorcho/pst-hbsps)), where it is coupled with the [Cosmosis](https://cosmosis.readthedocs.io/en/latest/) Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
 
-As a first scientic application, synthetic obsrvations of simulated galaxies from the Illustris TNG suite [@tng] have been generated with PST to test the accuracy of the specific star formation rates on different timescales recovered by BESTA, to be contrasted with the results obtained for a sample of real galaxies from the Euclid Quick Release Q1 [@Q1_quenching].
-
 # Features and functionality
 
 PST design is built around three main components:
@@ -75,7 +73,7 @@ Second, the `ChemicalEvolutionModel` classes represent the star formation and ch
 
 Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Servive](http://svo2.cab.inta-csic.es/theory/fps/) for synthetic photometry calculations, as well as popular line indices such as the Lick system.
 
-# Documatation and tutorials
+# Documentation and tutorials
 
 To facilitate the use of PST, we provide a comprehensive set of tutorials in the form of Jupyter notebooks. These tutorials cover the following topics:
 
