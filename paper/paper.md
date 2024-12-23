@@ -86,4 +86,6 @@ Full documentation is available [online](https://population-synthesis-toolkit.re
 
 We acknowledge financial support from the Spanish State Research Agency (AEI/10.13039/501100011033) through grant PID2019-107408GB-C42.
 
+Daniel Jiménez-López was supported by Fondo Europeo de Desarrollo Regional (MINCIN/AEI/10.13039/501100011033/FEDER, UE), through a FPI-contract fellowship in the project PID2022-138560NB.
+
 # References
