@@ -18,6 +18,7 @@ authors:
     equal-contrib: true
     affiliation: "2, 3"
   - name: Daniel Jiménez-López
+    orcid: 0009-0001-2907-8691
     corresponding: true
     equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
     affiliation: 4 
