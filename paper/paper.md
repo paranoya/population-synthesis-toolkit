@@ -1,5 +1,5 @@
 ---
-title: 'Population Synthesis Toolkit (PST): A Python library for '
+title: 'The Population Synthesis Toolkit (PST) Python library'
 tags:
   - Python
   - astronomy
