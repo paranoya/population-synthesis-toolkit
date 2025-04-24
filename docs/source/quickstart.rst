@@ -61,7 +61,7 @@ Here’s the complete code for this workflow:
     import matplotlib.pyplot as plt
     plt.figure()
     plt.pcolormesh(np.log10(ssp_model.ages.value),
-                   np.log10(ssp_model.metallicities), color,
+                   np.log10(ssp_model.metallicities.value), color,
                    cmap='jet')
     plt.colorbar(label=r'$g - r$')
     plt.xlabel('log(Age / yr)')
