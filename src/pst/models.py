@@ -61,8 +61,19 @@ class ChemicalEvolutionModel(ABC):
     (Z-SFR) need to be implemented in a subclass.
     """
     
+    @property
+    def today(self):
+        return self._today
+
+    @today.setter
+    def today(self, value):
+        if value is not None:
+            self._today = check_unit(value, u.Gyr)
+        else:
+            self._today = None
+
     def __init__(self, **kwargs):
-        pass
+        self.today = kwargs.get("today")
 
     @abstractmethod
     def stellar_mass_formed(self, time):
@@ -120,6 +131,48 @@ class ChemicalEvolutionModel(ABC):
         return ssp.get_weights(ages=bin_age,
                                metallicities=bin_metallicity,
                                masses=bin_mass)
+
+    def time_at_stellar_mass_frac(self, frac, today=None, time_res=30 << u.Myr):
+        """
+        Get the cosmic time at which the model formed a fraction of the total stellar mass.
+
+        Parameters
+        ----------
+        frac : float
+            Input fraction.
+        today : float or astropy.units.Quantity
+            Age of the Universe at the time of the observation. If not provided,
+            the defult is to use ``self.today'' (returning an error if not set).
+        time_res : float or astropy.units.Quantity
+            Time-step resolution for sampling the SFH.
+        Returns
+        -------
+        frac_times : astropy.units.Quantity
+            Fraction formation times.
+        """
+        frac = np.atleast_1d(frac)
+        if today is None:
+            if self.today is None:
+                raise ValueError(
+                    "current CEM does not have attribute 'today' set,"
+                    + " it must be provided by the user")
+            else:
+                today = self.today
+        else:
+            today = check_unit(today, u.Gyr)
+
+        time_res = check_unit(time_res, u.Gyr)
+        dummy_time = np.arange(0, today.to_value("Gyr"),
+                               time_res.to_value("Gyr")) << u.Gyr
+        mass_history = self.stellar_mass_formed(dummy_time)
+        frac_history = mass_history / mass_history[-1]
+        idx = np.searchsorted(frac_history, frac).clip(
+            min=1, max=frac_history.size - 1)
+        t_frac = (
+            dummy_time[idx - 1] * (frac - frac_history[idx]) / (frac_history[idx] - frac_history[idx - 1])
+         + dummy_time[idx] * (1 - (frac - frac_history[idx]) / (frac_history[idx] - frac_history[idx - 1])
+        ))
+        return t_frac
 
     def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
                     allow_negative=False):
