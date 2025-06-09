@@ -15,7 +15,7 @@ class MassPropMetallicityMixin:
     r"""Model mixin where the metallicity is proportional to the stellar mass
     
     .. math::
-        Z(t) = Z_{today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(today)}\right)^\alpha
+        Z(t) = Z_{\rm today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(\rm today)}\right)^\alpha
     """
     @property
     def ism_metallicity_today(self):
@@ -244,7 +244,7 @@ class ExponentialCEM(ChemicalEvolutionModel):
     declining function of time:
 
     .. math::
-        M_\star(t) = M_{inf} \cdot (1 - e^{-t/\tau})
+        M_\star(t) = M_{\rm inf} \cdot (1 - e^{-t/\tau})
  
     Attributes
     ----------
@@ -297,7 +297,7 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
     function of time, where the SFR rises initially and then decays.
 
     .. math::
-        M_\star(t) = M_{inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
+        M_\star(t) = M_{\rm inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
  
     Attributes
     ----------
@@ -404,7 +404,7 @@ class LogNormalCEM(ChemicalEvolutionModel):
     and then decays:
 
     .. math::
-        M_\star(t) = \frac{M_{today}}{2} \cdot \left(1 - erf\left(\frac{ln(t) - ln(t_0)}{\sigma \sqrt{2}}\right) \right)
+        M_\star(t) = \frac{M_{\rm today}}{2} \cdot \left(1 - {\rm erf}\left(\frac{{\rm ln}(t) - {\rm ln}(t_0)}{\sigma \sqrt{2}}\right) \right)
 
     Attributes
     ----------
@@ -506,7 +506,7 @@ class TabularCEM(ChemicalEvolutionModel):
         -----------
         This method evaluates the integral:
             math::
-            \int_{0}^{t} SFR(t') dt'
+            \int_{0}^{t} {\rm SFR}(t') dt'
         at each time input time :math:`t`.
         ``
         Parameters
