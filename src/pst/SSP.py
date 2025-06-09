@@ -226,8 +226,8 @@ class SSPBase(object):
     def interpolate_sed(self, new_wl_edges, verbose=True):
         """Flux-conserving interpolation.
 
-        params
-        -----
+        Parameters
+        ----------
         - new_wl_edges: bin edges of the new interpolated points.
         """
         if not isinstance(new_wl_edges, units.Quantity):
@@ -288,7 +288,7 @@ class SSPBase(object):
     def compute_photometry(self, filter_list, z_obs=0.0, verbose=True):
         """Compute the SSP synthetic photometry of a set of filters.
         
-        Paramteres
+        Parameters
         ----------
         filter_list: list of pst.observable.Filter
             A list of photometric filters.
