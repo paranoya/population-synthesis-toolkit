@@ -7,7 +7,7 @@ Installation Guide
 System Requirements
 ===================
 - Python 3.8 or later
-- Required packages: NumPy, SciPy, Matplotlib, Astropy
+- Required packages: NumPy, SciPy, Matplotlib, Astropy, extinction, requests
 
 Installing PST
 ================
