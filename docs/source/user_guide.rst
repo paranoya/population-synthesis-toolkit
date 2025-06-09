@@ -13,9 +13,7 @@ Simple Stellar Population (SSP) Models
 
 In this section, we'll dive into the SSP models implemented in PST, explore their attributes, and highlight the features that this module provides for astrophysical modeling.
 
-:class:`SSPBase`: Core Class for SSP Models
-
-The class :class:`SSPBase` is the backbone of the SSP models in PST. It provides a flexible and efficient way to represent the spectral energy distributions (SEDs) of stellar populations across a grid of ages and metallicities.
+The class :class:`pst.SSP.SSPBase` is the backbone of the SSP models in PST. It provides a flexible and efficient way to represent the spectral energy distributions (SEDs) of stellar populations across a grid of ages and metallicities.
 
 Key Attributes
 ^^^^^^^^^^^^^^
@@ -93,7 +91,7 @@ For more options, refer to the API :ref:`SSP`.
 Chemical Evolution Models (CEM)
 ===============================
 
-The ``ChemicalEvolutionModel`` class defines the framework for modeling the chemical and stellar evolution of a galaxy over time.
+The :class:`pst.models.ChemicalEvolutionModel` class defines the framework for modeling the chemical and stellar evolution of a galaxy over time.
 This framework includes methods for computing the Spectral Energy Distribution (SED), stellar mass, and synthetic photometry using a given SSP model.
 
 .. code-block:: python
@@ -111,7 +109,7 @@ Features
 - **Mass/Metallicity Interpolation**
     Interpolates the star formation history of the galaxy over time to compute the stellar masses at any given time.
 
-    - ``stellar_mass_formed(time)``: Method to compute the total stellar mass formed at a given cosmic time.  
+    - ``stellar_mass_formed(time)``: Method to compute the total stellar mass formed at a given cosmic time.
     - ``ism_metallicity(time)``: Method to compute the ISM metallicity at a given cosmic time.
 
     Example:
@@ -166,7 +164,7 @@ Currently, PST is able to produce three different types of observable quantities
 
 - Photometry
 
-    Synthetic photometry is produced by means of the :class:`Filter` class, that
+    Synthetic photometry is produced by means of the :class:`pst.observables.Filter` class, that
     represents the passband of a given photometric band.
 
     PST uses the `Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>`_ to have access to a wide range of photometric filters. If a filter is not found locally, it is downloaded automatically and placed in the default filter directory.
@@ -187,7 +185,7 @@ Currently, PST is able to produce three different types of observable quantities
 
 - Equivalent Widths
 
-    Similarly, PST can also measure equivalent widths from spectra by means of the :class:`EquivalentWidth` class, which is essentially defined by three spectral regions:
+    Similarly, PST can also measure equivalent widths from spectra by means of the :class:`pst.observables.EquivalentWidth` class, which is essentially defined by three spectral regions:
 
     - Left pseudo-continuum window.
     - Right pseudo-continuum window.
