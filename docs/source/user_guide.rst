@@ -30,7 +30,13 @@ Features
 
 PST provides a number of features to work with SSP models, allowing users to manipulate and extract various physical and observational quantities:
 
-1. **SSP Interpolation**
+.. code-block:: python
+
+            from pst.SSP import PopStar
+            from astropy import units as u
+            ssp_model = PopStar(IMF='cha')
+
+- **SSP Interpolation**
    The `get_weights` method provides a 2D interpolation tool that allows you to compute weights for a given set of ages and metallicities. This method is useful for handling multiple stellar populations simultaneously, especially in galaxy synthesis models where stars form over a range of ages and metallicities.
 
     Example:
@@ -40,7 +46,7 @@ PST provides a number of features to work with SSP models, allowing users to man
             weights = ssp_model.get_weights(ages=[1e9, 5e9], metallicities=[0.02, 0.03])
 
 
-2. **Grid Binning and Re-interpolation**
+- **Grid Binning and Re-interpolation**
     The `regrid` method allows you to rebin the SSP model to new grids of ages and metallicities. This is useful if you need to match the SSP model grid to other datasets or models.
 
     Example:
@@ -51,18 +57,18 @@ PST provides a number of features to work with SSP models, allowing users to man
             new_metal_bins = np.logspace(-2, 0, 20)
             ssp_model.regrid(new_age_bins, new_metal_bins)
 
-3. **Wavelength Handling**
+- **Wavelength Handling**
     The `cut_wavelength` method allows users to cut the SED to specific wavelength ranges, which is useful when focusing on particular bands or wavelengths.
 
     Example:
 
     .. code-block:: python
 
-            ssp_model.cut_wavelength(wl_min=3000 * u.AA, wl_max=7000 * u.AA)
+            ssp_model.cut_wavelength(wl_min=3000 * u.angstrom, wl_max=7000 * u.angstrom)
 
     Additionally, `interpolate_sed` provides a way to interpolate the SEDs over new wavelength bins using a flux-conserving interpolation scheme.
 
-4. **Mass-to-Light Ratios**
+- **Mass-to-Light Ratios**
     The get_mass_lum_ratio and get_specific_mass_lum_ratio methods calculate the mass-to-light ratio over a specified wavelength range, providing critical information for stellar population synthesis models.
 
     Example:
@@ -72,7 +78,7 @@ PST provides a number of features to work with SSP models, allowing users to man
             mass_lum_ratio = ssp_model.get_mass_lum_ratio(wl_range=np.array([4000, 7000]) * u.angstrom)
 
 
-5. **Synthetic Photometry**
+- **Synthetic Photometry**
     One of the most powerful features is the ability to compute synthetic photometry using the `compute_photometry` method. This function calculates the flux observed through a set of photometric filters at a given cosmic time.
 
     Example:
@@ -108,7 +114,7 @@ Features
     - ``stellar_mass_formed(time)``: Method to compute the total stellar mass formed at a given cosmic time.  
     - ``ism_metallicity(time)``: Method to compute the ISM metallicity at a given cosmic time.
 
-    Example
+    Example:
 
     .. code-block:: python
 
@@ -123,7 +129,7 @@ Features
     - ``interpolate_ssp_masses(ssp, t_obs, oversample_factor=10)``: Interpolates the star formation history to compute the stellar masses associated to each SSP at the time of observation.
     - ``compute_SED(ssp, t_obs, allow_negative=False)``: Computes the SED resulting from the chemical evolution model, observed at a given time using the provided SSP model.
 
-    Example
+    Example:
 
     .. code-block:: python
 
@@ -154,7 +160,7 @@ Currently, PST is able to produce three different types of observable quantities
 - Spectra
 
     These can be used for a wide range of purposes, including the production of the
-    two other observable quantities. PST works by defaul in luminosity (or flux) density
+    two other observable quantities. PST works by default in luminosity (or flux) density
     per wavelength unit (e.g. Lsun / AA), although the use of :class:`astropy.units` allows
     to easily convert to specific flux per frequency.
 
@@ -163,9 +169,9 @@ Currently, PST is able to produce three different types of observable quantities
     Synthetic photometry is produced by means of the :class:`Filter` class, that
     represents the passband of a given photometric band.
 
-    PST uses the `Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>`_ to have access to a wide range of photometric filters. If a filter is not found locally, it is downladed automatically and placed in the default filter directory.
+    PST uses the `Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>`_ to have access to a wide range of photometric filters. If a filter is not found locally, it is downloaded automatically and placed in the default filter directory.
 
-    Example
+    Example:
 
     .. code-block:: python
 
@@ -216,7 +222,7 @@ For more details, refer to the API :ref:`observables`.
 Dust extinction effects
 =======================
 
-The dust model module uses the extinctino laws provided by the `extinction <https://extinction.readthedocs.io/en/latest/>`_ library.
+The dust model module uses the extinction laws provided by the `extinction <https://extinction.readthedocs.io/en/latest/>`_ library.
 
 Currently, there are two available models for dust extinction:
 
