@@ -27,3 +27,14 @@ To install the package from the source repository:
     git clone https://github.com/paranoya/population-synthesis-toolkit.git
     cd population-synthesis-toolkit
     python3 -m pip install .
+
+Verifying the installation
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To confirm that the installation was successful, run the provided test script:
+
+.. code-block:: bash
+
+    ./run_tests.sh
+
+This script will execute all the core unit tests located in the `/tests` directory. All tests should pass without errors. If any test fails, ensure that all dependencies are installed and that you're running a compatible version of Python.
