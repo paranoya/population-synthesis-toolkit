@@ -15,7 +15,7 @@ Link to the official sites of the SSP models currently used in PST:
 
    See `instructions <https://github.com/paranoya/population-synthesis-toolkit/tree/main/ssp_installation/bc03>`_ for ingesting the models in the PST format.
 
-Ingesting new SSP models is a straitforward exercise. Users only need to create a new SSP model class by inheriting from the base class :class:`SSPBase`:
+Ingesting new SSP models is a straightforward exercise. Users only need to create a new SSP model class by inheriting from the base class :class:`SSPBase`:
 
 .. code-block:: python
 

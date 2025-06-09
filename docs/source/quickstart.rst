@@ -68,3 +68,9 @@ Here’s the complete code for this workflow:
     plt.ylabel('log(Z / Z_sun)')
     plt.title(r'$g - r$ Color as a Function of Age and Metallicity')
     plt.show()
+
+
+.. image:: gr_popstar.png
+   :alt: g-r color as function of age and metallicity using the PopStar SSP models.
+   :align: center
+   :width: 80%
