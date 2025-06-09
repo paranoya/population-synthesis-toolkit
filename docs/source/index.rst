@@ -3,7 +3,12 @@ Welcome to PST's Documentation
 
 Overview
 ========
-The **Population Synthesis Toolkit (PST)** is a Python library designed to provide a user-friendly interface for working with **Simple Stellar Population (SSP)** models and synthesizing a variety of observable quantities such as spectra, photometry, and equivalent widths.
+The **Population Synthesis Toolkit (PST)** is a Python library intended for astronomy researchers, particularly those working in extragalactic astrophysics and stellar population studies, who need a flexible and extensible Python-based toolkit for modeling galaxy properties.
+PST is designed to provide a user-friendly interface for working with **Simple Stellar Population (SSP)** models and for synthesizing a variety of observable quantities such as spectra, photometry, and equivalent widths.
+In particular, PST is conceived to address the following challenges:
+- Handling a broad variety of SSP libraries, publicly available in heterogeneous native formats.
+- Modeling arbitrarily complex galaxy star formation and chemical evolution histories.
+- Enabling the simultaneous and self-consistent analysis of photometric and spectroscopic data from different instruments.
 
 At its core, PST combines individual SSPs to generate **Composite Stellar Populations (CSP)** through the implementation of **Chemical Evolution Models (CEM)**. These models track the evolution of a stellar system, considering both its **Star Formation History (SFH)**—the mass converted into stars over time—and the chemical enrichment of the gas.
 
