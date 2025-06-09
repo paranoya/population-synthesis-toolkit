@@ -44,7 +44,7 @@ PST is a Python library that offers a comprehensive and flexible framework for s
 
 # Statement of need
 
-Compared to alternative approaches in the literature (e.g., [@cid-fernandes+05, @boquien+19]), the user-friendly modular framework of PST is conceived to address the following challenges:
+Compared to alternative approaches in the literature [e.g., @cid-fernandes+05; @boquien+19], the user-friendly modular framework of PST is conceived to address the following challenges:
 - To handle a broad variety of SSP libraries, publicly available in heterogeneous native formats.
 - To model arbitrarily complex galaxy star formation and chemical evolution histories.
 - To enable the simultaneous and self-consistent analysis of photometric and spectroscopic data from different instruments.
@@ -54,7 +54,7 @@ PST is designed for astronomy researchers, particularly those working in extraga
 Primary use cases include data analysis, synthetic model construction, and pipeline integration for studies involving stellar population synthesis (see examples below). PST is especially valuable in workflows that combine observational data with theoretical models in a Bayesian or forward-modeling context.
 
 PST is currently a dependency of [PyKOALA](https://github.com/pykoala/pykoala), another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
-It is also at the core of the Bayesian Estimator for Stellar Population Analysis ([BESTA](https://https://besta.readthedocs.io/), see also [@cc+25]), where it is coupled with the [CosmoSIS](https://cosmosis.readthedocs.io/en/latest/) [@zuntz+15] Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
+It is also at the core of the Bayesian Estimator for Stellar Population Analysis [[BESTA](https://https://besta.readthedocs.io/), see also @cc+25], where it is coupled with the [CosmoSIS](https://cosmosis.readthedocs.io/en/latest/) [@zuntz+15] Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
 
 # Features and functionality
 
