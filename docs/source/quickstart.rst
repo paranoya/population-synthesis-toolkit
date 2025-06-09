@@ -35,6 +35,7 @@ Here’s the complete code for this workflow:
     from pst.SSP import PopStar
     from pst.observables import load_photometric_filters
     import numpy as np
+    from matplotlib import pyplot as plt
 
     # Define the IMF and redshift
     imf_type = 'cha'  # Chabrier 2003 Initial Mass Function
@@ -58,7 +59,6 @@ Here’s the complete code for this workflow:
     color = magnitudes[0] - magnitudes[1]
 
     # Plot the color as a function of stellar age and metallicity
-    import matplotlib.pyplot as plt
     plt.figure()
     plt.pcolormesh(np.log10(ssp_model.ages.value),
                    np.log10(ssp_model.metallicities.value), color,
