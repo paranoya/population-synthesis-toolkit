@@ -16,6 +16,13 @@ class MassPropMetallicityMixin:
     
     .. math::
         Z(t) = Z_{\rm today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(\rm today)}\right)^\alpha
+        :label: powlaw-metallicity
+
+    where :math:`Z_{\rm today}` is the ISM metallicity at present,
+    :math:`M_{\star}(t)` is the stellar mass formed at time :math:`t`, and
+    :math:`M_{\star}(\rm today)` is the stellar mass at present.
+    The exponent :math:`\alpha` regulates the chemical enrichment rate with stellar mass.
+
     """
     @property
     def ism_metallicity_today(self):
@@ -36,6 +43,18 @@ class MassPropMetallicityMixin:
         self._alpha_powerlaw = value
 
     def ism_metallicity(self, times):
+        """Evaluate the ISM metallicity at a given set of times, see eq. :eq:`powlaw-metallicity`.
+
+        Parameters
+        ----------
+        times : :class:`astropy.units.Quantity`
+            Cosmic times at which the metallicity will be evaluated.
+
+        Returns
+        -------
+        z_t : :class:`astropy.units.Quantity`
+            Vector with the ISM metallicity at each input time.
+        """
         m = self.stellar_mass_formed(times)
         return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
 
@@ -65,17 +84,18 @@ class ChemicalEvolutionModel(ABC):
         pass
 
     @abstractmethod
-    def stellar_mass_formed(self, time):
+    def stellar_mass_formed(self, time) -> u.Quantity:
         """Total stellar mass formed at a given time."""
         return
 
     @abstractmethod
-    def ism_metallicity(self, time):
+    def ism_metallicity(self, time) -> u.Quantity:
         """ISM metals mass fraction at a given time."""
         return
 
     @u.quantity_input
-    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr, oversample_factor=10):
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr,
+                               oversample_factor=10) -> u.Quantity:
         """
         Interpolate the star formation history to compute the SSP stellar masses.
 
@@ -85,7 +105,7 @@ class ChemicalEvolutionModel(ABC):
 
         Parameters
         ----------
-        SSP : pst.SSP.SSPBase
+        SSP : :class:`pst.SSP.SSPBase`
             The Simple Stellar Population (SSP) model used for synthesizing the SED.
         t_obs : astropy.Quantity
             The cosmic time at which the galaxy is observed. Only SSPs with ages
@@ -122,7 +142,7 @@ class ChemicalEvolutionModel(ABC):
                                masses=bin_mass)
 
     def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
-                    allow_negative=False):
+                    allow_negative=False) -> u.Quantity:
         """
         Compute the Spectral Energy Distribution (SED) resulting from the SFH.
 
@@ -157,14 +177,12 @@ class ChemicalEvolutionModel(ABC):
                     axis=(0))
         return sed
 
-    def compute_photometry(self, ssp, t_obs, photometry=None):
+    def compute_photometry(self, ssp, t_obs, photometry=None) -> u.Quantity:
         """
-        Compute the syntehtic photometry using a SSP at a given time.
+        Compute the synthetic photometry using a SSP at a given time.
 
         This method computes the photometric fluxes associated to
         the SFH by synthesizing the fluxes of the input SSP model.
-        the galaxy using the input SSP model and optionally  
-        photometric filters.
 
         Parameters
         ----------
@@ -254,6 +272,17 @@ class ExponentialCEM(ChemicalEvolutionModel):
         Timescale of the exponential decline in star formation.
     metallicity : float
         Metallicity of the gas (constant).
+
+    Examples
+    --------
+    Create an instance of the `ExponentialCEM` model and compute the stellar mass formed:
+
+    >>> from astropy import units as u
+    >>> from pst.models import ExponentialCEM
+    >>> model = ExponentialCEM(stellar_mass_inf=1e10 * u.Msun, tau=2 * u.Gyr, metallicity=0.02)
+    >>> time = [0.5, 1.0, 2.0] * u.Gyr
+    >>> model.stellar_mass_formed(time)
+    <Quantity [2.21199217e+09, 3.93469340e+09, 6.32120559e+09] solMass>    
     """
     def __init__(self, **kwargs):
         self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf'],
@@ -274,6 +303,18 @@ class ExponentialCEM(ChemicalEvolutionModel):
 class ExponentialQuenchedCEM(ExponentialCEM):
     """
     Exponentially declining CEM model including a quenching event.
+
+    Examples
+    --------
+    Create an instance of the `ExponentialQuenchedCEM` model and compute the stellar mass formed:
+
+    >>> from astropy import units as u
+    >>> from pst.models import ExponentialQuenchedCEM
+    >>> model = ExponentialQuenchedCEM(stellar_mass_inf=1e10 * u.Msun, tau=2 * u.Gyr,
+    ...                                 metallicity=0.02, quenching_time=1.5 * u.Gyr)
+    >>> time = [0.5, 1.0, 2.0] * u.Gyr
+    >>> model.stellar_mass_formed(time)
+    <Quantity [2.21199217e+09, 3.93469340e+09, 5.27633447e+09] solMass>
 
     See also
     --------
@@ -299,6 +340,9 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
     .. math::
         M_\star(t) = M_{\rm inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
  
+    The main difference from the :class:`ExponentialCEM` is that the stellar mass 
+    grows linearly at early times before transitioning to an exponential decay.
+
     Attributes
     ----------
     tau : astropy.Quantity
@@ -309,6 +353,18 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
         Total stellar mass formed at present.
     ism_metallicity_today : float
         Metallicity of the gas (constant).
+    
+    Examples
+    --------
+    Create an instance of the `ExponentialDelayedCEM` model and compute the stellar mass formed:
+
+    >>> from astropy import units as u
+    >>> from pst.models import ExponentialDelayedCEM
+    >>> model = ExponentialDelayedCEM(tau=2 * u.Gyr, today=10 * u.Gyr,
+    ...                                mass_today=1e10 * u.Msun, ism_metallicity_today=0.02)
+    >>> time = [0.5, 1.0, 2.0] * u.Gyr
+    >>> model.stellar_mass_formed(time)
+    <Quantity [2.76154498e+08, 9.40043900e+08, 2.75373844e+09] solMass>
     """
 
     def __init__(self, **kwargs):
@@ -362,8 +418,9 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
     """
     Gaussian burst star formation model.
 
-    This class models a galaxy's star formation history as a single gaussian burst
-    occurring at a specific time, after which no further star formation occurs.
+    This model represents a galaxy's star formation history as a single Gaussian 
+    burst of star formation. The burst occurs at a specific time and is characterized 
+    by a Gaussian distribution with a given standard deviation.
 
     Attributes
     ----------
@@ -375,6 +432,18 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
         Span time of the burst in terms of the standard deviation.
     burst_metallicity : float or astropy.Quantity
         Metallicity of the burst.
+    
+    Examples
+    --------
+    Create an instance of the `GaussianBurstCEM` model and compute the stellar mass formed:
+
+    >>> from astropy import units as u
+    >>> from pst.models import GaussianBurstCEM
+    >>> model = GaussianBurstCEM(mass_burst=1e10 * u.Msun, time_burst=2 * u.Gyr,
+    ...                          sigma_burst=0.5 * u.Gyr, burst_metallicity=0.02)
+    >>> time = [1.0, 2.0, 3.0] * u.Gyr
+    >>> model.stellar_mass_formed(time)
+    <Quantity [2.27501319e+08, 5.00000000e+09, 9.77249868e+09] solMass>
     """
  
     def __init__(self, **kwargs):
@@ -387,12 +456,12 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
     @u.quantity_input
     def stellar_mass_formed(self, time):
         return self.mass_burst / 2 * (1 + special.erf(
-            (time-self.tb) / (SQRT_2 * self.sigma_burst))
+            (time-self.time_burst) / (SQRT_2 * self.sigma_burst))
             )
   
     @u.quantity_input
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity)
+        return np.full(time.size, fill_value=self.burst_metallicity)
 
 
 class LogNormalCEM(ChemicalEvolutionModel):
@@ -595,22 +664,14 @@ class ParticleListCEM(ChemicalEvolutionModel):
     masses : numpy.array or astropy.units.Quantity
         Array representing the masses of each SSP particle. If the input is a 
         `numpy.array`, it is assumed to be in solar masses.
-
-    Attributes
-    ----------
-    time_form : astropy.units.Quantity
-        Array of SSP formation times in Gyr.
-    metallicities : astropy.units.Quantity
-        Array of SSP metallicities, assumed to be dimensionless.
-    masses : astropy.units.Quantity
-        Array of SSP masses in solar masses.
     """
     def __init__(self, time_form, metallicities, masses):
         self.time_form, self.metallicities, self.masses = (
             time_form, metallicities, masses)
 
     @property
-    def time_form(self):
+    def time_form(self) -> u.Quantity:
+        """Array of SSP formation times in Gyr."""
         return self._time_form
 
     @time_form.setter
@@ -621,7 +682,8 @@ class ParticleListCEM(ChemicalEvolutionModel):
             self._time_form = values
 
     @property
-    def metallicities(self):
+    def metallicities(self) -> u.Quantity:
+        """Array of SSP metallicities, assumed to be dimensionless."""
         return self._metallicities
 
     @metallicities.setter
@@ -632,7 +694,8 @@ class ParticleListCEM(ChemicalEvolutionModel):
             self._metallicities = values
 
     @property
-    def masses(self):
+    def masses(self) -> u.Quantity:
+        """Array of SSP masses in solar masses."""
         return self._masses
 
     @masses.setter
