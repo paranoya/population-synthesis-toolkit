@@ -51,6 +51,7 @@ PST provides a number of features to work with SSP models, allowing users to man
 
     .. code-block:: python
 
+            import numpy as np
             new_age_bins = np.logspace(6, 10, 50) * u.Gyr
             new_metal_bins = np.logspace(-2, 0, 20)
             ssp_model.regrid(new_age_bins, new_metal_bins)
@@ -166,10 +167,11 @@ Features
 
     .. code-block:: python
 
-            # Precompute the photometry of each SSP
+            # Precompute the photometry of each SSP using a list of filters (see below).
             _ = ssp_model.compute_photometry(list_of_filters, z_obs=0.0)
             photometric_fluxes = cem_model.compute_photometry(ssp_model, t_obs=13.7 * u.Gyr)
 
+            # Convert to AB magnitudes
             ab_mag = -2.5 * np.log10(photometric_fluxes.to_value("3631 Jy"))
 
 For more details, refer to the API :ref:`models`.
@@ -199,13 +201,15 @@ Currently, PST is able to produce three different types of observable quantities
 
         from pst.observables import Filter
 
+        # Load a JWST filter from the SVO Filter Service
         jwst_miri_filter = Filter.from_svo("JWST_MIRI.F2550W")
 
-        # Compute a synthetic magnitude from a spectra
-        jwst_miri_filter.interpolate(wavelength)
-        ab_mag = jwst_miri_filter.get_ab(spectra)
+        # Compute then absolute magnitude from the galaxy SED created above
+        jwst_miri_filter.interpolate(ssp_model.wavelength)
+        ab_mag, ab_mag_err = jwst_miri_filter.get_ab(sed / 4 / np.pi / (10 * u.pc)**2)
+        # print(ab_mag) --> 9.3671
 
-    The filter naming convention basically follows the rule ``TELESC_INSTRUMENT.BAND``.
+    The filter naming convention follows the rule ``TELESC_INSTRUMENT.BAND``.
 
 - Equivalent Widths
 
@@ -251,4 +255,4 @@ Currently, there are two available models for dust extinction:
 - Single Dust screen
 - Double dust screen (akin to `Charlot & Fall 2000 <https://ui.adsabs.harvard.edu/abs/2000ApJ...539..718C/abstract>`_)
 
-For more details, refer to the API :ref:`dust`.
+For more details, refer to the API :ref:`dust` and the `jupyter-notebook tutorial <https://github.com/paranoya/population-synthesis-toolkit/blob/main/tutorials/observables/create_a_photometric_grid.ipynb>`_.
