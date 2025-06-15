@@ -70,7 +70,7 @@ Here’s the complete code for this workflow:
     plt.show()
 
 
-.. image:: gr_popstar.png
+.. image:: _static/images/gr_popstar.png
    :alt: g-r color as function of age and metallicity using the PopStar SSP models.
    :align: center
    :width: 80%

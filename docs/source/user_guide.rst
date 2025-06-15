@@ -99,8 +99,8 @@ This framework includes methods for computing the Spectral Energy Distribution (
     from pst.models import ExponentialDelayedCEM
     # Create a model based on a delayed-tau exponential SFH model
     # with constant metallicity
-    cem_model = ExponentialDelayedCEM(stellar_mass_inf=1.0, tau=3.0,
-    metallicity=0.02)
+    cem_model = ExponentialDelayedCEM(mass_today=1.0, today=13.7, tau=3.0,
+    ism_metallicity_today=0.02)
 
 
 Features
@@ -116,11 +116,24 @@ Features
 
     .. code-block:: python
 
+            import numpy as np
+            from astropy import units as u 
+            from matplotlib import pyplot as plt
+
             cosmic_time = np.arange(0, 13.7) * u.Gyr
             mass_formation_history = cem_model.stellar_mass_formed(cosmic_time)
 
             plt.figure()
             plt.plot(cosmic_time, mass_formation_history)
+            plt.xlabel('Cosmic Time (Gyr)')
+            plt.ylabel('Stellar Mass Formed (M$_\odot$)')
+            plt.show()
+
+.. figure:: _static/images/delayed_tau_exponential_sfh.png
+    :align: center
+    :width: 600px
+
+    The above figure shows the stellar mass formed as a function of cosmic time for a galaxy modelled with a delayed-tau exponential SFH.
 
 - **SED Synthesis**
 
@@ -131,10 +144,21 @@ Features
 
     .. code-block:: python
 
+            # Use the SSP model initialised earlier
             sed = cem_model.compute_SED(ssp_model, t_obs=13.7 * u.Gyr)
 
             plt.figure()
-            plt.plot(ssp_model.wavelength, sed)
+            plt.loglog(ssp_model.wavelength, sed)
+            plt.xlabel('Wavelength (Angstrom)')
+            plt.ylabel('SED (Lsun/Angstrom)')
+            plt.show()
+
+.. figure:: _static/images/delayed_tau_exponential_sfh_sed.png
+    :align: center
+    :width: 600px
+
+    The above figure shows the SED of a galaxy modelled with a delayed-tau exponential SFH, using the PopStar SSP model.
+
 
 - **Synthetic Photometry**
 
