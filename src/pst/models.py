@@ -505,18 +505,20 @@ class TabularCEM(ChemicalEvolutionModel):
         Description
         -----------
         This method evaluates the integral:
-            math::
+
+        .. math::
             \int_{0}^{t} {\rm SFR}(t') dt'
+
         at each time input time :math:`t`.
-        ``
+
         Parameters
         ----------
-        times : astropy.Quantity
+        times : :class:`astropy.units.Quantity`
             Array of cosmic times at which the integral will be evaluated.
 
         Returns
         -------
-        integral : astropy.Quantity
+        integral : :class:`astropy.units.Quantity`
             The cumulative stellar mass formed at each input time.
         """
         interpolator = interpolate.PchipInterpolator(
