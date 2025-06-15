@@ -307,7 +307,7 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
         Cosmic time at the the time of the observation.
     mass_today : float or astropy.Quantity
         Total stellar mass formed at present.
-    metallicity : float
+    ism_metallicity_today : float
         Metallicity of the gas (constant).
     """
 
@@ -556,7 +556,8 @@ class TabularCEM(ChemicalEvolutionModel):
 
 
 class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
-    """
+    """Chemical evolution model based on a grid of times that assumes an analytic chemical enrichment history.
+
     See Also
     --------
     :class:`TabularCEM`
