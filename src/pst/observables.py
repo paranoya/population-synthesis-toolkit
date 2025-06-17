@@ -207,7 +207,7 @@ class Filter(object):
             return None
 
     def effective_wavelength(self):
-        """Compute the effective wavelength of the filter.
+        r"""Compute the effective wavelength of the filter.
         
         Description
         -----------
@@ -223,7 +223,7 @@ class Filter(object):
         return np.sum(self.filter_wavelength*self.filter_resp)/np.sum(self.filter_resp)
 
     def effective_bandwidth(self):
-        """Compute the effective bandwidth of the filter.
+        r"""Compute the effective bandwidth of the filter.
         
         Description
         -----------
@@ -245,7 +245,7 @@ class Filter(object):
             - self.effective_wavelength()**2))
 
     def effective_transmission(self):
-        """Compute the effective bandwidth of the filter.
+        r"""Compute the effective bandwidth of the filter.
         
         Description
         -----------
@@ -295,7 +295,7 @@ class Filter(object):
             return spectra
 
     def get_photons(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the photon flux from an input spectra.
+        r"""Compute the photon flux from an input spectra.
         
         Description
         -----------
@@ -351,7 +351,7 @@ class Filter(object):
         return photon_flux, photon_flux_err
     
     def get_ab(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the synthetic AB magnitude from an input spectra.
+        r"""Compute the synthetic AB magnitude from an input spectra.
         
         Description
         -----------
