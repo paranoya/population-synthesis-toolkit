@@ -7,7 +7,7 @@ Installation Guide
 System Requirements
 ===================
 - Python 3.8 or later
-- Required packages: NumPy, SciPy, Matplotlib, Astropy, extinction, requests
+- Required packages: NumPy, SciPy, Matplotlib, Astropy, extinction,
 
 Installing PST
 ================
@@ -35,6 +35,6 @@ To confirm that the installation was successful, run the provided test script:
 
 .. code-block:: bash
 
-    ./run_tests.sh
+    bash ./run_tests.sh
 
 This script will execute all the core unit tests located in the `/tests` directory. All tests should pass without errors. If any test fails, ensure that all dependencies are installed and that you're running a compatible version of Python.
