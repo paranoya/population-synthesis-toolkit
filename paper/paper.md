@@ -53,7 +53,7 @@ PST is designed for astronomy researchers, particularly those working in extraga
 
 Primary use cases include data analysis, synthetic model construction, and pipeline integration for studies involving stellar population synthesis (see examples below). PST is especially valuable in workflows that combine observational data with theoretical models in a Bayesian or forward-modeling context.
 
-PST is currently a dependency of [PyKOALA](https://github.com/pykoala/pykoala), another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
+PST is currently a dependency of PyKOALA [@pykoala], another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
 It is also at the core of the Bayesian Estimator for Stellar Population Analysis [[BESTA](https://https://besta.readthedocs.io/), see also @cc+25], where it is coupled with the [CosmoSIS](https://cosmosis.readthedocs.io/en/latest/) [@zuntz+15] Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
 
 # Features and functionality
