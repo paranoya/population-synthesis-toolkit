@@ -207,13 +207,14 @@ class Filter(object):
             return None
 
     def effective_wavelength(self):
-        """Compute the effective wavelength of the filter.
+        r"""Compute the effective wavelength of the filter.
         
         Description
         -----------
         The effective wavelength is computed as
-        .. :math:
-            eff_wl = \frac{\int{R(\lambda) \cdot \lambda d\lambda}}{\int{R(\lambda) d\lambda}}
+
+        .. math::
+            \lambda_{\rm eff} = \frac{\int{R(\lambda) \cdot \lambda d\lambda}}{\int{R(\lambda) d\lambda}}
         
         Returns
         -------
@@ -223,13 +224,14 @@ class Filter(object):
         return np.sum(self.filter_wavelength*self.filter_resp)/np.sum(self.filter_resp)
 
     def effective_bandwidth(self):
-        """Compute the effective bandwidth of the filter.
+        r"""Compute the effective bandwidth of the filter.
         
         Description
         -----------
         The effective bandwith is computed as
-        .. :math:
-            eff_bw = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - eff_wl\right)^{1/2}
+
+        .. math::
+            \lambda_{\rm BW} = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - \lambda_{\rm eff}\right)^{1/2}
 
         Returns
         -------
@@ -245,13 +247,14 @@ class Filter(object):
             - self.effective_wavelength()**2))
 
     def effective_transmission(self):
-        """Compute the effective bandwidth of the filter.
+        r"""Compute the effective bandwidth of the filter.
         
         Description
         -----------
         The effective transmission is computed as
-        .. :math:
-            \frac{\int{R(\lambda)^2 d\lambda}}{\int{R(\lambda) d\lambda}}
+
+        .. math::
+            R_{\rm eff} = \frac{\int{R(\lambda)^2 d\lambda}}{\int{R(\lambda) d\lambda}}
 
         Returns
         -------
@@ -295,7 +298,7 @@ class Filter(object):
             return spectra
 
     def get_photons(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the photon flux from an input spectra.
+        r"""Compute the photon flux from an input spectra.
         
         Description
         -----------
@@ -351,7 +354,7 @@ class Filter(object):
         return photon_flux, photon_flux_err
     
     def get_ab(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the synthetic AB magnitude from an input spectra.
+        r"""Compute the synthetic AB magnitude from an input spectra.
         
         Description
         -----------
@@ -529,16 +532,35 @@ class TopHatFilter(Filter):
 
 
 class EquivalentWidth(object):
-    """Equivalent width of an spectral region.
+    r"""Equivalent width of an spectral region.
     
-    Attributes
-    ----------
-    left_wl_range : :class:`np.ndarray` or :class:``astropy.units.Quantity``
-        Spectral range defining the left pseudocontinuum window.
-    right_wl_range : :class:`np.ndarray` or :class:``astropy.units.Quantity``
-        Spectral range defining the right pseudocontinuum window.
-    central_wl_range : :class:`np.ndarray` or :class:``astropy.units.Quantity``
-        Spectral range defining the equivalent width window.
+    Description
+    -----------
+    Given a stellar spectra spectra :math:`F_\lambda`, the equivalent width is
+    defined as the area of the spectral line, defined over a given spectral
+    region (:math:`\lambda_{\rm C,\,min}, \lambda_{\rm C,\,max}`), divided by
+    the average flux of the continuum in a given spectral region.
+    It is computed as: 
+
+    .. math::
+        EW = \int_{\lambda_{C,\,\rm min}}^{\lambda_{\rm C,\,max}} \left(1 - \frac{F_\lambda(\lambda)}{F_{\rm cont}(\lambda)}\right) d\lambda
+    where:
+
+    .. math::
+        F_{cont}(\lambda) = \frac{F_{\rm B} \lambda_{\rm R} - F_{\rm R} \lambda_{\rm B}}{\lambda_{\rm R} - \lambda_{\rm B}} + \lambda \frac{F_{\rm R} - F_{\rm B}}{\lambda_{\rm R} - \lambda_{\rm B}}
+        
+    and :math:`F_{\rm B}` and :math:`F_{\rm R}` are the average flux in the left
+    and right spectral windows, respectively, defined as:
+
+    .. math::
+        F_{\rm B} = \frac{1}{\lambda_{\rm B,\,max} - \lambda_{\rm B,\,min}} \int_{\lambda_{\rm B,\,min}}^{\lambda_{\rm B,\,max}} F_\lambda(\lambda) d\lambda
+    
+    .. math::
+        F_{\rm R} = \frac{1}{\lambda_{\rm R,\,max} - \lambda_{\rm R,\,min}} \int_{\lambda_{\rm R,\,min}}^{\lambda_{\rm R,\,max}} F_\lambda(\lambda) d\lambda
+
+    where :math:`\lambda_{\rm B,\,min}` and :math:`\lambda_{\rm B,\,max}` are the
+    left spectral window boundaries, and :math:`\lambda_{\rm R,\,min}` and
+    :math:`\lambda_{\rm R,\,max}` are the right spectral window boundaries.
     """
     def __init__(self, left_wl_range, central_wl_range, right_wl_range):
         self.left_wl_range = np.array(left_wl_range)
@@ -546,7 +568,8 @@ class EquivalentWidth(object):
         self.right_wl_range = np.array(right_wl_range)
     
     @property
-    def left_wl_range(self):
+    def left_wl_range(self) -> u.Quantity:
+        r"""Spectral range defining the left pseudocontinuum window :math:`\lambda_{\rm B,\,min}, \lambda_{\rm B,\,max}`."""
         return self._left_wl_range
     
     @left_wl_range.setter
@@ -557,7 +580,8 @@ class EquivalentWidth(object):
             self._left_wl_range = value
 
     @property
-    def right_wl_range(self):
+    def right_wl_range(self) -> u.Quantity:
+        r"""Spectral range defining the right pseudocontinuum window :math:`\lambda_{\rm R,\,min}, \lambda_{\rm R,\,max}`."""
         return self._right_wl_range
 
     @right_wl_range.setter
@@ -568,7 +592,8 @@ class EquivalentWidth(object):
             self._right_wl_range = value
     
     @property
-    def central_wl_range(self):
+    def central_wl_range(self) -> u.Quantity:
+        r"""Spectral range defining the equivalent width window :math:`\lambda_{\rm C,\,min}, \lambda_{\rm C,\,max}`."""
         return self._central_wl_range
 
     @central_wl_range.setter

@@ -226,8 +226,8 @@ class SSPBase(object):
     def interpolate_sed(self, new_wl_edges, verbose=True):
         """Flux-conserving interpolation.
 
-        params
-        -----
+        Parameters
+        ----------
         - new_wl_edges: bin edges of the new interpolated points.
         """
         if not isinstance(new_wl_edges, units.Quantity):
@@ -288,7 +288,7 @@ class SSPBase(object):
     def compute_photometry(self, filter_list, z_obs=0.0, verbose=True):
         """Compute the SSP synthetic photometry of a set of filters.
         
-        Paramteres
+        Parameters
         ----------
         filter_list: list of pst.observable.Filter
             A list of photometric filters.
@@ -319,8 +319,60 @@ class SSPBase(object):
 
 
 class PopStar(SSPBase):
-    """PopStar SSP models (Mollá+09)."""
+    """
+    PopStar SSP models (Mollá et al. 2009).
 
+    This class represents the PopStar evolutionary synthesis models for simple
+    stellar populations as presented in Mollá et al. (2009). It provides
+    access to spectral energy distributions (SEDs) across a range of metallicities
+    and ages, optionally including nebular emission.
+
+    Parameters
+    ----------
+    IMF : str
+        Initial Mass Function name. Must be one of the supported IMFs listed below:
+
+        - 'sal' : Salpeter (1955)
+        - 'fer' : Ferrini, Penco & Palla (1990)
+        - 'kro' : Kroupa (2002)
+        - 'cha' : Chabrier (2003)
+
+        This keyword is used to select the corresponding PopStar model files.
+    nebular : bool, optional
+        If True, include nebular emission in the SEDs. Default is False, meaning
+        only the stellar continuum is considered.
+    path : str or None, optional
+        Filesystem path to the PopStar model data. If None (default), the package
+        default path plus 'PopStar' subdirectory is used.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    Initialize with the desired IMF and nebular option:
+
+    >>> from pst.SSP import PopStar
+    >>> help(PopStar) # Retrieve the class documentation
+    >>> popstar = PopStar(IMF="cha", nebular=True) # Initialise the model
+    >>> print(popstar.wavelength)
+    <Quantity [91. , 94. , 96. , ..., 1200000., 1400000., 1600000.] Angstrom>
+    >>> oldest_sed = popstar.L_lambda[-1, -1] # Get the SED of the oldest SSP with highest metallicity
+
+    Notes
+    -----
+    - The PopStar models cover metallicities from 0.0001 to 0.05 and ages spanning from
+      10^5 to ~10^10 years.
+    - Nebular emission is included only if `nebular=True` is set.
+    - Model files are expected to be in compressed FITS format with specific naming
+      conventions as per Mollá et al. 2009.
+
+    For more details see the :class:`SSPBase` base class documentation.
+
+    References
+    ----------
+    Mollá, M., García-Vargas, M. L., & Bressan, A. (2009). PopStar I: evolutionary synthesis model description. `MNRAS, 398(1), 451-470 <https://academic.oup.com/mnras/article/398/1/451/1099698>`_.
+    `Fractal data repository <https://www.fractal-es.com/PopStar/>`_
+    """
     def __init__(self, IMF, nebular=False, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'PopStar')
@@ -377,8 +429,57 @@ class PopStar(SSPBase):
 
 
 class PyPopStar(SSPBase):
-    """PyPopStar SSP models (Millán-Irigoyen+21)."""
+    """PyPopStar SSP models (Millán-Irigoyen et al. 2021).
 
+    This class represents the PyPopStar simple stellar population (SSP) models
+    as described in Millán-Irigoyen et al. (2021). It provides spectral energy
+    distributions (SEDs) for a range of metallicities and ages, optionally
+    including nebular emission.
+
+    Parameters
+    ----------
+    IMF : str
+        Initial Mass Function identifier. Must be one of the supported IMFs:
+
+        - 'KRO' : Kroupa (2002)
+        - 'SAL' : Salpeter (1955)
+        - 'CHA' : Chabrier (2003)
+        This keyword selects the corresponding model subdirectory and file set.
+    nebular : bool, optional
+        If True, nebular emission is included in the SEDs. Default is False,
+        meaning only the stellar continuum is included.
+    path : str or None, optional
+        Filesystem path to the PyPopStar model data. If None (default), the
+        package default path plus 'PyPopStar' and IMF subdirectories are used.
+    verbose : bool, optional
+        If True (default), prints informational messages during initialization.
+
+    Example
+    -------
+    Initialize the PyPopStar model with a chosen IMF and nebular emission option:
+
+    >>> from pst.SSP import PyPopStar
+    >>> psp = PyPopStar(IMF='KRO', nebular=False)
+    >>> print(psp.wavelength)
+    <Quantity [ ... ] Angstrom>
+    >>> sed_example = psp.L_lambda[0, 0]  # SED for lowest metallicity, youngest age
+
+    Notes
+    -----
+    - PyPopStar models cover metallicities from 0.004 to 0.05 and ages spanning
+      approximately 10^5 to 10^10 years.
+    - Nebular emission is included only if `nebular=True`.
+    - Model files must follow the naming convention:
+      `'SSP-{IMF}_Z{metallicity}_logt{log_age}.fits'`.
+
+    For additional details, see the :class:`SSPBase` base class documentation.
+
+    References
+    ----------
+    Millán-Irigoyen, I.; Mollá, M.; Cerviño, M.; et al. (2021). HR-PYPOPSTAR: high-wavelength-resolution stellar populations evolutionary synthesis model `MNRAS, 506 (4), 4781-4799 <https://ui.adsabs.harvard.edu/abs/2021MNRAS.506.4781M/abstract>`_.
+
+    `Fractal data repository <https://www.fractal-es.com/PopStar/>`_
+    """
     def __init__(self, IMF, nebular=False, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
@@ -438,8 +539,78 @@ class PyPopStar(SSPBase):
 
 
 class BC03_2003(SSPBase):
+    """
+    BC03 SSP models (Bruzual & Charlot 2003, original version).
 
-    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+    This class implements the 2003 version of the Bruzual & Charlot (BC03)
+    evolutionary synthesis models. It supports both the STELIB and BaSeL stellar
+    spectral libraries and various IMFs.
+
+    Parameters
+    ----------
+    isochrone : str, optional
+        Isochrone set to use:'Padova1994' (default) or 'Padova2000'.
+    model : str, optional
+        Stellar spectral library. Must be one of:
+
+        - 'BaSeL'  : Low-resolution spectra
+        - 'STELIB' : High-resolution spectra
+
+        Case-insensitive. Default is 'BaSeL'.
+    imf : str, optional
+        Initial Mass Function. Must be one of:
+
+        - 'chabrier' or 'cha' : Chabrier (2003)
+        - 'salpeter' or 'sal' : Salpeter (1955)
+        - 'kroupa' or 'kro'    : Kroupa (2002)
+
+        Case-insensitive. Default is 'chabrier'.
+    path : str or None, optional
+        Filesystem path to the BC03 model data. If None (default), the package
+        default path is used.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    Create a BC03 SSP object using the Chabrier IMF and BaSeL library:
+
+    >>> from pst.SSP import BC03_2003
+    >>> ssp = BC03_2003(model='BaSeL', imf='Chabrier')
+    >>> print(ssp.wavelength)
+    <Quantity [ ... ] Angstrom>
+    >>> sed = ssp.L_lambda[0, -1]  # SED for lowest metallicity and oldest age
+
+    Notes
+    -----
+    - This implementation loads the original 2003 release of BC03.
+    - Supported metallicities (Padova1994 isochrones):
+
+        - 'm22': Z = 0.0001
+        - 'm32': Z = 0.0004
+        - 'm42': Z = 0.004
+        - 'm52': Z = 0.008
+        - 'm62': Z = 0.02
+        - 'm72': Z = 0.05
+
+    - SEDs are read from FITS files with filenames of the form:
+      `bc2003_{res}_{metallicity}_{imf}_ssp.fits`
+    - Units for `L_lambda` are Lsun / Angstrom / Msun.
+    - Ages are loaded from a standard time grid provided in `TIME_SCALE.DAT`.
+
+    See also
+    --------
+    :class:`SSPBase` : Base class for all SSP models.
+
+    References
+    ----------
+    Bruzual, G. & Charlot, S. (2003).
+    Stellar population synthesis at the resolution of 2003.
+    `MNRAS, 344(4), 1000–1028 <https://ui.adsabs.harvard.edu/abs/2003MNRAS.344.1000B/abstract>`_.
+
+    `Gustavo Bruzual page <https://www.bruzual.org/>`_
+    """
+    _metallicity_map = {
      # Padova1994
     'm22': 0.0001,
     'm32': 0.0004,
@@ -449,13 +620,13 @@ class BC03_2003(SSPBase):
     'm72': 0.05,
     #'m82': 0.1  Not available in the 2003 version
     }
-    resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
+    _resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
     
     def __init__(self, isochrone='Padova1994', model='BaSeL',
                  imf='Chabrier', path=None, verbose=True) -> None:
         self.isochrone = isochrone
-        self.model, model_key = self.parse_model(model)
-        self.imf, imf_key = self.parse_imf(imf)
+        self.model, model_key = self._parse_model(model)
+        self.imf, imf_key = self._parse_imf(imf)
 
         if path is None:
             self.path = os.path.join(self.default_path,
@@ -466,7 +637,7 @@ class BC03_2003(SSPBase):
 
         if verbose:
             print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
-        self.metallicities = np.array(list(self.metallicity_map.values())
+        self.metallicities = np.array(list(self._metallicity_map.values())
                                       ) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
             os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
@@ -475,9 +646,9 @@ class BC03_2003(SSPBase):
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
         load_wavelength = False
-        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+        for i, metallicity_key in enumerate(self._metallicity_map.keys()):
             fits_path = os.path.join(
-                self.path, f"bc2003_{self.resolution[model_key]}_{metallicity_key}_{imf_key}_ssp.fits")
+                self.path, f"bc2003_{self._resolution[model_key]}_{metallicity_key}_{imf_key}_ssp.fits")
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value * u.angstrom
@@ -488,7 +659,7 @@ class BC03_2003(SSPBase):
             for j, column in enumerate(table.itercols()):
                 self.L_lambda[i, j] = column.value * self.L_lambda.unit
 
-    def parse_model(self, model):
+    def _parse_model(self, model):
         if 'basel' in model.lower():
             model = 'BaSeL'
             key = 'BaSeL'
@@ -497,10 +668,10 @@ class BC03_2003(SSPBase):
             key = 'stelib'
         else:
             raise NameError(f"Unrecognized model: {model}.\n"
-                             + "Select Basel, Stelib, Miles")
+                             + "Select Basel or Stelib")
         return model, key
 
-    def parse_imf(self, imf):
+    def _parse_imf(self, imf):
         if 'cha' in imf.lower():
             imf = 'chabrier'
             key = 'chab'
@@ -517,8 +688,81 @@ class BC03_2003(SSPBase):
 
 
 class BC03_2013(SSPBase):
+    """
+    BC03 SSP models (Bruzual & Charlot 2003, 2013 updated version).
 
-    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+    This class implements the updated 2013 version of the Bruzual & Charlot (BC03)
+    simple stellar population (SSP) models, using improved coverage of high
+    metallicities and updated isochrone input. It supports both the STELIB and
+    BaSeL stellar spectral libraries and several initial mass functions (IMFs).
+
+    Parameters
+    ----------
+    isochrone : str, optional
+        Isochrone set to use. Currently only 'Padova1994' is supported (default).
+    model : str, optional
+        Stellar spectral library. Must be one of:
+
+        - 'BaSeL'  : Low-resolution spectra
+        - 'STELIB' : High-resolution spectra
+
+        Case-insensitive. Default is 'BaSeL'.
+    imf : str, optional
+        Initial Mass Function. Must be one of:
+
+        - 'chabrier' or 'cha' : Chabrier (2003)
+        - 'salpeter' or 'sal' : Salpeter (1955)
+        - 'kroupa' or 'kro'    : Kroupa (2002)
+
+        Case-insensitive. Default is 'chabrier'.
+    path : str or None, optional
+        Filesystem path to the BC03 model data. If None (default), the package
+        default path is used.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    Create a BC03 SSP object using the Chabrier IMF and BaSeL library:
+
+    >>> from pst.SSP import BC03_2013
+    >>> ssp = BC03_2013(model='BaSeL', imf='Chabrier')
+    >>> print(ssp.wavelength)
+    <Quantity [ ... ] Angstrom>
+    >>> sed = ssp.L_lambda[0, -1]  # SED for lowest metallicity and oldest age
+
+    Notes
+    -----
+    - This version extends the original 2003 release by including an additional
+      high-metallicity track (Z = 0.1).
+    - Supported metallicities (Padova1994 isochrones):
+
+        - 'm22': Z = 0.0001
+        - 'm32': Z = 0.0004
+        - 'm42': Z = 0.004
+        - 'm52': Z = 0.008
+        - 'm62': Z = 0.02
+        - 'm72': Z = 0.05
+        - 'm82': Z = 0.1
+
+    - File naming convention:
+      `bc2003_{res}_{model}_{metallicity}_{imf}_ssp.fits`
+    - Units for `L_lambda` are Lsun / Angstrom / Msun.
+    - Ages are taken from the same `TIME_SCALE.DAT` file as BC03_2003.
+
+    See also
+    --------
+    :class:`SSPBase` : Common functionality for SSP models.
+
+    References
+    ----------
+    Bruzual, G. & Charlot, S. (2003).
+    Stellar population synthesis at the resolution of 2003.
+    `MNRAS, 344(4), 1000–1028 <https://ui.adsabs.harvard.edu/abs/2003MNRAS.344.1000B/abstract>`_.
+
+    `Gustavo Bruzual page <https://www.bruzual.org/>`_
+    """
+    _metallicity_map = {
      # Padova1994
     'm22': 0.0001,
     'm32': 0.0004,
@@ -527,13 +771,13 @@ class BC03_2013(SSPBase):
     'm62': 0.02,
     'm72': 0.05,
     'm82': 0.1}
-    resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
+    _resolution = {'BaSeL': 'lr', 'stelib': 'hr'}
     
     def __init__(self, isochrone='Padova1994', model='BaSeL',
                  imf='Chabrier', path=None, verbose=True) -> None:
         self.isochrone = isochrone
-        self.model, model_key = self.parse_model(model)
-        self.imf, imf_key = self.parse_imf(imf)
+        self.model, model_key = self._parse_model(model)
+        self.imf, imf_key = self._parse_imf(imf)
 
         if path is None:
             self.path = os.path.join(self.default_path,
@@ -544,7 +788,7 @@ class BC03_2013(SSPBase):
 
         if verbose:
             print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
-        self.metallicities = np.array(list(self.metallicity_map.values())
+        self.metallicities = np.array(list(self._metallicity_map.values())
                                       ) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
             os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
@@ -553,9 +797,9 @@ class BC03_2013(SSPBase):
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
         load_wavelength = False
-        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+        for i, metallicity_key in enumerate(self._metallicity_map.keys()):
             fits_path = os.path.join(
-                self.path, f"bc2003_{self.resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+                self.path, f"bc2003_{self._resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value * u.angstrom
@@ -566,7 +810,7 @@ class BC03_2013(SSPBase):
             for j, column in enumerate(table.itercols()):
                 self.L_lambda[i, j] = column.value * self.L_lambda.unit
 
-    def parse_model(self, model):
+    def _parse_model(self, model):
         if 'basel' in model.lower():
             model = 'BaSeL'
             key = 'BaSeL'
@@ -575,10 +819,10 @@ class BC03_2013(SSPBase):
             key = 'stelib'
         else:
             raise NameError(f"Unrecognized model: {model}.\n"
-                             + "Select Basel, Stelib, Miles")
+                             + "Select Basel or Stelib")
         return model, key
 
-    def parse_imf(self, imf):
+    def _parse_imf(self, imf):
         if 'cha' in imf.lower():
             imf = 'chabrier'
             key = 'chab'
@@ -595,8 +839,85 @@ class BC03_2013(SSPBase):
 
 
 class BC03_2016(SSPBase):
+    """
+    BC03 SSP models (Bruzual & Charlot 2003, 2016 updated version).
 
-    metallicity_map = {                                                                                                                                                                                                                                                                                                  
+    This class implements the 2016 version of the Bruzual & Charlot (BC03)
+    simple stellar population (SSP) models. It includes higher metallicity
+    coverage and new spectral libraries, including MILES, STELIB, and BaSeL.
+    This version uses updated file naming conventions and directory structure.
+
+    Parameters
+    ----------
+    model : str, optional
+        Stellar spectral library. Must be one of:
+
+        - 'BaSeL'  : BaSeL 3.1 + ATLAS (low resolution)
+        - 'STELIB' : STELIB + ATLAS (high resolution)
+        - 'MILES'  : MILES + STELIB (high resolution)
+
+        Case-insensitive. Default is 'BaSeL'.
+    imf : str, optional
+        Initial Mass Function. Must be one of:
+
+        - 'chabrier' or 'cha' : Chabrier IMF
+        - 'salpeter' or 'sal' : Salpeter IMF
+        - 'kroupa' or 'kro'    : Kroupa IMF
+
+        Case-insensitive. Default is 'Kroupa'.
+    path : str or None, optional
+        Filesystem path to the BC03 model data. If None (default), the package
+        default path is used.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    Create a BC03 SSP object using the Chabrier IMF and BaSeL library:
+
+    >>> from pst.SSP import BC03_2016
+    >>> ssp = BC03_2016(model='BaSeL', imf='Chabrier')
+    >>> print(ssp.wavelength)
+    <Quantity [ ... ] Angstrom>
+    >>> sed = ssp.L_lambda[0, -1]  # SED for lowest metallicity and oldest age
+
+    Notes
+    -----
+    - This version supports extended metallicity coverage up to Z = 0.1.
+    - The directory and file naming conventions follow:
+
+        bc2003_{res}_{model_key}_{metallicity}_{imf_key}_ssp.fits
+
+    - Supported metallicities (Padova1994 isochrones):
+
+        - 'm22': Z = 0.0001
+        - 'm32': Z = 0.0004
+        - 'm42': Z = 0.004
+        - 'm52': Z = 0.008
+        - 'm62': Z = 0.02
+        - 'm72': Z = 0.05
+        - 'm82': Z = 0.1
+
+    - MILES input is selected via `model='MILES'` (resolved as `xmiless` internally).
+
+    See also
+    --------
+    :class:`SSPBase` : Base class for all SSP models.
+
+    References
+    ----------
+    Bruzual, G., & Charlot, S. (2003).
+    Stellar population synthesis at the resolution of 2003.
+    `MNRAS, 344(4), 1000–1028 <https://ui.adsabs.harvard.edu/abs/2003MNRAS.344.1000B/abstract>`_.
+
+    `Gustavo Bruzual page <https://www.bruzual.org/>`_
+
+    Gutkin, J., Charlot, S., & Bruzual, G. (2016).
+    Modelling the nebular emission from primeval to present-day star-forming galaxies
+    `MNRAS, 462(2), 1757–1774 <https://ui.adsabs.harvard.edu/abs/2016MNRAS.462.1757G>`_.
+    """
+
+    _metallicity_map = {
      # Padova1994
     'm22': 0.0001,
     'm32': 0.0004,
@@ -605,11 +926,11 @@ class BC03_2016(SSPBase):
     'm62': 0.02,
     'm72': 0.05,
     'm82': 0.1}
-    resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
+    _resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
     
     def __init__(self, model='BaSeL', imf='Kroupa', path=None, verbose=True) -> None:
-        self.model, model_key = self.parse_model(model)
-        self.imf, imf_key = self.parse_imf(imf)
+        self.model, model_key = self._parse_model(model)
+        self.imf, imf_key = self._parse_imf(imf)
 
         if path is None:
             self.path = os.path.join(self.default_path, 'BC03', 'bc03_2016ver',
@@ -619,16 +940,16 @@ class BC03_2016(SSPBase):
 
         if verbose:
             print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
-        self.metallicities = np.array(list(self.metallicity_map.values())) * units.dimensionless_unscaled
+        self.metallicities = np.array(list(self._metallicity_map.values())) * units.dimensionless_unscaled
         self.ages = np.loadtxt(
             os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')) * units.yr
         
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
         load_wavelength = False
-        for i, metallicity_key in enumerate(self.metallicity_map.keys()):
+        for i, metallicity_key in enumerate(self._metallicity_map.keys()):
             fits_path = os.path.join(
-                self.path, f"bc2003_{self.resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+                self.path, f"bc2003_{self._resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value * u.angstrom
@@ -640,7 +961,7 @@ class BC03_2016(SSPBase):
                 self.L_lambda[i, j] = column.value * self.L_lambda.unit
 
 
-    def parse_model(self, model):
+    def _parse_model(self, model):
         if 'basel' in model.lower():
             model = 'BaSeL3.1_Atlas'
             key = 'BaSeL'
@@ -655,7 +976,7 @@ class BC03_2016(SSPBase):
                              + "Select Basel, Stelib, Miles")
         return model, key
 
-    def parse_imf(self, imf):
+    def _parse_imf(self, imf):
         if 'cha' in imf.lower():
             imf = 'Chabrier_IMF'
             key = 'chab'
@@ -671,23 +992,65 @@ class BC03_2016(SSPBase):
         return imf, key
 
 class BaseGM(SSPBase):
-    """Granada models..."""
+    """
+    SSP model class for the GM (Granada-MILES) base used in the CALIFA survey.
 
+    This class loads a combined grid of simple stellar population (SSP) models:
+
+    - The **young stellar populations** (ages < 63 Myr) are taken from GRANADA models developed by González Delgado et al. (2005).
+    - The **older populations** (ages ≥ 63 Myr) are based on the MILES spectral
+      library, specifically using the models from Vazdekis et al. (2010).
+
+    Parameters
+    ----------
+    path : str or None, optional
+        Path to the `gsd01_156.fits` file containing the GRANADA SSP model cube.
+        If None, a default path is used. The companion `fits_like_properties.dat`
+        file containing the age and metallicity grid must reside in the same directory.
+    verbose : bool, optional
+        If True, print initialization messages. Default is True.
+
+    Notes
+    -----
+    - The Granada models are provided as 156 SEDs, reshaped to a (39 × 4) grid
+      of ages and metallicities.
+    - All models assume a **Salpeter (1955) initial mass function (IMF)**.
+    - Spectral range: **3000 Å to 7000 Å**, with **0.3 Å resolution**.
+
+    Example
+    -------
+    >>> from pst.SSP import BaseGM
+    >>> gm = BaseGM(verbose=False)
+    >>> print(gm.wavelength[0], gm.wavelength[-1])
+    3000.0 Angstrom 7000.0 Angstrom
+    >>> print(gm.ages.min(), gm.ages.max())
+    1e6 yr 1.3e10 yr
+
+    References
+    ----------
+    González Delgado, R. M., et al. (2005).
+    "Evolutionary stellar population synthesis at high spectral resolution: optical wavelengths ." MNRAS, 357, 945.
+    https://ui.adsabs.harvard.edu/abs/2005MNRAS.357..945G
+
+    Sánchez, S. F., et al. (2012).
+    "CALIFA, the Calar Alto Legacy Integral Field Area survey: I. Survey presentation."
+    A&A, 538, A8. https://ui.adsabs.harvard.edu/abs/2012A%26A...538A...8S
+    """
     def __init__(self, path=None, verbose=True):
         if path is None:
             self.path = os.path.join(self.default_path, 'BaseGM',
                                      'gsd01_156.fits')
-            self.ssp_properties_path = os.path.join(
+            self._ssp_properties_path = os.path.join(
             self.default_path,
             'BaseGM', 'fits_like_properties.dat')
         else:
             self.path = path
-            self.ssp_properties_path = os.path.join(os.path.dirname(path),
+            self._ssp_properties_path = os.path.join(os.path.dirname(path),
                                                     "fits_like_properties.dat")
 
-        self.metallicities = np.loadtxt(self.ssp_properties_path, usecols=(1)
+        self.metallicities = np.loadtxt(self._ssp_properties_path, usecols=(1)
                                         ) * units.dimensionless_unscaled
-        self.ages = np.loadtxt(self.ssp_properties_path, usecols=(0)) * units.yr
+        self.ages = np.loadtxt(self._ssp_properties_path, usecols=(0)) * units.yr
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
         if verbose:
@@ -696,7 +1059,7 @@ class BaseGM(SSPBase):
         wl0 = ssp_fits[0].header['CRVAL1']
         deltawl = ssp_fits[0].header['CDELT1']
 
-        self.header = ssp_fits[0].header
+        self._header = ssp_fits[0].header
         self.norm = np.array(
             [ssp_fits[0].header['NORM'+str(i)] for i in range(156)]
             ) * units.Lsun / units.Msun / units.Angstrom
@@ -760,17 +1123,57 @@ class XSL(SSPBase):
     """
     X-Shooter SSP empirical models.
 
-    Input:
-        - IMF: Initial mass function [KRO, SAL]
-        - ISOC: Set of isochrones to use [P00, PC]
+    These models provide spectral energy distributions for simple stellar populations
+    observed with the `X-Shooter instrument <http://www.eso.org/sci/facilities/paranal/instruments/xshooter/overview.html>`_. They cover a wide range of ages and
+    metallicities, using two sets of isochrones and two IMFs.
 
-    Please cite Verro et al. (2022b), when using these data.
+    Parameters
+    ----------
+    IMF : str
+        Initial Mass Function to use. Options:
 
-    XSL SSP models are in cgs flux units F [erg cm s Å].
-    To convert them to L/Lsun/Msun/Å, multiply the flux array by C_{imf}
+        - 'Kroupa' : Kroupa (2001) IMF
+        - 'Salpeter' : Salpeter (1955) IMF
+    ISO : str
+        Set of isochrones to use. Options:
+
+        - 'P00' : Padova 2000 isochrones
+        - 'PC' : PARSEC-COLIBRI isochrones
+    path : str or None, optional
+        Path to directory containing the SSP FITS files.
+        If None, defaults to `default_path/XSL/IMF`.
+    verbose : bool, optional
+        If True, prints initialization messages. Default is True.
+
+    Notes
+    -----
+    - Model files must be available in the specified `path`.
+
+    References
+    ----------
+    Verro, K., Trager, S.C., Peletier, R.F., et al. 2022, `A&A, 661, A50 <https://ui.adsabs.harvard.edu/abs/2022A&A...661A..50V>`_.
+
+    Project home page: http://xsl.u-strasbg.fr/index.html
+
+    See also
+    --------
+    SSPBase
+        Base class for SSP models.
+
+    Example
+    -------
+    >>> from pst.SSP import XSL
+    >>> xsl = XSL(IMF='Kroupa', ISO='P00', verbose=False)
+    >>> print(xsl.wavelength[0], xsl.wavelength[-1])
+    3000.0 Angstrom 25000.0 Angstrom
+    >>> print(xsl.ages.min(), xsl.ages.max())
+    5e7 yr 1.6e10 yr
+    >>> print(xsl.metallicities)
+    [0.0004 0.001 0.004 0.008 0.019 0.03]
+    >>> print(xsl.L_lambda.shape)
+    (6, 26, 58642)
     """
-
-    C_imf = dict(salpeter=9799552.50, kroupa=5567946.09)
+    _c_imf = dict(salpeter=9799552.50, kroupa=5567946.09)
 
     _initial_mass_functions = ["Kroupa", "Salpeter"]
     _iso_ages = {
@@ -815,7 +1218,7 @@ class XSL(SSPBase):
                    ) * units.Lsun / units.Msun / units.Angstrom
  
     def _fetch_files(self, iso, imf):
-        c_solar = self.C_imf[imf.lower()]  # Convert to solar units
+        c_solar = self._c_imf[imf.lower()]  # Convert to solar units
         if iso == "P00":
             file_fmt = r"XSL_SSP_T{:2.2e}_Z{}_Kroupa_P00.fits"
             for age_idx, age in enumerate(self.ages):
@@ -853,10 +1256,85 @@ class XSL(SSPBase):
                 ) * units.Angstrom
 
 class EMILES(SSPBase):
-    """E-MILES models from Vazdekis+16 and Röck+16."""
-    lib_isochrones = {"BASTI": "iTp",
+    """
+    E-MILES simple stellar population (SSP) models.
+
+    These models provide high-quality empirical SSP spectra covering the
+    spectral range 1680−50000 Å at moderately high resolution. The E-MILES
+    library combines multiple stellar libraries and theoretical isochrones
+    to deliver spectra of single-age, single-metallicity populations.
+
+    The UV spectral range (1680–3540 Å) is computed using the `NGSL space-based
+    stellar library <https://archive.stsci.edu/prepds/stisngsl/>`_, offering a significant improvement over earlier space-based
+    models. The optical spectra use the MILES empirical library, and redder
+    wavelengths are covered by `Indo-US <https://noirlab.edu/science/observing-noirlab/observing-kitt-peak/telescope-and-instrument-documentation/cflib>`_, `CaT <https://research.iac.es/proyecto/miles/pages/stellar-libraries/cat-library.php>`_, and `IRTF <https://irtfweb.ifa.hawaii.edu/~spex/IRTF_Spectral_Library/>`_ empirical libraries,
+    all computed with consistent methods.
+
+    The SSP spectra span metallicities from −1.79 < [M/H] < +0.26 and ages
+    greater than 30 Myr, across several IMF types with varying slopes.
+
+    Spectral resolution:
+
+        - UV range (λ < 3060 Å): FWHM ≈ 3 Å
+        - UV range (3060 Å < λ < 3540 Å): FWHM ≈ 5 Å
+        - Optical range (3540 Å to 8950 Å): FWHM ≈ 2.5 Å
+        - Infrared (longer wavelengths): σ = 60 km/s
+
+    Parameters
+    ----------
+    iso : str
+        Isochrone set to use. Options:
+
+        - 'BASTI' : BASTI isochrones (Pietrinferni et al. 2004)
+        - 'PADOVA00' : Padova 2000 isochrones (Girardi et al. 2000)
+    imf : str
+        Initial mass function to use. Options:
+
+        - 'KROUPA_UNIVERSAL' : Kroupa universal IMF (Kroupa 2001)
+        - 'UNIMODAL' : Unimodal IMF (single power-law, Vazdekis et al. 1996)
+        - 'BIMODAL' : Bimodal IMF (Vazdekis et al. 1996)
+        - 'CHABRIER' : Chabrier IMF (Chabrier 2003)
+    path : str or None, optional
+        Path to the directory containing the E-MILES FITS files.
+        Defaults to `default_path/EMILES`.
+    verbose : bool, optional
+        If True, prints initialization messages. Default is True.
+
+    Notes
+    -----
+    - The spectral resolution and wavelength coverage follow Vazdekis et al. (2016)
+      and Röck et al. (2016).
+    - The models cover a wavelength range of approximately 1680–50000 Å with
+      spectral resolution ~2.5 Å (FWHM).
+    - The metallicities are given as logarithmic values relative to solar,
+      with solar metallicity fixed at Z=0.019.
+
+    References
+    ----------
+    Vazdekis, A., Koleva, M., Ricciardelli, E., et al. 2016, `MNRAS, 463, 3409 <https://ui.adsabs.harvard.edu/abs/2016MNRAS.463.3409V/abstract>`_
+    Röck, B., Vazdekis, A., Ricciardelli, E., et al. 2016, `A&A, 589, A73, 8 <https://ui.adsabs.harvard.edu/abs/2016A%26A...589A..73R/abstract>`_
+
+    See also
+    --------
+    SSPBase
+        Base class for simple stellar population models.
+
+    Example
+    -------
+    >>> from pst.SSP import EMILES
+    >>> emiles = EMILES(iso='BASTI', imf='KROUPA_UNIVERSAL', verbose=False)
+    >>> print(emiles.wavelength[0], emiles.wavelength[-1])
+    1680.0 Angstrom 50000.0 Angstrom
+    >>> print(emiles.ages.min(), emiles.ages.max())
+    30.0 Myr 14.0 Gyr
+    >>> print(emiles.metallicities)
+    [0.0001 0.00016 ... 0.03]  # actual values depend on the isochrone
+    >>> print(emiles.L_lambda.shape)
+    (12, 52, 53689)
+    """
+    _lib_isochrones = {"BASTI": "iTp",
                   "PADOVA00": "iPp"}
-    lib_imfs = {"KROUPA_UNIVERSAL": "ku1.30",
+    _lib_imfs = {"KROUPA_UNIVERSAL": "ku1.30",
                 "UNIMODAL": "un",
                 "BIMODAL": "bi",
                 "CHABRIER": "ch1.30"}
@@ -900,20 +1378,20 @@ class EMILES(SSPBase):
         """Get the file prefix used to load the model files."""
         model_name = os.path.join(self.path, "E")
         # IMF
-        if not imf.upper() in self.lib_imfs.keys():
+        if not imf.upper() in self._lib_imfs.keys():
             raise NameError(f"Input IMF {imf} not recognized"
-                            + f"\nThe available isochrones are: {self.lib_imfs.keys()}")
+                            + f"\nThe available isochrones are: {self._lib_imfs.keys()}")
         else:
-            model_name += self.lib_imfs[imf.upper()]
+            model_name += self._lib_imfs[imf.upper()]
         # Metallicity and age
         model_name += r"Z{}{:.2f}T{:07.4f}_"
 
         # Isochrone
-        if not iso.upper() in self.lib_isochrones:
+        if not iso.upper() in self._lib_isochrones:
             raise NameError(f"Input isochrone {iso} not recognized"
-                            + f"\nThe available isochrones are: {list(self.lib_isochrones.keys())}")
+                            + f"\nThe available isochrones are: {list(self._lib_isochrones.keys())}")
         else:
-            model_name += self.lib_isochrones[iso.upper()]
+            model_name += self._lib_isochrones[iso.upper()]
             self._ages = self._iso_ages[iso.upper()]
             self.log_ages_yr = np.log10(self._ages / units.yr)
             # Solar metallicity defined in V+16.

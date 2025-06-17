@@ -39,13 +39,6 @@ Observables
    :undoc-members:
    :show-inheritance:
 
-Fitting
------------
-.. automodule:: pst.fitting_module
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. _utils:
 
 Utils
