@@ -220,21 +220,22 @@ Currently, PST is able to produce three different types of observable quantities
     - Central wavelength window.
 
     The first two regions are used to define a linear pseudo-continuum, while the latter is the region of interest where the equivalent width is measured.
+    For example, the H-beta equivalent width defined in `Tragger et al. 1998 <https://ui.adsabs.harvard.edu/abs/1998ApJS..116....1T/abstract>`_ is given by the following wavelength ranges:
 
     .. code-block:: python
 
         from pst.observables import EquivalentWidth
 
-        custom_ew = EquivalentWidth(left_wl_range=[3950, 4000],
-                                    central_wl_range=[4000, 4100],
-                                    right_wl_range=[4100, 4150])
+        custom_ew = EquivalentWidth(left_wl_range=[4827.875, 4847.875],
+                                    central_wl_range=[4847.875, 4876.625],
+                                    right_wl_range=[4876.625, 4891.625])
 
     It is also possible to load pre-defined equivalent widths by providing a JSON
     file such as:
 
     .. code-block::
 
-        {"left_wl_range": [6470.0, 6530.0], "central_wl_range": [6550.0,  6575.0], "right_wl_range": [6600, 6660]}
+        {"left_wl_range": [4827.875, 4847.875], "central_wl_range": [4847.875, 4876.625], "right_wl_range": [4876.625, 4891.625]}
     
     Then, you can initialise the class by:
 
@@ -242,6 +243,32 @@ Currently, PST is able to produce three different types of observable quantities
         
         halpha_ew = EquivalentWidth.from_json(path_to_json_file)
 
+    To compute the equivalent width, you can use the `measure_ew` method, which takes a wavelength and SED arrays as input,
+    and returns the equivalent width in the same units as the wavelength. Based on the example above, you can compute the H-beta equivalent width as follows:
+
+    .. code-block:: python
+
+        np.random.seed(42)  # For reproducibility
+        noisy_sed = np.random.normal(sed, 0.01 * sed, size=sed.shape) << sed.unit # Simulate some noise in the SED
+        ew, ew_err = custom_ew.compute_ew(wavelength=ssp_model.wavelength,
+                                        spectra=noisy_sed, spectra_err=sed * 0.01)
+        print(f"Equivalent Width (H-beta): {ew.value:.2f} +/- {ew_err:.2f} Angstrom")
+        plt.figure()
+        plt.title(r"EW(H$\beta$)=" + f'{ew.value:.2f} +/- {ew_err:.2f}')
+        plt.errorbar(ssp_model.wavelength.value, noisy_sed.value, yerr=sed.value * 0.01, label='SED')
+        plt.axvspan(*custom_ew.central_wl_range.value, color='green', label='Central window', alpha=0.3)
+        plt.axvspan(*custom_ew.right_wl_range.value, color='red', alpha=0.3, label='Left Range')
+        plt.axvspan(*custom_ew.left_wl_range.value, color='blue', alpha=0.3, label='Right Range')
+        plt.xlim(custom_ew.left_wl_range[0].value - 100, custom_ew.right_wl_range[-1].value + 100)
+        plt.ylim(np.interp(4861 << u.angstrom, ssp_model.wavelength, sed).value * np.array([0.8, 1.2]))
+        plt.xlabel('Wavelength (Angstrom)')
+        plt.ylabel('Flux (Lsun/Angstrom)')
+        plt.legend()
+        plt.show()
+
+.. figure:: _static/images/ew_calculation.png
+    :align: center
+    :width: 600px
 
 For more details, refer to the API :ref:`observables`.
 
