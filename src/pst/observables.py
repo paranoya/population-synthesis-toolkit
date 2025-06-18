@@ -561,6 +561,16 @@ class EquivalentWidth(object):
     where :math:`\lambda_{\rm B,\,min}` and :math:`\lambda_{\rm B,\,max}` are the
     left spectral window boundaries, and :math:`\lambda_{\rm R,\,min}` and
     :math:`\lambda_{\rm R,\,max}` are the right spectral window boundaries.
+
+    Example
+    -------
+    >>> from pst.observables import EquivalentWidth
+    >>> ew = EquivalentWidth(left_wl_range=(3700, 3900),
+    ...                      central_wl_range=(4000, 4100),
+    ...                      right_wl_range=(4200, 4400))
+    >>> wavelength = np.linspace(3600, 4600, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> ew_value, ew_err = ew.compute_ew(wavelength, spectra)
     """
     def __init__(self, left_wl_range, central_wl_range, right_wl_range):
         self.left_wl_range = np.array(left_wl_range)
@@ -623,6 +633,7 @@ class EquivalentWidth(object):
         ew_err : np.ndarray
             The associated error of the equivalent width.
         """
+        print(self.left_wl_range, wavelength)
         left_pts = np.where(np.searchsorted(self.left_wl_range, wavelength) == 1)[0]
         right_pts = np.where(np.searchsorted(self.right_wl_range, wavelength) == 1)[0]
         lick_pts = np.where(np.searchsorted(self.central_wl_range, wavelength) == 1)[0]
