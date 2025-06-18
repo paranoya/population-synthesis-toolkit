@@ -44,13 +44,17 @@ PST is a Python library that offers a comprehensive and flexible framework for s
 
 # Statement of need
 
-Compared to alternative approaches in the literature, the user-friendly modular framework of PST is conceived to address the following challenges:
+Compared to alternative approaches in the literature such as @cid-fernandes+05 and @boquien+19, the user-friendly modular framework of PST is conceived to address the following challenges:
 - To handle a broad variety of SSP libraries, publicly available in heterogeneous native formats.
 - To model arbitrarily complex galaxy star formation and chemical evolution histories.
 - To enable the simultaneous and self-consistent analysis of photometric and spectroscopic data from different instruments.
 
-PST is currently a dependency of [PyKOALA](https://github.com/pykoala/pykoala), another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
-It is also at the core of the Bayesian Estimator for Stellar Population Analysis ([BESTA](https://github.com/PabloCorcho/pst-hbsps)), where it is coupled with the [Cosmosis](https://cosmosis.readthedocs.io/en/latest/) Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
+PST is designed for astronomy researchers, particularly those working in extragalactic astrophysics and stellar population synthesis, who need a flexible and extensible Python-based toolkit for modeling galaxy properties. It is suited for users with intermediate to advanced expertise in Python and familiarity with common data formats and concepts in astronomical spectroscopy and photometry.
+
+Primary use cases include data analysis, synthetic model construction, and pipeline integration for studies involving stellar population synthesis (see examples below). PST is especially valuable in workflows that combine observational data with theoretical models in a Bayesian or forward-modeling context.
+
+PST is currently a dependency of PyKOALA [@pykoala], another open source Python package focused on the reduction of optical integral-field spectroscopic observations, where it is mainly used to derive broadband photometry.
+It is also at the core of the Bayesian Estimator for Stellar Population Analysis [[BESTA](https://https://besta.readthedocs.io/), see also @cc+25], where it is coupled with the [CosmoSIS](https://cosmosis.readthedocs.io/en/latest/) [@zuntz+15] Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colours and spectra.
 
 # Features and functionality
 
@@ -67,7 +71,7 @@ For any SSP model integrated into PST, the library provides tools for interpolat
 
 Second, the `ChemicalEvolutionModel` classes represent the star formation and chemical enrichment histories required to produce composite spectral energy distributions and additional derived quantities. They implement several widely-used analytic prescriptions for modeling SFHs, such as exponentially declining or log-normal models, as well as complex SFH representations, such as table-based SFHs and particle-like data models, particularly suitable for post-processing the results from cosmological hydrodynamical simulations.
 
-Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Servive](http://svo2.cab.inta-csic.es/theory/fps/) for synthetic photometry calculations, as well as popular line indices such as the Lick system.
+Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
 
 # Documentation and tutorials
 
