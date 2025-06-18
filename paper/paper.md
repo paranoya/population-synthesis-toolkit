@@ -42,9 +42,16 @@ Stellar population synthesis is a crucial methodology in astrophysics, enabling 
 
 PST is a Python library that offers a comprehensive and flexible framework for stellar population synthesis. Its main goal is to compute composite spectra using different galaxy evolution models and SSP libraries with ease and efficiency. It incorporates additional effects, such as cosmic redshift and dust extinction, and it computes several observable quantities derived from the spectra, including broadband photometric fluxes and equivalent widths.
 
+# State of the field
+
+A number of software packages have been developed to support stellar population synthesis and modeling of galaxy spectral energy distributions. Tools such as [binary_c-python](https://gitlab.surrey.ac.uk/ri0005/binary_c-python) and [SPISEA](https://github.com/astropy/SPISEA) [@hosek+20] are primarily designed for generating and analyzing simple stellar populations, often with a focus on individual stars, binaries, or star clusters. Meanwhile, libraries such as [python-FSPS](https://github.com/dfm/python-fsps), a Python interface to the Flexible Stellar Population Synthesis (FSPS) code [@conroy+09], and the more recent [DSPS](https://github.com/ArgonneCPAC/dsps) [@hearin+23], implemented using JAX for efficient gradient computation and forward modeling, provide extensive SSP modeling capabilities.
+
+Other packages put a stronger emphasis on fitting observed data to derive galaxy properties. These include Bayesian frameworks like [CIGALE](https://cigale.lam.fr/) [@boquien+19], [ProSpect](https://github.com/asgr/ProSpect) [@robotham+20] or [Prospector](https://prospect.readthedocs.io/en/v1.0.0/) [@johnson+21], which infer star formation histories and other physical parameters using spectro-photometric data. Alternative frequentist tools such as [Starlight](http://www.starlight.ufsc.br/) (@cid-fernandes+05), [PpXF](https://pypi.org/project/ppxf/) [capellari+04], or [Pipe3D](https://gitlab.com/pipe3d/pyPipe3D) [@sanchez+16], are commonly used to extract stellar kinematics and stellar population parameters from observed galaxy spectra, often in the context of integral field spectroscopy.
+
 # Statement of need
 
-Compared to alternative approaches in the literature such as @cid-fernandes+05 and @boquien+19, the user-friendly modular framework of PST is conceived to address the following challenges:
+Compared to alternative approaches, the user-friendly modular framework of PST is conceived to address the following challenges:
+
 - To handle a broad variety of SSP libraries, publicly available in heterogeneous native formats.
 - To model arbitrarily complex galaxy star formation and chemical evolution histories.
 - To enable the simultaneous and self-consistent analysis of photometric and spectroscopic data from different instruments.
