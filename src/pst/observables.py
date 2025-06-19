@@ -633,7 +633,7 @@ class EquivalentWidth(object):
         ew_err : np.ndarray
             The associated error of the equivalent width.
         """
-        print(self.left_wl_range, wavelength)
+
         left_pts = np.where(np.searchsorted(self.left_wl_range, wavelength) == 1)[0]
         right_pts = np.where(np.searchsorted(self.right_wl_range, wavelength) == 1)[0]
         lick_pts = np.where(np.searchsorted(self.central_wl_range, wavelength) == 1)[0]
@@ -720,25 +720,3 @@ class EquivalentWidth(object):
         else:
             raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
                                     f"associated to input name {name}")
-
-
-if __name__ == '__main__':
-    from pst.SSP import BaseGM
-    import matplotlib.pyplot as plt
-    ssp = BaseGM()
-    
-    filter = Filter.from_svo("PANSTARRS_PS1.r")
-    filter.interpolate(ssp.wavelength)
-
-    for sed in ssp.L_lambda.reshape(
-            (ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
-        sed = 1 * u.Msun * sed / 4 / np.pi / (10 * u.pc)**2
-        mag, mag_err = filter.get_ab(sed)
-        
-
-#        print("SSP absolute magnitude: ", mag)
-    plt.figure()
-    plt.plot(ssp.wavelength, filter.response)
-    plt.plot(ssp.wavelength, sed / np.mean(sed))
-    plt.yscale('log')
-    plt.show()
