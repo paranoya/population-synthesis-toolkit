@@ -616,6 +616,14 @@ class EquivalentWidth(object):
     def compute_ew(self, wavelength, spectra, spectra_err=None):
         """Compute the equivalent width of a given input spectra.
         
+        Description
+        -----------
+        The equivalent width is computed using the definition given in the class
+        description. Positive values of the equivalent width indicate an absorption
+        line, while negative values indicate an emission line. The error on the
+        equivalent width is computed using the error propagation formula, assuming
+        null covariance between the spectral points.
+
         Parameters
         ----------
         spectra : :class:`np.ndarray` or :class:``astropy.units.Quantity``
