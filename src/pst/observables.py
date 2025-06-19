@@ -231,7 +231,7 @@ class Filter(object):
         The effective bandwith is computed as
 
         .. math::
-            \lambda_{\rm BW} = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - \lambda_{\rm eff}\right)^{1/2}
+            \Delta \lambda_{\rm BW} = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - \lambda_{\rm eff}\right)^{1/2}
 
         Returns
         -------
