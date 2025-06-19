@@ -40,7 +40,7 @@ bibliography: paper.bib
 
 Stellar population synthesis is a crucial methodology in astrophysics, enabling the interpretation of the integrated light of galaxies and stellar clusters. By combining empirical and/or theoretical libraries of the spectral energy distribution emitted by simple stellar populations (SSPs) with models of the star formation history (SFH) and chemical evolution, population synthesis facilitates the estimation of essential galaxy properties, such as total stellar mass, star formation rate, mass-weighted age and metallicity, etc.
 
-PST is a Python library that offers a comprehensive and flexible framework for stellar population synthesis. Its main goal is to compute composite spectra using different galaxy evolution models and SSP libraries with ease and efficiency. It incorporates additional effects, such as cosmic redshift and dust extinction, and it computes several observable quantities derived from the spectra, including broadband photometric fluxes and equivalent widths.
+PST is a Python library that offers a comprehensive and flexible framework for stellar population synthesis. Its main goal is to compute composite spectra using different galaxy evolution models and SSP libraries with ease and efficiency. It incorporates additional effects, such as cosmic redshift and dust extinction and attenuation, and it computes several observable quantities derived from the spectra, including broadband photometric fluxes and equivalent widths.
 
 # State of the field
 
@@ -78,7 +78,7 @@ For any SSP model integrated into PST, the library provides tools for interpolat
 
 Second, the `ChemicalEvolutionModel` classes represent the star formation and chemical enrichment histories required to produce composite spectral energy distributions and additional derived quantities. They implement several widely-used analytic prescriptions for modeling SFHs, such as exponentially declining or log-normal models, as well as complex SFH representations, such as table-based SFHs and particle-like data models, particularly suitable for post-processing the results from cosmological hydrodynamical simulations.
 
-Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
+Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths (either absorption or emission line features). PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
 
 # Documentation and tutorials
 
