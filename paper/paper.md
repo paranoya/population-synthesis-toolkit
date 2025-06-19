@@ -78,7 +78,7 @@ For any SSP model integrated into PST, the library provides tools for interpolat
 
 Second, the `ChemicalEvolutionModel` classes represent the star formation and chemical enrichment histories required to produce composite spectral energy distributions and additional derived quantities. They implement several widely-used analytic prescriptions for modeling SFHs, such as exponentially declining or log-normal models, as well as complex SFH representations, such as table-based SFHs and particle-like data models, particularly suitable for post-processing the results from cosmological hydrodynamical simulations.
 
-Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths (either absorption or emission line features). PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
+Third, PST features a dedicated `observables` module to predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths, which are useful for estimating the strength of absorption or emission lines. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
 
 # Documentation and tutorials
 
