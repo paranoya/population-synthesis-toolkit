@@ -231,7 +231,7 @@ class Filter(object):
         The effective bandwith is computed as
 
         .. math::
-            \lambda_{\rm BW} = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - \lambda_{\rm eff}\right)^{1/2}
+            \Delta \lambda_{\rm BW} = \sqrt{8\log(2)} \left(\frac{\int{R(\lambda) \cdot \lambda^2 d\lambda}}{\int{R(\lambda) d\lambda}} - \lambda_{\rm eff}\right)^{1/2}
 
         Returns
         -------
@@ -561,6 +561,16 @@ class EquivalentWidth(object):
     where :math:`\lambda_{\rm B,\,min}` and :math:`\lambda_{\rm B,\,max}` are the
     left spectral window boundaries, and :math:`\lambda_{\rm R,\,min}` and
     :math:`\lambda_{\rm R,\,max}` are the right spectral window boundaries.
+
+    Example
+    -------
+    >>> from pst.observables import EquivalentWidth
+    >>> ew = EquivalentWidth(left_wl_range=(3700, 3900),
+    ...                      central_wl_range=(4000, 4100),
+    ...                      right_wl_range=(4200, 4400))
+    >>> wavelength = np.linspace(3600, 4600, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> ew_value, ew_err = ew.compute_ew(wavelength, spectra)
     """
     def __init__(self, left_wl_range, central_wl_range, right_wl_range):
         self.left_wl_range = np.array(left_wl_range)
@@ -606,6 +616,14 @@ class EquivalentWidth(object):
     def compute_ew(self, wavelength, spectra, spectra_err=None):
         """Compute the equivalent width of a given input spectra.
         
+        Description
+        -----------
+        The equivalent width is computed using the definition given in the class
+        description. Positive values of the equivalent width indicate an absorption
+        line, while negative values indicate an emission line. The error on the
+        equivalent width is computed using the error propagation formula, assuming
+        null covariance between the spectral points.
+
         Parameters
         ----------
         spectra : :class:`np.ndarray` or :class:``astropy.units.Quantity``
@@ -623,6 +641,7 @@ class EquivalentWidth(object):
         ew_err : np.ndarray
             The associated error of the equivalent width.
         """
+
         left_pts = np.where(np.searchsorted(self.left_wl_range, wavelength) == 1)[0]
         right_pts = np.where(np.searchsorted(self.right_wl_range, wavelength) == 1)[0]
         lick_pts = np.where(np.searchsorted(self.central_wl_range, wavelength) == 1)[0]
@@ -709,25 +728,3 @@ class EquivalentWidth(object):
         else:
             raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
                                     f"associated to input name {name}")
-
-
-if __name__ == '__main__':
-    from pst.SSP import BaseGM
-    import matplotlib.pyplot as plt
-    ssp = BaseGM()
-    
-    filter = Filter.from_svo("PANSTARRS_PS1.r")
-    filter.interpolate(ssp.wavelength)
-
-    for sed in ssp.L_lambda.reshape(
-            (ssp.L_lambda.shape[0] * ssp.L_lambda.shape[1], ssp.L_lambda.shape[2])):
-        sed = 1 * u.Msun * sed / 4 / np.pi / (10 * u.pc)**2
-        mag, mag_err = filter.get_ab(sed)
-        
-
-#        print("SSP absolute magnitude: ", mag)
-    plt.figure()
-    plt.plot(ssp.wavelength, filter.response)
-    plt.plot(ssp.wavelength, sed / np.mean(sed))
-    plt.yscale('log')
-    plt.show()
