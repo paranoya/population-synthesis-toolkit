@@ -60,7 +60,7 @@ PST is designed for astronomy researchers, especially those working in extragala
 
 The primary use cases are data analysis, synthetic model construction, and pipeline integration for studies involving stellar population synthesis (see the examples below). PST is particularly useful in workflows that combine observational data with theoretical models within a Bayesian or forward-modeling framework.
 
-PST is currently a dependency of PyKOALA [@pykoala], another  open-source Python package focused on reducing optical integral-field spectroscopic observations. There, PST is mainly used to derive broadband photometry.
+PST is currently a dependency of [PyKOALA](https://github.com/pykoala) [@pykoala_adass], another  open-source Python package focused on reducing optical integral-field spectroscopic observations. There, PST is mainly used to derive broadband photometry.
 PST is also at the core of the Bayesian Estimator for Stellar Population Analysis [[BESTA](https://https://besta.readthedocs.io/), see also @cc+25], where it is coupled with the [CosmoSIS](https://cosmosis.readthedocs.io/en/latest/) [@zuntz+15] Monte Carlo sampling framework to infer the physical properties of galaxies from the observed colors and spectra.
 
 # Features and functionality
@@ -74,7 +74,7 @@ For any SSP model integrated into PST, the library provides tools for interpolat
 
 Second, the `ChemicalEvolutionModel` classes represent the star formation and chemical enrichment histories required to produce composite spectral energy distributions and additional derived quantities. These classes implement several widely used analytic prescriptions for modeling star formation histories (SFHs), such as exponentially declining or log-normal models. They also implement complex SFH representations, such as table-based SFHs and particle-like data models. These models are particularly suitable for post-processing results from cosmological hydrodynamic simulations.
 
-Third, PST features a dedicated `observables` module that can predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths, which are useful for estimating the strength of absorption or emission lines. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+20] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
+Third, PST features a dedicated `observables` module that can predict additional quantities from spectra, such as broadband photometric fluxes, colours, and equivalent widths, which are useful for estimating the strength of absorption or emission lines. PST includes automatic integration with the photometric filters provided by the [Spanish Virtual Observatory Filter Profile Service](http://svo2.cab.inta-csic.es/theory/fps/) [@rodrigo+12; @rodrigo+20; @rodrigo+24] for synthetic photometry calculations, as well as popular line indices such as the Lick system [@worthey+94].
 
 # Documentation and tutorials
 
