@@ -5,6 +5,7 @@ PST is a very flexible tool that allows users to perform stellar population synt
 ## Status
 [![Documentation Status](https://readthedocs.org/projects/population-synthesis-toolkit/badge/?version=latest)](https://population-synthesis-toolkit.readthedocs.io/en/latest/?badge=latest)
 ![Unit tests](https://github.com/paranoya/population-synthesis-toolkit/actions/workflows/testing.yml/badge.svg)
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.08203/status.svg)](https://doi.org/10.21105/joss.08203)
 
 ## Documentation
 
