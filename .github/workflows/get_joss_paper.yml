@@ -5,6 +5,8 @@ on:
     paths:
       - paper/**
       - .github/workflows/draft-pdf.yml
+    branches:
+      - joss-paper
 
 jobs:
   paper:
