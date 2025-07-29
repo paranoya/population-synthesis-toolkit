@@ -33,6 +33,27 @@ Key Features
    get_ssp_data
    api
 
+
+Acknowledgement
+===============
+
+If you use PST in your research, please cite the following `paper <https://joss.theoj.org/papers/10.21105/joss.08203>`_:
+
+.. code-block:: latex
+
+   @article{PST_2025,
+            doi = {10.21105/joss.08203},
+            url = {https://doi.org/10.21105/joss.08203},
+            year = {2025},
+            publisher = {The Open Journal},
+            volume = {10},
+            number = {111},
+            pages = {8203},
+            author = {Corcho-Caballero, Pablo and Ascasibar, Yago and Jiménez-López, Daniel},
+            title = {The Population Synthesis Toolkit (PST) Python Library},
+            journal = {Journal of Open Source Software} }
+
+
 Indices and tables
 ==================
 * :ref:`genindex`
