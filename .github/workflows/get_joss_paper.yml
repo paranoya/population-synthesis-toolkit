@@ -1,10 +1,10 @@
 name: Build JOSS paper draft
 
-on:
-  push:
-    branches:
-    - main
-  pull_request:
+on: 
+  push:  
+    paths:
+      - paper/**
+      - .github/workflows/draft-pdf.yml
 
 jobs:
   paper:
