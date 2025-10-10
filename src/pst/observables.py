@@ -292,10 +292,49 @@ class Filter(object):
         return self.response
 
     def _check_spectra(self, spectra, default_unit=u.Lsun / u.angstrom / u.cm**2):
-        if spectra is not None and not isinstance(spectra, u.Quantity):
-            return  spectra * default_unit
-        else:
+        """
+        Ensure that ``spectra`` is an astropy Quantity and return it as flux density
+        per wavelength (F_lambda), using `self.wavelength` for conversions if
+        necessary.
+
+        Parameters
+        ----------
+        spectra : array-like or ~astropy.units.Quantity
+            Spectrum values. If array-like (dimensionless), it will be multiplied by
+            `default_unit`. If a Quantity, it may be either F_nu (per frequency) or
+            F_lambda (per wavelength).
+        default_unit : ~astropy.units.Unit, optional
+            Target per-wavelength flux-density unit to return, e.g. Lsun / Å / cm²
+            (must be equivalent to power / area / length).
+
+        Returns
+        -------
+        astropy.units.Quantity
+            Spectrum expressed in `default_unit` (per-wavelength flux density).
+
+        Notes
+        -----
+        - Requires `self.wavelength` to be defined as an astropy Quantity with
+        length units.
+        - If `spectra` is already per wavelength, only a unit conversion is applied.
+        - If `spectra` is per frequency, the conversion uses
+        `equivalencies=u.spectral_density(self.wavelength)`.
+        """
+        if spectra is None:
+            return None
+
+        if not isinstance(spectra, u.Quantity):
+            spectra = u.Quantity(spectra, default_unit)
+        # Check flux density units
+        if spectra.unit.is_equivalent(u.W / (u.m**2 * u.m)):
             return spectra
+        elif spectra.unit.is_equivalent(u.W / (u.m**2 * u.Hz)):
+            return spectra.to(default_unit, equivalencies=u.spectral_density(self.wavelength))
+        else:
+            raise ValueError(
+           f"Cannot interpret spectral flux units {spectra.unit}. "
+            "Expected per-frequency or per-wavelength flux density."
+            )   
 
     def get_photons(self, spectra, spectra_err=None, mask_nan=True):
         r"""Compute the photon flux from an input spectra.
