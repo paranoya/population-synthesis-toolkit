@@ -12,8 +12,10 @@ class TestObservables(unittest.TestCase):
         print("Setting SSP model")
         self.dummy_wavelength = np.geomspace(100, 1e5, 3000) * u.angstrom
         # Monocromatic SED
-        self.dummy_spectra = np.ones(self.dummy_wavelength.size
+        self.dummy_flam = np.ones(self.dummy_wavelength.size
                                      ) * constants.c / self.dummy_wavelength**2 * 3631 * u.Jy
+        self.dummy_fnu = np.ones(self.dummy_wavelength.size
+                                ) * 3631 * u.Jy
 
     def test_default_dir(self):
         self.assertTrue(
@@ -52,12 +54,22 @@ class TestObservables(unittest.TestCase):
                                    0.32484839450189695),
                         "Unexpected effective transmission value")
 
+        # Interpolate filter to input wavelength array
         filter.interpolate(self.dummy_wavelength)
-        flux, _ = filter.get_fnu(self.dummy_spectra)
+        # Use flam
+        flux, _ = filter.get_fnu(self.dummy_flam)
         self.assertTrue(np.isclose(flux, 3631.0 * u.Jy),
                         f"Unexpected integrated flux value: {flux}")
         
-        mag, _ = filter.get_ab(self.dummy_spectra)
+        mag, _ = filter.get_ab(self.dummy_flam)
+        self.assertTrue(np.isclose(mag, 0.0, atol=1e-4),
+                        f"Unexpected magnitude value: {mag}")
+        # Use fnu
+        flux, _ = filter.get_fnu(self.dummy_fnu)
+        self.assertTrue(np.isclose(flux, 3631.0 * u.Jy),
+                        f"Unexpected integrated flux value: {flux}")
+
+        mag, _ = filter.get_ab(self.dummy_fnu)
         self.assertTrue(np.isclose(mag, 0.0, atol=1e-4),
                         f"Unexpected magnitude value: {mag}")
 
@@ -65,7 +77,7 @@ class TestObservables(unittest.TestCase):
 
     def test_equivalent_width(self):
         eqwidth = observables.EquivalentWidth.from_name("lick_ha")
-        ew, ew_err = eqwidth.compute_ew(self.dummy_wavelength, self.dummy_spectra)
+        ew, ew_err = eqwidth.compute_ew(self.dummy_wavelength, self.dummy_flam)
         self.assertTrue(np.isfinite(ew), "Unexpected EW value")
 
 

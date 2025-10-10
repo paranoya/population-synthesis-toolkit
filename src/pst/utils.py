@@ -67,7 +67,7 @@ def gaussian1d_conv(f, sigma, deltax):
             f_convolved[pixel] = np.sum(f * g)
     return f_convolved
 
-def check_unit(quantity, default_unit=None):
+def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
     """Check the units of an input quantity.
     
     Parameters
@@ -81,12 +81,17 @@ def check_unit(quantity, default_unit=None):
     isq = isinstance(quantity, u.Quantity)
     if isq and default_unit is not None:
         if not quantity.unit.is_equivalent(default_unit):
-            raise u.UnitTypeError(
-                "Input quantity does not have the appropriate units")
+            if equivalence is not None:
+                return quantity.to(default_unit,
+                equivalencies=equivalence(**equiv_kwargs))
+            else:
+                raise u.UnitTypeError(
+                    "Input quantity does not have the appropriate units")
         else:
-            return quantity
+            return quantity.to(default_unit)
+
     elif not isq and default_unit is not None:
-        return quantity * default_unit
+        return quantity << default_unit
     elif not isq and default_unit is None:
         raise ValueError("Input value must be a astropy.units.Quantity")
     else:

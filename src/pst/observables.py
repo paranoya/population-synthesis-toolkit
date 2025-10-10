@@ -291,12 +291,6 @@ class Filter(object):
         self.wavelength= wavelength
         return self.response
 
-    def _check_spectra(self, spectra, default_unit=u.Lsun / u.angstrom / u.cm**2):
-        if spectra is not None and not isinstance(spectra, u.Quantity):
-            return  spectra * default_unit
-        else:
-            return spectra
-
     def get_photons(self, spectra, spectra_err=None, mask_nan=True):
         r"""Compute the photon flux from an input spectra.
         
@@ -325,8 +319,9 @@ class Filter(object):
         photon_flux_err : :class:``astropy.units.Quantity``
             Filter photon flux associated error.
         """
-        spectra = self._check_spectra(spectra)
-        spectra_err = self._check_spectra(spectra_err)
+        spectra = utils.check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
+                                   equivalence=u.spectral_density, wav=self.wavelength)
+
         if mask_nan:
             mask = np.isfinite(spectra)
             photon_flux = np.trapz(
@@ -340,6 +335,10 @@ class Filter(object):
                 x=self.wavelength)
 
         if spectra_err is not None:
+
+            spectra_err = utils.check_unit(spectra_err,
+                                           default_unit=u.Lsun / u.angstrom / u.cm**2,
+                                           equivalence=u.spectral_density, wav=self.wavelength)
             if mask_nan:
                 mask = mask & np.isfinite(spectra_err)
             else:
@@ -455,8 +454,9 @@ class Filter(object):
         --------
         :func:`get_photons`
         """
-        spectra = self._check_spectra(spectra)
-        spectra_err = self._check_spectra(spectra_err)
+        spectra = spectra = utils.check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
+                                   equivalence=u.spectral_density, wav=self.wavelength)
+
         if mask_nan:
             mask = np.isfinite(spectra)
         else:
@@ -466,6 +466,9 @@ class Filter(object):
                                ) / np.trapz(self.response[mask] * self.wavelength[mask], x=self.wavelength[mask])
 
         if spectra_err is not None:
+
+            spectra_err = utils.check_unit(spectra_err, default_unit=u.Lsun / u.angstrom / u.cm**2,
+                                           equivalence=u.spectral_density, wav=self.wavelength)
             if mask_nan:
                 mask = mask & np.isfinite(spectra_err)
             else:
