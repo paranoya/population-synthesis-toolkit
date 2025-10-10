@@ -329,6 +329,9 @@ class Filter(object):
         if spectra.unit.is_equivalent(u.W / (u.m**2 * u.m)):
             return spectra
         elif spectra.unit.is_equivalent(u.W / (u.m**2 * u.Hz)):
+            if self.wavelength is None:
+                raise AttributeError("Attribute `self.wavelength` must be defined"
+                                     + " to convert spectra to Flam units.")
             return spectra.to(default_unit, equivalencies=u.spectral_density(self.wavelength))
         else:
             raise ValueError(
