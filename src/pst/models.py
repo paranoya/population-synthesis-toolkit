@@ -4,6 +4,7 @@ import numpy as np
 from astropy import units as u
 from scipy import special
 from scipy import interpolate
+from scipy.special import betainc
 
 from pst.SSP import SSPBase
 from pst.utils import check_unit, SQRT_2
@@ -269,7 +270,10 @@ class ChemicalEvolutionModel(ABC):
         return model_photometry
 
 
-#-------------------------------------------------------------------------------
+# --------------------------------------------------------------------
+# ---------------------- Analytical models ---------------------------
+# --------------------------------------------------------------------
+
 class SingleBurstCEM(ChemicalEvolutionModel):
     """
     Single-burst star formation model.
@@ -588,8 +592,277 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     def stellar_mass_formed(self, times: u.Quantity):
         return super().stellar_mass_formed(times)
 
+class BetaCEM(ChemicalEvolutionModel):
+    """
+    Chemical evolution model whose cumulative *formed* stellar mass follows a
+    regularised incomplete Beta function (Beta-CMF).
 
-#-------------------------------------------------------------------------------
+    The cumulative fraction of formed mass is
+    :math:`f_\\star(t) = I_x(\\alpha, \\beta)`, with
+    :math:`x = \\frac{t - t_\\mathrm{start}}{t_\\mathrm{end} - t_\\mathrm{start}} \\in [0,1]`,
+    where :math:`I_x` is the regularised incomplete Beta function.
+    The total formed stellar mass at time ``t`` is then
+    :math:`M_\\mathrm{formed}(t) = M_{\\mathrm{formed},\\infty} f_\\star(t)`.
+
+    Parameters
+    ----------
+    mass_today : :class:`astropy.units.Quantity`
+        Asymptotic total *formed* stellar mass by :math:`t_\mathrm{end}`, e.g.
+        in :math:`\mathrm{M_\odot}`.
+    alpha, beta : float, optional
+        Beta-CMF shape parameters (>0). Smaller :math:`\alpha<1` favours earlier
+        build-up (rapid rise), larger :math:`\alpha>1` delays the early growth.
+        Larger :math:`\beta>1` sharpens the late-time truncation. Provide these
+        **or** ``t_mean`` and ``kappa``.
+    t_mean : :class:`astropy.units.Quantity` or float, optional
+        Mean formation time. If a Quantity, it is interpreted in Gyr and will be
+        internally converted to the fractional mean
+        :math:`m=t_\mathrm{mean}/t_\mathrm{end}`. If a float, it must already be
+        the fractional mean :math:`m\in(0,1)`. Provide this **with** ``kappa``
+        as an alternative to ``alpha``/``beta``.
+    kappa : float, optional
+        Concentration :math:`\kappa=\alpha+\beta>0` used together with
+        ``t_mean`` to derive :math:`\alpha,\beta`.
+    today : :class:`astropy.units.Quantity`, optional
+        Age of the Universe (or modelling horizon). Used as ``t_end`` if
+        ``t_end`` is not given. You may also set :attr:`today` later.
+    t_start : :class:`astropy.units.Quantity`, optional
+        Cosmic time when star formation starts. Default is ``0 Gyr``.
+    t_end : :class:`astropy.units.Quantity`, optional
+        Cosmic time when the model stops. If ``None``, uses ``today``. Must be
+        strictly greater than ``t_start``.
+    ism_metallicity_today : float or :class:`astropy.units.Quantity`, optional
+        Present-day ISM metallicity (mass fraction). Returned by
+        :meth:`ism_metallicity`. Default is ``0.02`` (≈ :math:`Z_\odot`).
+
+    Attributes
+    ----------
+    alpha, beta : float
+        Final shape parameters used by the model (derived if ``t_mean``/``kappa``
+        were supplied).
+    t_start, t_end : :class:`astropy.units.Quantity`
+        Time bounds of the model.
+    mass_today : :class:`astropy.units.Quantity`
+        Asymptotic formed stellar mass by :math:`t_\mathrm{end}`.
+    ism_metallicity_today : float or :class:`astropy.units.Quantity`
+        ISM metallicity returned by :meth:`ism_metallicity`.
+
+    """
+
+    def __init__(self,
+                 mass_today: u.Quantity,
+                 alpha: float = None,
+                 beta: float = None,
+                 t_mean: u.Quantity | float = None,
+                 kappa : float = None,
+                 today: u.Quantity | None = None,
+                 t_start: u.Quantity = 0.0 * u.Gyr,
+                 t_end: u.Quantity | None = None,
+                 ism_metallicity_today: float | u.Quantity = 0.02,
+                 **kwargs):
+
+        super().__init__(today=today, **kwargs)
+
+        if alpha <= 0 or beta <= 0:
+            raise ValueError("Beta-CMF shape parameters must be > 0.")
+
+        self.mass_today = check_unit(mass_today, u.Msun)
+        self.t_start = check_unit(t_start, u.Gyr)
+        self._t_end = check_unit(t_end, u.Gyr) if t_end is not None else None
+
+        if t_mean is not None and kappa is not None:
+            alpha, beta = self._alpha_beta_from_mean_concentration(t_mean, kappa)
+        elif alpha is None and beta is None:
+            raise AttributeError("Must provide a value for mean/concentration"
+                                 " or alpha/beta parameters")
+
+        self.alpha = alpha
+        self.beta = beta
+        self.ism_metallicity_today = ism_metallicity_today
+
+    @property
+    def alpha(self):
+        r"""Beta-CMF early-time shape parameter (:math:`\alpha>0`)."""
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self, alpha):
+        if alpha <= 0:
+            raise ValueError("alpha must be > 0.")
+        self._alpha = alpha
+
+    @property
+    def beta(self):
+        r"""Beta-CMF late-time shape parameter (:math:`\beta>0`)."""
+        return self._beta
+
+    @beta.setter
+    def beta(self, beta):
+        if beta <= 0:
+            raise ValueError("beta must be > 0.")
+        self._beta = beta
+
+    @property
+    def t_end(self) -> u.Quantity:
+        """Modelling horizon (defaults to self.today if t_end not explicitly set)."""
+        if self._t_end is not None:
+            return self._t_end
+        if self.today is None:
+            raise ValueError("t_end is not set and `today` is None; set one of them.")
+        return self.today
+
+    @property
+    def t_mean(self):
+        r"""
+        Mean formation time :math:`t_\mathrm{mean} = \mathbb{E}[t]`.
+
+        Returns
+        -------
+        t_mean : :class:`astropy.units.Quantity`
+            Mean time in Gyr. Equal to
+            :math:`t_\mathrm{end}\,\alpha/(\alpha+\beta)`.
+        """
+        return self.t_end * self.alpha / (self.alpha + self.beta)
+    
+    @property
+    def kappa(self):
+        r"""
+        Concentration parameter :math:`\kappa=\alpha+\beta`.
+
+        Returns
+        -------
+        kappa : float
+            Sum of Beta shape parameters.
+        """
+        return self.alpha + self.beta
+
+    def _alpha_beta_from_mean_concentration(self, t_mean, kappa):
+        """
+        Map mean-concentration to Beta shape parameters.
+
+        Parameters
+        ----------
+        t_mean : :class:`astropy.units.Quantity` or float
+            Mean formation time. If Quantity, interpreted in Gyr and converted
+            to the fractional mean :math:`m=t_\mathrm{mean}/t_\mathrm{end}`.
+            If float, it is assumed to be the fractional mean :math:`m`.
+        kappa : float
+            Concentration :math:`\kappa>0`.
+
+        Returns
+        -------
+        alpha, beta : float
+            Beta shape parameters.
+
+        Raises
+        ------
+        ValueError
+            If :math:`m \notin (0,1)` or :math:`\kappa \le 0`.
+        """
+        if isinstance(t_mean, u.Quantity):
+            t_mean /= self.t_end
+            t_mean = t_mean.decompose()
+        if not (0 < t_mean < 1):
+            raise ValueError("m must be in (0,1)")
+        if not (kappa > 0):
+            raise ValueError("kappa must be > 0")
+        return t_mean * kappa, (1 - t_mean) * kappa
+
+    def _rescaled_x(self, time: u.Quantity) -> np.ndarray:
+        """
+        Rescale cosmic time to x in [0,1] over [t_start, t_end].
+
+        Parameters
+        ----------
+        time : astropy.units.Quantity
+            Cosmic time(s) at which to evaluate.
+
+        Returns
+        -------
+        x : ndarray
+            Values in [0,1], clipped outside the interval.
+        """
+        t = check_unit(time, u.Gyr).to_value("Gyr")
+        t0 = self.t_start.to_value("Gyr")
+        t1 = self.t_end.to_value("Gyr")
+        if not (t1 > t0):
+            raise ValueError("t_end must be greater than t_start.")
+        x = (t - t0) / (t1 - t0)
+        return np.clip(x, 0.0, 1.0)
+
+    def stellar_mass_formed(self, time) -> u.Quantity:
+        """
+        Total *formed* stellar mass at cosmic time ``time``.
+
+        Parameters
+        ----------
+        time : astropy.units.Quantity
+            Cosmic time(s) at which to evaluate, in Gyr.
+
+        Returns
+        -------
+        Mformed : astropy.units.Quantity
+            Cumulative formed mass, in Msun.
+        """
+        x = self._rescaled_x(time)
+        # Regularised incomplete Beta function I_x(alpha, beta) in x [0,1]
+        f = betainc(self.alpha, self.beta, x)
+        return (self.mass_today.to(u.Msun).value * f) * u.Msun
+
+    def ism_metallicity(self, time) -> u.Quantity:
+        """TODO"""
+        return np.full(time.size, fill_value=self.ism_metallicity_today)
+
+    def sfr(self, time) -> u.Quantity:
+        """
+        Instantaneous star-formation rate at cosmic time ``time`` (analytic).
+        
+        Parameters
+        ----------
+        time : u.Quantity or float
+            Cosmic time(s) at which to evaluate, in Gyr.
+        """
+        from scipy.special import gammaln
+
+        t = check_unit(time, u.Gyr)
+        x = self._rescaled_x(t)  # clipped to [0,1]
+
+        # log Beta(a,b) = ln Γ(a) + ln Γ(b) − ln Γ(a+b)
+        logB = (gammaln(self.alpha) + gammaln(self.beta)
+                - gammaln(self.alpha + self.beta))
+
+        # Beta PDF in log-space; zero outside (0,1)
+        pdf = np.zeros_like(x, dtype=float)
+        mask = (x > 0.0) & (x < 1.0)
+        if np.any(mask):
+            logpdf = ((self.alpha - 1.0) * np.log(x[mask])
+                      + (self.beta - 1.0) * np.log1p(-x[mask])
+                      - logB)
+            pdf[mask] = np.exp(logpdf)
+
+        return (self.mass_today / (self.t_end - self.t_start)) * pdf
+        
+
+    def t_peak(self) -> u.Quantity | None:
+        """
+        Time of peak SFR for alpha, beta > 1; otherwise returns None.
+
+        Returns
+        -------
+        t_peak : astropy.units.Quantity or None
+            Cosmic time of maximum SFR, if defined.
+        """
+        if (self.alpha > 1.0) and (self.beta > 1.0):
+            t0 = self.t_start.to_value("Gyr")
+            t_span = (self.t_end - self.t_start).to_value("Gyr")
+            x_peak = (self.alpha - 1.0) / (self.alpha + self.beta - 2.0)
+            return (t0 + x_peak * t_span) * u.Gyr
+        return None
+
+# --------------------------------------------------------------------
+# ---------------------- Numerical models ----------------------------
+# --------------------------------------------------------------------
+
 class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
     
