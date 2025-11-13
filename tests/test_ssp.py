@@ -20,8 +20,8 @@ class TestSSP(unittest.TestCase):
     def test_interpolate_sed(self):
         new_wl = np.arange(5000, 8000, 5.5)
         self.ssp_model.interpolate_sed(new_wl)
-        self.assertEqual(self.ssp_model.wavelength.size, new_wl.size - 1)
-        self.assertEqual(self.ssp_model.L_lambda.shape[-1], new_wl.size - 1)
+        self.assertEqual(self.ssp_model.wavelength.size, new_wl.size)
+        self.assertEqual(self.ssp_model.L_lambda.shape[-1], new_wl.size)
 
     def test_regrid(self):
         new_ages = np.array([0.5, 1.0, 5.0])
