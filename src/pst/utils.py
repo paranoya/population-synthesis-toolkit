@@ -472,14 +472,18 @@ def spectra_flux_conserving_interpolation(new_wave, wave, spectra, method="cumul
         spectra_var_v = None
     # Select interpolation method
     if method == "cumulative":
-        int_spec = resample_via_cumulative_masked(wave.value, spectra.value, w_out=new_wave.value,
+        int_spec = resample_via_cumulative_masked(wave.value, spectra.value,
+                                                  w_out=new_wave.value,
                                                   **interp_args)
         int_var = None
         if spectra_err is not None:
-            int_var = resample_via_cumulative_masked(wave.value, spectra_var_v, w_out=new_wave.value,
+            int_var = resample_via_cumulative_masked(wave.value, spectra_var_v,
+                                                     w_out=new_wave.value,
                                                      **interp_args)
     elif method == "binfrac":
-        int_spec, int_var = resample_via_bin_frac(wave, spectra.value, w_out=new_wave.value, var_in=spectra_var_v,
+        int_spec, int_var = resample_via_bin_frac(wave, spectra.value,
+                                                  w_out=new_wave.value,
+                                                  var_in=spectra_var_v,
                                                   **interp_args)
     else:
         raise KeyError(f"Unrecognised interpolation method {method}")
