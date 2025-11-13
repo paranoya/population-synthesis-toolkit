@@ -223,7 +223,7 @@ class SSPBase(object):
             if verbose:
                 print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
-    def interpolate_sed(self, new_wl, verbose=True):
+    def interpolate_sed(self, new_wl, verbose=True, **interp_kwargs):
         """Flux-conserving interpolation.
 
         Parameters
@@ -244,7 +244,7 @@ class SSPBase(object):
             for j in range(self.L_lambda.shape[1]):
                 new_l_lambda[i, j] = flux_conserving_interpolation(
                     new_wl, self.wavelength, self.L_lambda[i, j],
-                    method="binfrac")
+                    **interp_kwargs)
 
         self.L_lambda = new_l_lambda
         self.wavelength = new_wl
