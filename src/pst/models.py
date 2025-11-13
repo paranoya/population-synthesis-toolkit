@@ -130,7 +130,6 @@ class ChemicalEvolutionModel(ABC):
             Stellar masses corresponding to each SSP age and metallicity, in units
             of solar masses.
         """
-
         # define age bins from 0 to t_obs
         age_bins = np.hstack(
             [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
@@ -645,11 +644,12 @@ class TabularCEM(ChemicalEvolutionModel):
         """
         interpolator = interpolate.PchipInterpolator(
            self.table_t, self.table_mass)
-        integral = interpolator(times) << self.table_mass.unit
+        integral = interpolator(times.to_value(self.table_t.unit)
+                                ) << self.table_mass.unit
         integral[times > self.table_t[-1]] = self.table_mass[-1]
         integral[times < self.table_t[0]] = 0
         return integral
-    
+
     @u.quantity_input
     def ism_metallicity(self, times: u.Gyr):
         """Evaluate the integral of the SFR over a given set of times.
