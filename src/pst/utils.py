@@ -464,7 +464,8 @@ def flux_conserving_interpolation(new_wave, wave, spectra, method="cumulative",
     """
     wave = check_unit(wave)
     new_wave = check_unit(new_wave, wave.unit)
-    spectra = check_unit(spectra)
+    if not isinstance(spectra, u.Quantity):
+        spectra = spectra.copy() << u.dimensionless_unscaled
 
     if spectra_err is not None:
             spectra_var_v = spectra_err.to_value(spectra.unit)**2
