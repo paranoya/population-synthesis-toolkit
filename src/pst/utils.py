@@ -416,7 +416,8 @@ def resample_via_bin_frac(
         return f_out, var_out
 
 
-def flux_conserving_interpolation(new_wave, wave, spectra, method="cumulative",
+def flux_conserving_interpolation(new_wave, wave, spectra, *,
+                                  method="binfrac",
                                   spectra_err=None, **interp_args):
     """
     High-level wrapper for flux-conserving spectral resampling.
