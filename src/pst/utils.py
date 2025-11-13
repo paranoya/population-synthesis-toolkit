@@ -416,8 +416,8 @@ def resample_via_bin_frac(
         return f_out, var_out
 
 
-def spectra_flux_conserving_interpolation(new_wave, wave, spectra, method="cumulative",
-                                          spectra_err=None, **interp_args):
+def flux_conserving_interpolation(new_wave, wave, spectra, method="cumulative",
+                                  spectra_err=None, **interp_args):
     """
     High-level wrapper for flux-conserving spectral resampling.
 
@@ -490,34 +490,6 @@ def spectra_flux_conserving_interpolation(new_wave, wave, spectra, method="cumul
     if spectra_var_v is None:
         return int_spec << spectra.unit
     return int_spec << spectra.unit, int_var << spectra.unit**2
-
-def flux_conserving_interpolation(new_wave, wave, spectra):
-    """Interpolate a spectra to a new grid of wavelengths preserving the flux density.
-    
-    Parameters
-    ----------
-    new_wave : np.ndarray
-        New grid of wavelengths
-    wave : np.ndarray
-        Original grid of wavelengths
-    spectra : np.ndarray
-        Spectra associated to `wave`.
-    
-    Returns
-    -------
-    interp_spectra : np.ndarray
-        Interpolated spectra to `new_wave`
-    """
-    wave_limits = 1.5 * wave[[0, -1]] - 0.5 * wave[[1, -2]]
-    wave_edges = np.hstack([wave_limits[0], (wave[1:] + wave[:-1])/2, wave_limits[1]])
-
-    new_wave_limits = 1.5 * new_wave[[0, -1]] - 0.5 * new_wave[[1, -2]]
-    new_wave_edges = np.hstack([new_wave_limits[0], (new_wave[1:] + new_wave[:-1])/2, new_wave_limits[1]])
-    cumulative_spectra = np.cumsum(spectra * np.diff(wave_edges))
-    cumulative_spectra = np.insert(cumulative_spectra, 0, 0)
-    new_cumulative_spectra = np.interp(new_wave_edges, wave_edges, cumulative_spectra)
-    interp_spectra = np.diff(new_cumulative_spectra) / np.diff(new_wave_edges)
-    return interp_spectra
 
 def gaussian1d_conv(f, sigma, deltax):
     """Apply a gaussian convolution to a 1D array f(x).
