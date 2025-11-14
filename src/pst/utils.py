@@ -463,35 +463,52 @@ def flux_conserving_interpolation(new_wave, wave, spectra, *,
     -----
     - For rigorous covariance propagation, prefer `method="binfrac"`.
     """
-    wave = check_unit(wave)
-    new_wave = check_unit(new_wave, wave.unit)
-    if not isinstance(spectra, u.Quantity):
-        spectra = spectra.copy() << u.dimensionless_unscaled
+    if isinstance(wave, u.Quantity):
+        new_wave = check_unit(new_wave, wave.unit)
+        wl_unit = wave.unit
+        wl = wave.value
+        new_wl = new_wave.value
+    elif isinstance(new_wave, u.Quantity):
+        raise ValueError("New wavelength is a Quantity but original wavelength"
+                         " is not")
+    else:
+        wl_unit = 1.0
+        wl = wave
+        new_wl = new_wave
+
+    if isinstance(spectra, u.Quantity):
+        spec_unit = spectra.unit
+        spec = spectra.value
+    else:
+        spec_unit = 1.0
+        spec = spectra
 
     if spectra_err is not None:
-            spectra_var_v = spectra_err.to_value(spectra.unit)**2
+            if isinstance(spectra_err, u.Quantity):
+                spectra_var_v = spectra_err.to_value(spec_unit)**2
+            else:
+                spectra_var_v = spectra_err**2
     else:
         spectra_var_v = None
     # Select interpolation method
     if method == "cumulative":
-        int_spec = resample_via_cumulative_masked(wave.value, spectra.value,
-                                                  w_out=new_wave.value,
+        int_spec = resample_via_cumulative_masked(wl, spec, w_out=new_wl,
                                                   **interp_args)
         int_var = None
         if spectra_err is not None:
-            int_var = resample_via_cumulative_masked(wave.value, spectra_var_v,
-                                                     w_out=new_wave.value,
+            int_var = resample_via_cumulative_masked(wl, spectra_var_v,
+                                                     w_out=new_wl,
                                                      **interp_args)
     elif method == "binfrac":
-        int_spec, int_var = resample_via_bin_frac(wave, spectra.value,
-                                                  w_out=new_wave.value,
+        int_spec, int_var = resample_via_bin_frac(wl, spec,
+                                                  w_out=new_wl,
                                                   var_in=spectra_var_v,
                                                   **interp_args)
     else:
         raise KeyError(f"Unrecognised interpolation method {method}")
     if spectra_var_v is None:
-        return int_spec << spectra.unit
-    return int_spec << spectra.unit, int_var << spectra.unit**2
+        return int_spec * spec_unit
+    return int_spec * spec_unit, int_var * spec_unit**2
 
 def gaussian1d_conv(f, sigma, deltax):
     """Apply a gaussian convolution to a 1D array f(x).
