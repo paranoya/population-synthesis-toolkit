@@ -223,7 +223,7 @@ class SSPBase(object):
             if verbose:
                 print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
-    def interpolate_sed(self, new_wl, verbose=True, **interp_kwargs):
+    def interpolate_sed(self, new_wl, verbose=True, log=False, **interp_kwargs):
         """Flux-conserving interpolation.
 
         Parameters
@@ -236,6 +236,13 @@ class SSPBase(object):
         if verbose:
             print('[SSP] Interpolating SSP SEDs')
 
+        if log:
+            target_wl = np.log(new_wl.to_value(self.wavelength.unit))
+            ref_wl = np.log(self.wavelength.value)
+        else:
+            target_wl = new_wl
+            ref_wl = self.wavelength
+
         new_l_lambda = np.empty(
             shape=(self.metallicities.size, self.ages.size,
                    new_wl.size), dtype=np.float32) * self.L_lambda.unit
@@ -243,7 +250,7 @@ class SSPBase(object):
         for i in range(self.L_lambda.shape[0]):
             for j in range(self.L_lambda.shape[1]):
                 new_l_lambda[i, j] = flux_conserving_interpolation(
-                    new_wl, self.wavelength, self.L_lambda[i, j],
+                    target_wl, ref_wl, self.L_lambda[i, j],
                     **interp_kwargs)
 
         self.L_lambda = new_l_lambda
