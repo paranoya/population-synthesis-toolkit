@@ -9,7 +9,7 @@ from astropy.table import Table
 from astropy import units as u
 from astropy import units
 
-from pst.utils import check_unit
+from pst.utils import check_unit, flux_conserving_interpolation
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
@@ -223,32 +223,35 @@ class SSPBase(object):
             if verbose:
                 print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
-    def interpolate_sed(self, new_wl_edges, verbose=True):
+    def interpolate_sed(self, new_wl, verbose=True, log=False, **interp_kwargs):
         """Flux-conserving interpolation.
 
         Parameters
         ----------
-        - new_wl_edges: bin edges of the new interpolated points.
+        - new_wl: bin centers of the new interpolated points.
         """
-        if not isinstance(new_wl_edges, units.Quantity):
-            new_wl_edges *= self.wavelength.unit
+        if not isinstance(new_wl, units.Quantity):
+            new_wl = new_wl << self.wavelength.unit
 
-        new_wl = (new_wl_edges[1:] + new_wl_edges[:-1]) / 2
-        dwl = np.diff(new_wl_edges)
-        ori_dwl = np.hstack((np.diff(self.wavelength),
-                             self.wavelength[-1] - self.wavelength[-2]))
         if verbose:
             print('[SSP] Interpolating SSP SEDs')
+
+        if log:
+            target_wl = np.log(new_wl.to_value(self.wavelength.unit))
+            ref_wl = np.log(self.wavelength.value)
+        else:
+            target_wl = new_wl
+            ref_wl = self.wavelength
+
         new_l_lambda = np.empty(
             shape=(self.metallicities.size, self.ages.size,
                    new_wl.size), dtype=np.float32) * self.L_lambda.unit
 
         for i in range(self.L_lambda.shape[0]):
             for j in range(self.L_lambda.shape[1]):
-                f = np.interp(new_wl_edges, self.wavelength,
-                              np.cumsum(self.L_lambda[i, j] * ori_dwl))
-                new_flux = np.diff(f) / dwl
-                new_l_lambda[i, j] = new_flux
+                new_l_lambda[i, j] = flux_conserving_interpolation(
+                    target_wl, ref_wl, self.L_lambda[i, j],
+                    **interp_kwargs)
 
         self.L_lambda = new_l_lambda
         self.wavelength = new_wl
