@@ -122,6 +122,19 @@ class TestModels(unittest.TestCase):
         real_mass = 1 - np.exp(- self.dummy_times / 3 / u.Gyr)
         self.assertTrue(np.allclose(mass, real_mass * u.Msun, rtol=1e-2))
 
+    def test_cc25tabular(self):
+        tau = np.array([0.1, 1.0]) << u.Gyr
+        ssfr = np.array([0.1, 1.0]) << (1 / u.Gyr)
+        model = models.CC25TabularCEM(
+            tau_ssfr=tau, ssfr=ssfr, mass_today=1.0 * u.Msun,
+            today=13.7 << u.Gyr,
+            ism_metallicity_today=0.02, alpha_powerlaw=1.0)
+
+        self.assertTrue(
+            np.all(model.table_mass.to("Msun") == np.array([0., 0., 0.99, 1.0]) << u.Msun))
+        self.assertTrue(
+            np.all(model.table_t.to("Gyr") == np.array([0., 12.7, 13.6, 13.7]) << u.Gyr))
+
     def test_particle_grid(self):
         n_particles = 10000
         particles_z = 10**(np.random.uniform(-4, 0.3, n_particles))

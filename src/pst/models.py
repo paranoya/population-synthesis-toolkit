@@ -684,7 +684,6 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     --------
     :class:`TabularCEM`
     :class:`MassPropMetallicityMixin`
-
     """
     def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today,
                  mass_today, **kwargs):
@@ -695,6 +694,42 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
         # but never used
         metallicity = np.zeros(times.size)
         super().__init__(times, masses, metallicity, **kwargs)
+
+class CC25TabularCEM(TabularCEM_ZPowerLaw):
+    r"""Chemical evolution model based on the SFH parameterization from Corcho-Caballero et al. (2025).
+
+    The SFH is defined in terms of the average specific star formation rate (``ssfr``)
+    several timescales (``tau_ssfr``), expressed in lookback time with respect
+    to the age of the Universe at the time of observation, related by the expression:
+
+    .. math::
+        M_\star(t) = M_{\rm today} \cdot \left(1 - \tau_{\rm ssfr} \cdot ssfr \right)
+
+    See Also
+    --------
+    :class:`TabularCEM_ZPowerLaw`
+    :class:`MassPropMetallicityMixin`
+    """
+    def __init__(self, tau_ssfr, ssfr, alpha_powerlaw, ism_metallicity_today,
+                 mass_today=1, **kwargs):
+        self.today = kwargs["today"]
+        self.tau_ssfr = check_unit(tau_ssfr, u.Gyr)
+        # Check positive tau
+        assert np.all(self.tau_ssfr > 0 << u.Gyr), "All tau_ssfr values must be positive"
+        # Check tau smaller than age of the Universe
+        if np.any(self.tau_ssfr > self.today):
+            raise ValueError("All tau_ssfr values must be less than 'today'")
+        self.ssfr = check_unit(ssfr, 1 / u.Gyr)
+        self.mass_today = check_unit(mass_today, u.Msun)
+        # Compute mass fraction array from ssfr and tau_ssfr
+        times = self.today - self.tau_ssfr
+        times = np.insert(times, (0, times.size), (0 << u.Gyr, self.today))
+        masses = self.mass_today * (1 - self.tau_ssfr * self.ssfr)
+        masses = np.insert(masses, (0, masses.size),
+                           (0.0 << u.Msun, self.mass_today))
+        super().__init__(times, masses, alpha_powerlaw,
+                         ism_metallicity_today, self.mass_today, **kwargs)
+
 
 
 class ParticleListCEM(ChemicalEvolutionModel):
