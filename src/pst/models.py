@@ -718,8 +718,14 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
         assert np.all(self.tau_ssfr > 0 << u.Gyr), "All tau_ssfr values must be positive"
         # Check tau smaller than age of the Universe
         if np.any(self.tau_ssfr > self.today):
-            raise ValueError("All tau_ssfr values must be less than 'today'")
-        self.ssfr = check_unit(ssfr, 1 / u.Gyr)
+            raise ValueError(
+                "All tau_ssfr values must be less than 'today'"
+                + f" ({self.today.to_value('Gyr')} Gyr)"
+                + f", but max(tau_ssfr) = {np.max(self.tau_ssfr).to_value('Gyr')} Gyr")
+
+        sort_idx = np.argsort(self.tau_ssfr)[::-1]
+        self.tau_ssfr = self.tau_ssfr[sort_idx]  # Sort descending
+        self.ssfr = check_unit(ssfr, 1 / u.Gyr)[sort_idx]
         self.mass_today = check_unit(mass_today, u.Msun)
         # Compute mass fraction array from ssfr and tau_ssfr
         times = self.today - self.tau_ssfr
