@@ -4,6 +4,19 @@ from astropy import units as u
 from astropy import constants
 from pst import dust, SSP
 
+class TestUtils(unittest.TestCase):
+    def test_modified_blackbody(self):
+        wavelength = np.geomspace(10, 1e4, 1000) * u.um
+        temperature = 30 * u.K
+        beta = 1.5
+
+        mbb_spectrum = dust.modified_blackbody(
+            wavelength, T=temperature, beta=beta)
+
+        self.assertEqual(mbb_spectrum.unit, u.Unit("erg / (Hz s sr cm2)"))
+        self.assertTrue(np.isfinite(mbb_spectrum).all())
+
+
 class TestDust(unittest.TestCase):
 
     @classmethod
@@ -33,6 +46,40 @@ class TestDust(unittest.TestCase):
 
         reddened_ssp = dust_screen.redden_ssp_model(self.ssp_model, a_v=1.0)
 
+class TestCasey2012(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        print("Testing Casey 2012 IR emission model")
+        self.model = dust.Casey2012Emission()
+        self.dummy_wl = np.geomspace(0.1, 1000, 100) << u.um
+
+    def test_lamda_pivot(self):
+        lam_c = self.model._lambda_pivot(t_dust=35 << u.K, alpha=2.0)
+        print(lam_c)
+        self.assertEqual(lam_c.unit, u.um)
+
+    def test_shape_nu(self):
+
+        mbb, pl = self.model._shape_l_nu(self.dummy_wl, t_dust=55 << u.K, beta=1.6, alpha=2)
+        # from matplotlib import pyplot as plt
+        # plt.figure()
+        # plt.plot(self.dummy_wl, pl)
+        # plt.plot(self.dummy_wl, mbb)
+        # plt.yscale("log")
+        # plt.xscale("log")
+        # plt.show()
+    
+    def test_emission_spec(self):
+        spec = self.model.emission_spectrum(self.dummy_wl, t_dust=55 << u.K, beta=1.6, alpha=2,
+                                               lum_ir=1e11 << u.Lsun)
+        from matplotlib import pyplot as plt
+        plt.figure()
+        plt.plot(self.dummy_wl, spec)
+        plt.yscale("log")
+        plt.xscale("log")
+        plt.ylabel("Fnu " + str(spec.unit))
+        plt.show()
 
 if __name__ == '__main__':
     unittest.main()
