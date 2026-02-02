@@ -571,3 +571,15 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
     else:
         return quantity
 
+def broadcast_to_axis(x: np.ndarray, target_ndim: int, axis: int) -> np.ndarray:
+    """
+    Expand 1D array x (wavelength axis) to match target ndim, placing wavelength on `axis`.
+    """
+    if x.ndim != 1:
+        raise ValueError("Expected 1D array for wavelength-dependent quantity.")
+    if target_ndim == 1:
+        return x
+    # Create shape like (1,1,...,N,...,1) with N at axis
+    shape = [1] * target_ndim
+    shape[axis] = x.size
+    return x.reshape(shape)
