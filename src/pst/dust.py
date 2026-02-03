@@ -11,7 +11,7 @@ This module is intended for applying dust extinction or emission to stellar spec
 to synthetic stellar populations or other types of spectra.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from abc import ABC, abstractmethod
 
@@ -23,6 +23,7 @@ import numpy as np
 import extinction as _extinction_lib
 
 from pst.utils import check_unit, broadcast_to_axis
+from pst.sed import SedComponent
 
 ## Utils ###
 
@@ -33,6 +34,7 @@ def modified_blackbody(
     beta: float,
     lam_0: Optional[u.Quantity] = None,
     lam_ref: u.Quantity = 100 * u.um,
+    per_freq=False
 ) -> u.Quantity:
     """
     Modified blackbody (greybody) spectrum.
@@ -80,8 +82,12 @@ def modified_blackbody(
         # optically thin: emissivity ∝ nu^beta, make it dimensionless with a reference
         nu_ref = (const.c / lam_ref).to(u.Hz)
         factor = (nu / nu_ref) ** beta  # dimensionless
+    if per_freq:
+        return Bnu * factor
+    else:
+        return (Bnu * factor).to("erg / (Angstrom s sr cm2)", 
+                                 u.spectral_density(lam))
 
-    return Bnu * factor
 
 ### Attenuation curve (wavelength dependence) ###
 
@@ -89,7 +95,7 @@ class AttenuationCurve(ABC):
     """
     Dust attenuation curve.
 
-    Must implement A_lambda in magnitudes for given A_V.
+    Must implement A_lambda in magnitudes for given a_v.
     """
     name: str
 
@@ -101,7 +107,7 @@ class AttenuationCurve(ABC):
     def tau_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> np.ndarray:
         """Convert magnitudes to optical depth tau: A = 1.086 * tau."""
         a_lam = self.a_lambda(wavelength, a_v=a_v, **params).to_value(u.mag)
-        return a_lam / 1.086
+        return a_lam / 1.086 << u.dimensionless_unscaled
 
     def attenuation_factor(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
         """Return multiplicative attenuation factor: 10^(-0.4 a_lambda)."""
@@ -117,7 +123,7 @@ class ExtinctionLibCurve(AttenuationCurve):
     Notes
     -----
     The `extinction` package functions generally expect wavelength in Angstrom (float),
-    and return A_lambda (magnitudes) given (A_V, R_V).
+    and return A_lambda (magnitudes) given (a_v, R_V).
     """
     name: str
 
@@ -157,24 +163,24 @@ class AttenuationModel(ABC):
 @dataclass
 class DustScreenAttenuation(AttenuationModel):
     """
-    Simple foreground screen: factor = curve.factor(wave, A_V).
+    Simple foreground screen: factor = curve.factor(wave, a_v).
     """
-    curve: AttenuationCurve | str
+    curve: AttenuationCurve | str = "ccm89"
 
     def __post_init__(self):
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
 
-    def attenuation_factor(self, wavelength: u.Quantity, *, A_V: float = 1.0, **params) -> u.Quantity:
-        return self.curve.factor(wavelength, A_V=float(A_V), **params)
+    def attenuation_factor(self, wavelength: u.Quantity, *, a_v: float = 0.0, **params) -> u.Quantity:
+        return self.curve.attenuation_factor(wavelength, a_v=float(a_v), **params)
 
 
 @dataclass
 class CharlotFall00Attenuation(AttenuationModel):
     """
     Charlot & Fall (2000)-style two-component attenuation:
-    - young populations get A_V_young
-    - old populations get A_V_old
+    - young populations get a_v_young
+    - old populations get a_v_old
     threshold set by young_age
 
     """
@@ -192,73 +198,28 @@ class CharlotFall00Attenuation(AttenuationModel):
         self,
         wavelength: u.Quantity,
         *,
-        age: u.Quantity,
         a_v_young: float = 1.0,
         a_v_old: float = 0.3,
         **params,
     ) -> u.Quantity:
         wavelength = check_unit(wavelength, u.AA)
-        age = check_unit(age, u.Gyr)
 
-        age = np.atleast_1d(age)
-        young = age < self.young_age
-
-        f_y = self.curve[0].factor(wavelength, a_v=float(a_v_young),
+        f_y = self.curve[0].attenuation_factor(wavelength, a_v=float(a_v_young),
                                    **params).to_value(u.dimensionless_unscaled)
-        f_o = self.curve[1].factor(wavelength, a_v=float(a_v_old),
+        f_o = self.curve[1].attenuation_factor(wavelength, a_v=float(a_v_old),
                                    **params).to_value(u.dimensionless_unscaled)
 
-        out = np.empty((age.size, wavelength.size), dtype=float)
-        out[young] = f_y
-        out[~young] = f_o
-        return out * u.dimensionless_unscaled
+        return np.array([f_y, f_o]) << u.dimensionless_unscaled
 
 # -----------------------------------------------------------------------------
-# Emission models
+# Dust Emission models
 # -----------------------------------------------------------------------------
-
-class EmissionModel(ABC):
-    """
-    Dust emission component.
-
-    Returns an additive spectrum on the wavelength grid.
-    """
-
-    @abstractmethod
-    def emission_spectrum(self, wavelength: u.Quantity, **params) -> u.Quantity:
-        """
-        Returns emission spectrum as Quantity.
-
-        The *units* are determined by your chosen normalization parameterization
-        (e.g., L_IR scaling or amplitude in L_lambda). Keep this consistent with PST.
-        """
-        raise NotImplementedError
-
-    def add_to(self, wavelength, spectra, axis: int = -1, **params):
-        wavelength = check_unit(wavelength, u.AA)
-        em = self.emission_spectrum(wavelength, **params)
-        em_val = em.to_value(em.unit)
-        em_val = broadcast_to_axis(em_val, np.ndim(spectra), axis=axis)
-        return spectra + em_val * em.unit
-
-
 @dataclass
-class Casey2012Emission(EmissionModel):
-    r"""
-    Casey (2012) IR SED parameterization
-
-    This model combines a modified blackbody (MBB) component for the cold dust
-    emission with a mid-infrared (MIR) power-law component to account for warmer
-    dust and PAH features. The two components are smoothly joined at a pivot wavelength
-    by the following expression
-
-    .. math::
-        S(\lambda) = N_{bb} \frac{\left(1 - e^{-(\lambda_0/\lambda)^\beta}\right)\left(\frac{c}{\lambda}\right)^3}{e^{hc/\lambda kT} - 1} + N_{pl} \lambda^{\alpha} e^{-(\lambda/\lambda_c)^2}
-
-    """
-
+class Casey2012DustComponent(SedComponent):
     optically_thin: bool = False
-    ir_range_default: Tuple[u.Quantity, u.Quantity] = (8*u.um, 1000*u.um)
+    ir_range: Tuple[u.Quantity, u.Quantity] = (8 << u.um, 1000 << u.um)
+    default_unit = u.Lsun / u.AA
+    min_wavelength = 1 << u.um  # rest-frame cutoff
 
     def emission_spectrum(
         self,
@@ -267,98 +228,123 @@ class Casey2012Emission(EmissionModel):
         t_dust: float = 35.0,
         beta: float = 1.5,
         alpha: float = 2.0,
-        lam0: Optional[u.Quantity] = None,
+        lam0: Optional[u.Quantity] = 200 << u.um,
         lum_ir: Optional[u.Quantity] = None,
-        lam_pivot: u.Quantity = None,
+        lam_pivot: Optional[u.Quantity] = None,
+        **kwargs,
     ) -> u.Quantity:
-        """
-        Return L_lambda-like spectrum for dust emission.
-
-        Notes
-        -----
-        This is a *draft* implementation: the exact Casey2012 join functional form
-        is encapsulated in `_shape_nu()` so you can refine it without touching the API.
-        """
-        wav = check_unit(wavelength, u.AA)
-        t_dust = check_unit(t_dust, u.K)
+        lam = check_unit(wavelength, u.AA).to(u.um)   # work in um internally
+        T = check_unit(t_dust, u.K)
 
         if lam_pivot is None:
-            lam_pivot = self._lambda_pivot(t_dust, alpha)
+            lam_pivot = self._lambda_pivot(T, alpha).to(u.um)
+        if lam0 is not None:
+            lam0 = check_unit(lam0, u.um).to(u.um)
 
-        # Build components
-        mbb, powlaw = self._shape_l_nu(
-            lam=wav,
-            t_dust=t_dust,
-            beta=beta,
-            alpha=alpha,
-            lam0=lam0,
-            lam_pivot=lam_pivot)
+        # --- Build an *arbitrary-shape* L_lambda template ---
+        mbb_lam, pl_lam = self._shape_l_lambda(
+            lam=lam, t_dust=T, beta=beta, alpha=alpha, lam0=lam0, lam_pivot=lam_pivot
+        )
+        l_lamda_shape = mbb_lam + pl_lam  # arbitrary normalization
 
-        # Combine components
-        shape_nu = (mbb.to_value("Jy /sr") + powlaw.to_value("Jy /sr")) << u.Jy
+        # cutoff at short wavelengths
+        l_lamda_shape[lam < self.min_wavelength.to(u.um)] = 0.0
 
+        # --- Normalize to lum_ir over 8-1000 um, if requested ---
         if lum_ir is not None:
-            lum_ir = check_unit(lum_ir)
-            # Normalize to given L_IR over 8-1000 micron
-            ir_min, ir_max = self.ir_range_default
-            ir_mask = (wav >= ir_min) & (wav <= ir_max)
-            wav_ir = wav[ir_mask]
+            lum_ir = check_unit(lum_ir, u.Lsun)
+            wl_min, wl_max = self.ir_range
+            # integrate_sed expects same wavelength unit as array; give in um
+            l_ir_norm = self.integrate_sed(lam, l_lamda_shape,
+                                           wl_min.to(u.um), wl_max.to(u.um))
+            # protect against divide-by-zero if shape has no support in IR
+            if l_ir_norm <= 0:
+                raise ValueError("Dust template has zero integrated luminosity in the IR range; cannot normalize.")
+            l_lamda_shape = l_lamda_shape * (lum_ir / l_ir_norm).decompose()
 
-            shape_nu_ir = shape_nu[ir_mask]
-            # L_IR = integral L_nu dnu = integral L_nu * c / lambda^2 d lambda
-            integrand_ir = shape_nu_ir * (const.c / wav_ir**2)
-            l_ir_model = np.trapz(integrand_ir, wav_ir)
-            print(l_ir_model.to("W / m2"))
-            norm_factor = (lum_ir / l_ir_model).decompose()
-            print(norm_factor)
-            shape_nu *= norm_factor
-        # Convert to L_lambda-like quantity: L_lambda = L_nu * c / lambda^2
-        # shape_lam = (shape_nu_q * u.speed_of_light / wav**2).to(u.W / u.m)
-        return shape_nu
+        # return in PST canonical units on the original wavelength grid (AA)
+        return l_lamda_shape.to(self.default_unit, equivalencies=u.spectral_density(wavelength))
 
-    def _shape_l_nu(
+    def _shape_l_lambda(
         self,
         lam: u.Quantity,
         *,
         t_dust: u.Quantity,
         beta: float,
         alpha: float,
+        lam0: Optional[u.Quantity] = 200 << u.um,
         lam_pivot: u.Quantity = None,
-        lam0: Optional[u.Quantity]= 200 << u.um,
-    ) -> np.ndarray:
+    ) -> Tuple[u.Quantity, u.Quantity]:
         """
-        Draft spectral shape in frequency space.
+        Return two components (MBB and MIR power-law) as an *L_lambda-shaped* template.
 
-        You should replace the join with the exact Casey2012 prescription you prefer.
-        The important thing is: keep it smooth and monotonic around the pivot.
+        The absolute normalization is arbitrary; caller normalizes via lum_ir.
+        """
+        # Use BlackBody in wavelength form as a physically-motivated shape
+        bb = BlackBody(temperature=t_dust)
 
-        Returns
-        -------
-        shape_nu : ndarray
-            Dimensionless shape proportional to L_nu.
-        """
-        if lam_pivot is None:
-            lam_pivot = self._lambda_pivot(t_dust, alpha)
-        # Cold-dust modified blackbody
-        mbb = modified_blackbody(lam, T=t_dust, beta=beta, lam_0=lam0 if lam0 is not None else None)
-        # MIR power-law term
-        powlaw = (lam/lam_pivot)**alpha * np.exp(-(lam/lam_pivot)**2)
-        # Power-law contribution
-        mbb_pivot = modified_blackbody(lam_pivot, T=t_dust, beta=beta, lam_0=lam0).to(u.Jy/u.sr)
-        powlaw *= mbb_pivot  # Jy/sr
-        return mbb.to(u.Jy / u.sr), powlaw.to(u.Jy / u.sr)
-    
-    def _lambda_pivot(self, t_dust: u, alpha: float) -> u.Quantity:
-        """
-        Estimate pivot wavelength where MBB and power-law components intersect.
+        # B_lambda has units W/(m2 m sr); we'll treat it as a shape and renormalize anyway
+        Blam = bb(lam)
 
-        This is a rough estimate; you may want to refine it.
-        """
-        if self.optically_thin:
-            lam_c = 1 / (t_dust.to_value(u.K) + (26.68 + 6.246 * alpha))
+        if lam0 is not None:
+            tau = (lam0 / lam) ** beta
+            emiss = -np.expm1(-tau) * u.dimensionless_unscaled
         else:
-            lam_c = 1 / ((26.68 + 6.246 * alpha)**-2 + (1.905e-4 + 7.243e-5 * alpha) * t_dust.to_value(u.K))
-        return lam_c << u.um
+            # optically thin emissivity proportional to nu^beta ~ lam^{-beta}
+            emiss = (lam_pivot / lam) ** beta * u.dimensionless_unscaled
+
+        mbb = Blam * emiss
+
+        # MIR power-law in lambda, with Gaussian cutoff
+        pl_shape = (lam / lam_pivot) ** alpha * np.exp(-(lam / lam_pivot) ** 2)
+
+        # Join by matching at pivot (same as your previous approach)
+        mbb_piv = (bb(lam_pivot) * (
+            (-np.expm1(-((lam0/lam_pivot)**beta)) if lam0 is not None else 1.0)
+        ) * u.dimensionless_unscaled)
+
+        pl = (mbb_piv * pl_shape).to(mbb.unit)
+
+        return mbb, pl
+
+    def _lambda_pivot(self, t_dust: u.Quantity, alpha: float) -> u.Quantity:
+        b1, b2, b3, b4 = 26.68, 6.246, 1.905e-4, 7.243e-5
+        lam_c_um = 0.75 / (((b1 + b2 * alpha) ** -2) + (b3 + b4 * alpha) * t_dust.to_value(u.K))
+        return lam_c_um * u.um
+
+@dataclass
+class CalorimetricDustWrapper(SedComponent):
+    source: SedComponent
+    attenuation: AttenuationModel
+    dust: SedComponent
+    default_unit = u.Lsun / u.AA
+    ir_range: Tuple[u.Quantity, u.Quantity] = (8*u.um, 1000*u.um)
+
+    def emission_spectrum(self, wavelength: u.Quantity, **params) -> u.Quantity:
+        lam = check_unit(wavelength, u.AA)
+        f = self.attenuation.attenuation_factor(lam, **params).to_value(u.dimensionless_unscaled)
+
+        if isinstance(self.attenuation, CharlotFall00Attenuation):
+            # For stellar sources, split the SED into young and old components
+            params["age_bin_edges"] = u.Quantity(
+                [0, self.attenuation.young_age.value,
+                (15 << u.Gyr).to_value(self.attenuation.young_age.unit)],
+                self.attenuation.young_age.unit)
+            Lsrc = self.source.emission_spectrum(lam, **params).to(self.default_unit)
+            if Lsrc.ndim != 2:
+                raise ValueError("CF00 requires binned stellar SED output with shape (n_bins, n_wave).")
+            Latt = Lsrc * f
+            Labs_spec = np.sum(Lsrc - Latt, axis=0)
+            Latt = np.sum(Latt, axis=0)
+            
+        else:
+            Lsrc = self.source.emission_spectrum(lam, **params).to(self.default_unit)
+            Latt = Lsrc * f
+            Labs_spec = Lsrc - Latt
+
+        Labs = self.integrate_sed(lam, Labs_spec)
+        Ldust = self.dust.emission_spectrum(lam, lum_ir=Labs, **params).to(self.default_unit)
+        return Latt + Ldust
 
 
 class DustModelBase(ABC):
