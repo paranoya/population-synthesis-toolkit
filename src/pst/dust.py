@@ -23,7 +23,7 @@ import numpy as np
 import extinction as _extinction_lib
 
 from pst.utils import check_unit, broadcast_to_axis
-from pst.sed import SedComponent
+from pst.sed import SedComponent, StellarComponent
 
 ## Utils ###
 
@@ -93,103 +93,422 @@ def modified_blackbody(
 
 class AttenuationCurve(ABC):
     """
-    Dust attenuation curve.
+    Base class for dust attenuation curves.
 
-    Must implement A_lambda in magnitudes for given a_v.
+    This interface defines a wavelength dependent attenuation curve expressed
+    as A_lambda in magnitudes for a given V band attenuation a_v. Implementations
+    must provide a_lambda, and the base class provides convenience conversions
+    to optical depth and multiplicative attenuation factors.
+
+    Notes
+    -----
+    The primary method a_lambda returns attenuation in magnitudes. The helper
+    methods implement common conversions:
+
+    - tau_lambda converts magnitudes to optical depth using A = 1.086 * tau
+    - attenuation_factor returns the multiplicative factor applied to spectra
+      as 10**(-0.4 * A_lambda)
+
+    Attributes
+    ----------
+    name : str
+        Name identifying the curve or law.
     """
+
     name: str
 
     @abstractmethod
     def a_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
-        """Return attenuation in magnitudes (same length as wavelength)."""
+        """
+        Compute the attenuation A_lambda in magnitudes.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v : float
+            V band attenuation in magnitudes.
+        **params
+            Additional curve parameters. Subclasses may define parameters such
+            as r_v, bump strength, or slope modifiers.
+
+        Returns
+        -------
+        a_lam : astropy.units.Quantity
+            Attenuation in magnitudes with the same shape as wavelength.
+        """
         raise NotImplementedError
 
-    def tau_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> np.ndarray:
-        """Convert magnitudes to optical depth tau: A = 1.086 * tau."""
+    def tau_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
+        """
+        Convert attenuation in magnitudes to optical depth.
+
+        Uses the relation A = 1.086 * tau.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the optical depth is evaluated.
+        a_v : float
+            V band attenuation in magnitudes.
+        **params
+            Additional curve parameters forwarded to a_lambda.
+
+        Returns
+        -------
+        tau : astropy.units.Quantity
+            Optical depth as a dimensionless quantity with the same shape as
+            wavelength.
+        """
         a_lam = self.a_lambda(wavelength, a_v=a_v, **params).to_value(u.mag)
-        return a_lam / 1.086 << u.dimensionless_unscaled
+        return (a_lam / 1.086) << u.dimensionless_unscaled
 
     def attenuation_factor(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
-        """Return multiplicative attenuation factor: 10^(-0.4 a_lambda)."""
+        """
+        Compute the multiplicative attenuation factor.
+
+        The factor is defined as 10**(-0.4 * A_lambda), suitable for multiplying
+        spectra expressed as flux or luminosity densities.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v : float
+            V band attenuation in magnitudes.
+        **params
+            Additional curve parameters forwarded to a_lambda.
+
+        Returns
+        -------
+        factor : astropy.units.Quantity
+            Dimensionless attenuation factor with the same shape as wavelength.
+        """
         a_lam = self.a_lambda(wavelength, a_v=a_v, **params).to_value(u.mag)
         f = 10.0 ** (-0.4 * a_lam)
         return f << u.dimensionless_unscaled
 
+
 @dataclass
-class ExtinctionLibCurve(AttenuationCurve):
+class PowerLawAttenuationCurve(AttenuationCurve):
     """
-    Thin wrapper around the `extinction` python package (ccm89, odonnell94, calzetti00, ...).
+    Power law attenuation curve.
+
+    This class implements a simple attenuation law where A_lambda follows a
+    power law in wavelength relative to a reference wavelength.
+
+    The curve is commonly used as a building block in two component attenuation
+    prescriptions such as Charlot and Fall 2000, where different normalizations
+    are applied to young and old stellar populations.
+
+    Parameters
+    ----------
+    alpha : float
+        Power law slope. For alpha < 0 the attenuation decreases with
+        increasing wavelength.
+    turn_over_wl : astropy.units.Quantity
+        Reference wavelength that sets the normalization point of the power law.
+        The ratio wavelength / turn_over_wl is made dimensionless before raising
+        to alpha.
 
     Notes
     -----
-    The `extinction` package functions generally expect wavelength in Angstrom (float),
-    and return A_lambda (magnitudes) given (a_v, R_V).
+    The attenuation in magnitudes is computed as:
+
+    A_lambda = a_v * (wavelength / turn_over_wl) ** alpha
+
+    where a_v is interpreted as the attenuation at the reference wavelength
+    turn_over_wl. This differs from laws that interpret a_v strictly as V band
+    attenuation. Choose turn_over_wl accordingly if you want a_v to correspond
+    to A_V.
+
+    The method returns A_lambda as an astropy Quantity with units of magnitudes
+    and the same shape as the input wavelength.
+
+    See Also
+    --------
+    AttenuationCurve : Base interface for attenuation curves.
+    CharlotFall00Attenuation : Two component attenuation model that can use
+        different curves for young and old populations.
     """
+
+    alpha: float
+    turn_over_wl: u.Quantity
+
+    def __post_init__(self):
+        if self.alpha > 0:
+            raise ValueError("alpha must be negative")
+
+    def a_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
+        """
+        Compute attenuation A_lambda in magnitudes.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v : float
+            Attenuation normalization in magnitudes at turn_over_wl.
+        **params
+            Additional parameters reserved for future extensions. Currently
+            unused.
+
+        Returns
+        -------
+        a_lam : astropy.units.Quantity
+            Attenuation in magnitudes with the same shape as wavelength.
+        """
+        ratio = (wavelength / self.turn_over_wl).decompose()
+        return (a_v * np.power(ratio, self.alpha)) << u.mag
+
+
+@dataclass
+class ExtinctionLibCurve(AttenuationCurve):
+    """
+    Attenuation curve wrapper for the ``extinction`` python package.
+
+    This class wraps laws implemented by the extinction package such as ccm89,
+    odonnell94, and calzetti00.
+
+    The extinction package functions typically accept wave, a_v, r_v, and unit,
+    where wave is a float array in Angstrom and the return value is A_lambda in
+    magnitudes.
+
+    Parameters
+    ----------
+    name : str
+        Name of the extinction law function in the extinction package.
+
+    Raises
+    ------
+    ValueError
+        If the requested law name is not present in the extinction package.
+
+    Notes
+    -----
+    The extinction functions are expected to have a signature compatible with:
+
+    - wave: float array in Angstrom
+    - a_v: float
+    - r_v: float
+    - return: A_lambda in magnitudes
+
+    The parameter r_v is read from params with a default value of 3.1.
+
+    See Also
+    --------
+    AttenuationCurve : Base interface for attenuation curves.
+    """
+
     name: str
 
     def __post_init__(self):
+        """
+        Resolve the law function from the extinction package.
+        """
         try:
             self._law = getattr(_extinction_lib, self.name)
         except AttributeError as e:
             raise ValueError(f"Unknown extinction law '{self.name}' in extinction package.") from e
 
     def a_lambda(self, wavelength: u.Quantity, *, a_v: float, **params) -> u.Quantity:
+        """
+        Compute A_lambda using the extinction package law.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v : float
+            V band attenuation in magnitudes.
+        **params
+            Additional parameters. The recognized parameter is r_v.
+
+            - r_v: float, optional
+              Total to selective extinction ratio. Default is 3.1.
+
+        Returns
+        -------
+        a_lam : astropy.units.Quantity
+            Attenuation in magnitudes with the same shape as wavelength.
+        """
         wav = check_unit(wavelength).to_value(u.AA)
-        r_v = params.get('r_v', 3.1)  # ensure R_V is in params
+        r_v = params.get("r_v", 3.1)
         a_lam = self._law(np.array(wav, dtype=float), float(a_v), float(r_v))
         return a_lam << u.mag
 
 
-### Attenuation model (geometrical effects) ###
-
 class AttenuationModel(ABC):
     """
-    Geometry-aware attenuation model.
+    Base class for geometry dependent attenuation models.
 
-    Returns a multiplicative factor that can be applied to spectra.
+    An attenuation model returns a multiplicative attenuation factor that can be
+    applied to spectra. Models can represent different geometries such as a
+    foreground screen or two component prescriptions.
+
+    Subclasses must implement attenuation_factor.
+
+    Notes
+    -----
+    The apply method multiplies the input spectra by the model attenuation
+    factor, broadcasting the factor along the selected axis.
+
+    See Also
+    --------
+    DustScreenAttenuation : Foreground screen model.
+    CharlotFall00Attenuation : Two component model inspired by Charlot and Fall 2000.
     """
 
     @abstractmethod
     def attenuation_factor(self, wavelength: u.Quantity, **params) -> u.Quantity:
+        """
+        Compute the multiplicative attenuation factor.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation factor is evaluated.
+        **params
+            Model parameters. The required and optional parameters depend on the
+            subclass.
+
+        Returns
+        -------
+        factor : astropy.units.Quantity
+            Dimensionless attenuation factor. The shape is model dependent. For
+            most models this is (n_wave,), but some models can return multiple
+            factors for different components.
+        """
         raise NotImplementedError
 
-    def apply(self, wavelength, spectra, axis: int = -1, **params):
+    def apply(self, wavelength: u.Quantity, spectra, axis: int = -1, **params):
+        """
+        Apply attenuation to spectra.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid corresponding to the spectra.
+        spectra : array-like or astropy.units.Quantity
+            Input spectra to be attenuated. The wavelength axis is given by
+            axis.
+        axis : int, optional
+            Axis in spectra corresponding to wavelength. Default is -1.
+        **params
+            Parameters forwarded to attenuation_factor.
+
+        Returns
+        -------
+        attenuated : same type as spectra
+            Spectra multiplied by the attenuation factor, broadcast to the
+            selected axis.
+
+        Notes
+        -----
+        This method assumes attenuation_factor returns a wavelength dependent
+        factor of shape (n_wave,). For models that return multiple components,
+        the caller should handle component selection or reduction before calling
+        apply.
+        """
         wavelength = check_unit(wavelength, u.AA)
-        f = self.attenuation_factor(wavelength, **params)  # (N,) dimensionless
-        f_np = broadcast_to_axis(f.to_value(u.dimensionless_unscaled), np.ndim(spectra), axis=axis)
+        f = self.attenuation_factor(wavelength, **params)
+        f_np = broadcast_to_axis(
+            f.to_value(u.dimensionless_unscaled),
+            np.ndim(spectra),
+            axis=axis,
+        )
         return spectra * f_np
 
 
 @dataclass
 class DustScreenAttenuation(AttenuationModel):
     """
-    Simple foreground screen: factor = curve.factor(wave, a_v).
+    Foreground dust screen attenuation model.
+
+    This model applies a single attenuation curve to the full spectrum as a
+    multiplicative factor.
+
+    Parameters
+    ----------
+    curve : AttenuationCurve or str, optional
+        Attenuation curve instance or name of a law in the extinction package.
+        If a string is provided, an ExtinctionLibCurve is constructed.
+
+    Notes
+    -----
+    The main parameter is a_v, interpreted as V band attenuation in magnitudes.
+    Additional curve parameters such as r_v are forwarded to the curve.
     """
+
     curve: AttenuationCurve | str = "ccm89"
 
     def __post_init__(self):
+        """
+        Construct an ExtinctionLibCurve when curve is given by name.
+        """
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
 
     def attenuation_factor(self, wavelength: u.Quantity, *, a_v: float = 0.0, **params) -> u.Quantity:
+        """
+        Compute the attenuation factor for a foreground screen.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v : float, optional
+            V band attenuation in magnitudes. Default is 0.0.
+        **params
+            Additional parameters forwarded to the underlying curve, such as
+            r_v.
+
+        Returns
+        -------
+        factor : astropy.units.Quantity
+            Dimensionless attenuation factor with the same shape as wavelength.
+        """
         return self.curve.attenuation_factor(wavelength, a_v=float(a_v), **params)
 
 
 @dataclass
 class CharlotFall00Attenuation(AttenuationModel):
     """
-    Charlot & Fall (2000)-style two-component attenuation:
-    - young populations get a_v_young
-    - old populations get a_v_old
-    threshold set by young_age
+    Two component attenuation model inspired by Charlot and Fall 2000.
 
+    This model defines two attenuation components applied to two stellar
+    populations divided by an age threshold. A common usage is:
+
+    - young population uses a_v_young
+    - old population uses a_v_old
+    - the split is defined by young_age
+
+    This class returns two wavelength dependent attenuation factors, one for the
+    young component and one for the old component. The caller is responsible for
+    applying these factors to the corresponding spectral components.
+
+    Parameters
+    ----------
+    curve : str or list of AttenuationCurve or list of str
+        If a string is provided, both components use the same extinction package
+        law. If a list is provided, it must contain two curves or two names.
+    young_age : astropy.units.Quantity, optional
+        Age threshold separating young and old populations. Default is 10 Myr.
+
+    Notes
+    -----
+    The returned attenuation factor has shape (2, n_wave). The first entry
+    corresponds to the young component and the second to the old component.
     """
+
     curve: str | List[AttenuationCurve] | List[str]
     young_age: u.Quantity = 10.0 << u.Myr
 
     def __post_init__(self):
+        """
+        Normalize curve inputs to a list of two AttenuationCurve instances.
+        """
         if isinstance(self.curve, str):
-            # Both components use the same curve
             self.curve = 2 * [ExtinctionLibCurve(name=self.curve)]
         elif isinstance(self.curve, list):
             self.curve = [ExtinctionLibCurve(name=c) if isinstance(c, str) else c for c in self.curve]
@@ -202,38 +521,137 @@ class CharlotFall00Attenuation(AttenuationModel):
         a_v_old: float = 0.3,
         **params,
     ) -> u.Quantity:
+        """
+        Compute attenuation factors for young and old components.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the attenuation is evaluated.
+        a_v_young : float, optional
+            V band attenuation in magnitudes for the young component.
+            Default is 1.0.
+        a_v_old : float, optional
+            V band attenuation in magnitudes for the old component.
+            Default is 0.3.
+        **params
+            Additional parameters forwarded to each attenuation curve, such as
+            r_v.
+
+        Returns
+        -------
+        factor : astropy.units.Quantity
+            Dimensionless attenuation factors with shape (2, n_wave). The first
+            row corresponds to the young component and the second row
+            corresponds to the old component.
+        """
         wavelength = check_unit(wavelength, u.AA)
 
-        f_y = self.curve[0].attenuation_factor(wavelength, a_v=float(a_v_young),
-                                   **params).to_value(u.dimensionless_unscaled)
-        f_o = self.curve[1].attenuation_factor(wavelength, a_v=float(a_v_old),
-                                   **params).to_value(u.dimensionless_unscaled)
+        f_y = self.curve[0].attenuation_factor(
+            wavelength, a_v=float(a_v_young), **params
+        ).to_value(u.dimensionless_unscaled)
+
+        f_o = self.curve[1].attenuation_factor(
+            wavelength, a_v=float(a_v_old), **params
+        ).to_value(u.dimensionless_unscaled)
 
         return np.array([f_y, f_o]) << u.dimensionless_unscaled
 
-# -----------------------------------------------------------------------------
-# Dust Emission models
-# -----------------------------------------------------------------------------
+
 @dataclass
 class Casey2012DustComponent(SedComponent):
+    """
+    Dust emission component based on Casey 2012 style templates.
+
+    This component generates a dust emission spectrum as a sum of a modified
+    blackbody component and a mid infrared power law component. The shape is
+    normalized to match an integrated infrared luminosity over a configurable
+    wavelength range.
+
+    Parameters
+    ----------
+    optically_thin : bool, optional
+        If True, uses an optically thin approximation for emissivity. Default is
+        False.
+    ir_range : tuple of astropy.units.Quantity, optional
+        Wavelength range used for luminosity normalization. Default is 8 um to
+        1000 um.
+    default_unit : astropy.units.Unit, optional
+        Output spectral density unit. Default is Lsun / AA.
+    min_wavelength : astropy.units.Quantity, optional
+        Rest frame cutoff. Emission below this wavelength is set to zero.
+        Default is 1 um.
+
+    Notes
+    -----
+    The public method emission_spectrum expects a target integrated luminosity
+    lum_ir. Internally the code builds a shape template on the input wavelength
+    grid and then normalizes it such that the integral of L_lambda over ir_range
+    equals lum_ir.
+
+    The implementation assumes integrate_sed integrates L_lambda over wavelength
+    and returns units of luminosity.
+
+    See Also
+    --------
+    CalorimetricDustComponent : Dust emission coupled to absorbed stellar energy.
+    """
+
     optically_thin: bool = False
     ir_range: Tuple[u.Quantity, u.Quantity] = (8 << u.um, 1000 << u.um)
     default_unit = u.Lsun / u.AA
-    min_wavelength = 1 << u.um  # rest-frame cutoff
+    min_wavelength = 1 << u.um
 
     def emission_spectrum(
         self,
         wavelength: u.Quantity,
         *,
+        lum_ir: u.Quantity,
         t_dust: float = 35.0,
         beta: float = 1.5,
         alpha: float = 2.0,
         lam0: Optional[u.Quantity] = 200 << u.um,
-        lum_ir: Optional[u.Quantity] = None,
         lam_pivot: Optional[u.Quantity] = None,
         **kwargs,
     ) -> u.Quantity:
-        lam = check_unit(wavelength, u.AA).to(u.um)   # work in um internally
+        """
+        Compute the dust emission spectrum.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where the emission is evaluated.
+        lum_ir : astropy.units.Quantity
+            Target integrated infrared luminosity used for normalization.
+            Expected units are luminosity, for example Lsun.
+        t_dust : float, optional
+            Dust temperature in Kelvin. Default is 35.0.
+        beta : float, optional
+            Emissivity index. Default is 1.5.
+        alpha : float, optional
+            Mid infrared power law slope. Default is 2.0.
+        lam0 : astropy.units.Quantity or None, optional
+            Optical depth scale wavelength. If provided, uses a finite optical
+            depth emissivity. If None, uses an optically thin approximation.
+            Default is 200 um.
+        lam_pivot : astropy.units.Quantity or None, optional
+            Pivot wavelength connecting the two components. If None, it is
+            computed from t_dust and alpha.
+        **kwargs
+            Additional unused parameters reserved for future extensions.
+
+        Returns
+        -------
+        l_lambda : astropy.units.Quantity
+            Dust emission spectrum in default_unit, sampled on wavelength.
+
+        Raises
+        ------
+        ValueError
+            If the template has zero integrated luminosity in the IR range and
+            cannot be normalized.
+        """
+        lam = check_unit(wavelength, u.AA).to(u.um)
         T = check_unit(t_dust, u.K)
 
         if lam_pivot is None:
@@ -241,29 +659,26 @@ class Casey2012DustComponent(SedComponent):
         if lam0 is not None:
             lam0 = check_unit(lam0, u.um).to(u.um)
 
-        # --- Build an *arbitrary-shape* L_lambda template ---
         mbb_lam, pl_lam = self._shape_l_lambda(
             lam=lam, t_dust=T, beta=beta, alpha=alpha, lam0=lam0, lam_pivot=lam_pivot
         )
-        l_lamda_shape = mbb_lam + pl_lam  # arbitrary normalization
+        l_lambda_shape = mbb_lam + pl_lam
 
-        # cutoff at short wavelengths
-        l_lamda_shape[lam < self.min_wavelength.to(u.um)] = 0.0
+        l_lambda_shape[lam < self.min_wavelength.to(u.um)] = 0.0
 
-        # --- Normalize to lum_ir over 8-1000 um, if requested ---
         if lum_ir is not None:
             lum_ir = check_unit(lum_ir, u.Lsun)
             wl_min, wl_max = self.ir_range
-            # integrate_sed expects same wavelength unit as array; give in um
-            l_ir_norm = self.integrate_sed(lam, l_lamda_shape,
-                                           wl_min.to(u.um), wl_max.to(u.um))
-            # protect against divide-by-zero if shape has no support in IR
+            l_ir_norm = self.integrate_sed(
+                lam, l_lambda_shape, wl_min.to(u.um), wl_max.to(u.um)
+            )
             if l_ir_norm <= 0:
-                raise ValueError("Dust template has zero integrated luminosity in the IR range; cannot normalize.")
-            l_lamda_shape = l_lamda_shape * (lum_ir / l_ir_norm).decompose()
+                raise ValueError(
+                    "Dust template has zero integrated luminosity in the IR range; cannot normalize."
+                )
+            l_lambda_shape = l_lambda_shape * (lum_ir / l_ir_norm).decompose()
 
-        # return in PST canonical units on the original wavelength grid (AA)
-        return l_lamda_shape.to(self.default_unit, equivalencies=u.spectral_density(wavelength))
+        return l_lambda_shape.to(self.default_unit, equivalencies=u.spectral_density(wavelength))
 
     def _shape_l_lambda(
         self,
@@ -276,76 +691,206 @@ class Casey2012DustComponent(SedComponent):
         lam_pivot: u.Quantity = None,
     ) -> Tuple[u.Quantity, u.Quantity]:
         """
-        Return two components (MBB and MIR power-law) as an *L_lambda-shaped* template.
+        Build the unnormalized spectral shape template in L_lambda form.
 
-        The absolute normalization is arbitrary; caller normalizes via lum_ir.
+        Parameters
+        ----------
+        lam : astropy.units.Quantity
+            Wavelength grid in microns.
+        t_dust : astropy.units.Quantity
+            Dust temperature.
+        beta : float
+            Emissivity index.
+        alpha : float
+            Mid infrared power law slope.
+        lam0 : astropy.units.Quantity or None, optional
+            Optical depth scale wavelength. If None, uses an optically thin
+            approximation.
+        lam_pivot : astropy.units.Quantity
+            Pivot wavelength connecting the components.
+
+        Returns
+        -------
+        mbb : astropy.units.Quantity
+            Modified blackbody shaped component. Absolute normalization is
+            arbitrary.
+        pl : astropy.units.Quantity
+            Mid infrared power law shaped component. Absolute normalization is
+            arbitrary.
+
+        Notes
+        -----
+        The absolute normalization is arbitrary. The caller normalizes the sum
+        to match lum_ir using integrate_sed.
         """
-        # Use BlackBody in wavelength form as a physically-motivated shape
         bb = BlackBody(temperature=t_dust)
-
-        # B_lambda has units W/(m2 m sr); we'll treat it as a shape and renormalize anyway
         Blam = bb(lam)
 
         if lam0 is not None:
             tau = (lam0 / lam) ** beta
-            emiss = -np.expm1(-tau) * u.dimensionless_unscaled
+            emiss = (-np.expm1(-tau)) * u.dimensionless_unscaled
         else:
-            # optically thin emissivity proportional to nu^beta ~ lam^{-beta}
             emiss = (lam_pivot / lam) ** beta * u.dimensionless_unscaled
 
         mbb = Blam * emiss
 
-        # MIR power-law in lambda, with Gaussian cutoff
         pl_shape = (lam / lam_pivot) ** alpha * np.exp(-(lam / lam_pivot) ** 2)
 
-        # Join by matching at pivot (same as your previous approach)
-        mbb_piv = (bb(lam_pivot) * (
-            (-np.expm1(-((lam0/lam_pivot)**beta)) if lam0 is not None else 1.0)
-        ) * u.dimensionless_unscaled)
+        mbb_piv = (
+            bb(lam_pivot)
+            * (
+                (-np.expm1(-((lam0 / lam_pivot) ** beta)) if lam0 is not None else 1.0)
+            )
+            * u.dimensionless_unscaled
+        )
 
         pl = (mbb_piv * pl_shape).to(mbb.unit)
-
         return mbb, pl
 
     def _lambda_pivot(self, t_dust: u.Quantity, alpha: float) -> u.Quantity:
+        """
+        Compute the pivot wavelength used to connect template components.
+
+        Parameters
+        ----------
+        t_dust : astropy.units.Quantity
+            Dust temperature.
+        alpha : float
+            Mid infrared power law slope.
+
+        Returns
+        -------
+        lam_pivot : astropy.units.Quantity
+            Pivot wavelength in microns.
+        """
         b1, b2, b3, b4 = 26.68, 6.246, 1.905e-4, 7.243e-5
-        lam_c_um = 0.75 / (((b1 + b2 * alpha) ** -2) + (b3 + b4 * alpha) * t_dust.to_value(u.K))
+        lam_c_um = 0.75 / (
+            ((b1 + b2 * alpha) ** -2) + (b3 + b4 * alpha) * t_dust.to_value(u.K)
+        )
         return lam_c_um * u.um
 
+
 @dataclass
-class CalorimetricDustWrapper(SedComponent):
-    source: SedComponent
+class CalorimetricDustComponent(SedComponent):
+    """
+    Calorimetric dust emission component.
+
+    This component couples an attenuation model and a dust emission component
+    using energy balance. It computes the absorbed stellar luminosity and uses
+    it as the infrared luminosity normalization of the dust emission model.
+
+    Parameters
+    ----------
+    attenuation : AttenuationModel
+        Attenuation model used to compute the attenuated stellar spectrum.
+    dust : SedComponent
+        Dust emission component that accepts lum_ir as a normalization parameter.
+    default_unit : astropy.units.Unit, optional
+        Output spectral density unit. Default is Lsun / AA.
+    ir_range : tuple of astropy.units.Quantity, optional
+        IR wavelength range used by the dust component. Default is 8 um to
+        1000 um.
+
+    Notes
+    -----
+    The method emission_spectrum returns three spectra:
+
+    - Lsrc: intrinsic stellar spectrum
+    - Latt: attenuated stellar spectrum
+    - Ldust: dust emission spectrum normalized to absorbed energy
+
+    For CharlotFall00Attenuation, the method expects the stellar source to
+    return a binned output with shape (n_bins, n_wave), where the bins represent
+    young and old populations.
+
+    See Also
+    --------
+    CharlotFall00Attenuation : Two component attenuation model returning two factors.
+    Casey2012DustComponent : Dust emission template normalized by lum_ir.
+    """
+
     attenuation: AttenuationModel
     dust: SedComponent
     default_unit = u.Lsun / u.AA
-    ir_range: Tuple[u.Quantity, u.Quantity] = (8*u.um, 1000*u.um)
+    ir_range: Tuple[u.Quantity, u.Quantity] = (8 * u.um, 1000 * u.um)
 
-    def emission_spectrum(self, wavelength: u.Quantity, **params) -> u.Quantity:
+    def emission_spectrum(
+        self,
+        wavelength: u.Quantity,
+        source: StellarComponent,
+        source_params: dict = None,
+        **params,
+    ) -> Tuple[u.Quantity, u.Quantity, u.Quantity]:
+        """
+        Compute intrinsic, attenuated, and dust emission spectra.
+
+        Parameters
+        ----------
+        wavelength : astropy.units.Quantity
+            Wavelength grid where spectra are evaluated.
+        source : StellarComponent
+            Stellar emission source.
+        source_params : dict, optional
+            Parameters forwarded to the stellar source emission_spectrum.
+        **params
+            Parameters forwarded to the attenuation model and the dust emission
+            component. For example a_v or a_v_young and a_v_old.
+
+        Returns
+        -------
+        Lsrc : astropy.units.Quantity
+            Intrinsic stellar spectrum in default_unit.
+        Latt : astropy.units.Quantity
+            Attenuated stellar spectrum in default_unit.
+        Ldust : astropy.units.Quantity
+            Dust emission spectrum in default_unit normalized to absorbed energy.
+
+        Raises
+        ------
+        ValueError
+            If CharlotFall00Attenuation is used and the stellar source does not
+            return a 2D binned spectrum with shape (n_bins, n_wave).
+        """
         lam = check_unit(wavelength, u.AA)
-        f = self.attenuation.attenuation_factor(lam, **params).to_value(u.dimensionless_unscaled)
+
+        f = self.attenuation.attenuation_factor(lam, **params)
+
+        if source_params is None:
+            source_params = {}
 
         if isinstance(self.attenuation, CharlotFall00Attenuation):
-            # For stellar sources, split the SED into young and old components
-            params["age_bin_edges"] = u.Quantity(
-                [0, self.attenuation.young_age.value,
-                (15 << u.Gyr).to_value(self.attenuation.young_age.unit)],
-                self.attenuation.young_age.unit)
-            Lsrc = self.source.emission_spectrum(lam, **params).to(self.default_unit)
+            source_params["age_bin_edges"] = u.Quantity(
+                [
+                    0,
+                    self.attenuation.young_age.value,
+                    (15 << u.Gyr).to_value(self.attenuation.young_age.unit),
+                ],
+                self.attenuation.young_age.unit,
+            )
+
+            Lsrc = source.emission_spectrum(lam, **source_params).to(self.default_unit)
+
             if Lsrc.ndim != 2:
-                raise ValueError("CF00 requires binned stellar SED output with shape (n_bins, n_wave).")
-            Latt = Lsrc * f
-            Labs_spec = np.sum(Lsrc - Latt, axis=0)
-            Latt = np.sum(Latt, axis=0)
-            
+                raise ValueError(
+                    "CF00 requires binned stellar SED output with shape (n_bins, n_wave)."
+                )
+
+            Latt_bins = Lsrc * f
+            Labs_spec = np.sum(Lsrc - Latt_bins, axis=0)
+            Latt = np.sum(Latt_bins, axis=0)
+
         else:
-            Lsrc = self.source.emission_spectrum(lam, **params).to(self.default_unit)
+            Lsrc = source.emission_spectrum(lam, **source_params).to(self.default_unit)
             Latt = Lsrc * f
             Labs_spec = Lsrc - Latt
 
         Labs = self.integrate_sed(lam, Labs_spec)
         Ldust = self.dust.emission_spectrum(lam, lum_ir=Labs, **params).to(self.default_unit)
-        return Latt + Ldust
 
+        return Lsrc, Latt, Ldust
+
+
+# Legacy code for backwards compatibility
 
 class DustModelBase(ABC):
     """
@@ -564,44 +1109,3 @@ class CF03DustScreen(DustScreen):
         ext[~young] = super().get_extinction(wavelength, a_v_old)
         return ext
 
-        
-if __name__ == "__main__":
-    from matplotlib import pyplot as plt
-    
-    # Redden some set of spectra using Charlote and Fall 03 model
-    dust_model = CF03DustScreen("ccm89", young_ssp_age=10 * u.yr)
-    
-    wavelength = np.linspace(1000, 10000) * u.angstrom
-    spectra = np.ones((10, wavelength.size))
-    ages = np.linspace(5, 15, 10) * u.yr
-    reddened_spectra = dust_model.apply_extinction(wavelength, spectra,
-                                                   age=ages,
-                                                   a_v_young=1.0, a_v_old=0.3)
-    
-    plt.figure()
-    plt.title("Charlote and Fall 03 dust extinction model")
-    plt.plot(wavelength, spectra[0], label=f'Unreddened')
-    plt.plot(wavelength, reddened_spectra[0], label=f'Age={ages[0]}')
-    plt.plot(wavelength, reddened_spectra[-1], label=f'Age={ages[-1]}')
-    plt.legend()
-    
-    # Apply the extinction to a given SSP model
-    from pst.SSP import PopStar
-    ssp = PopStar(IMF='cha')
-    dust_model = DustScreen("ccm89",)
-    red_ssp = dust_model.redden_ssp_model(ssp, a_v=1.0)
-    
-    plt.figure()
-    plt.title("Redden SSP model")
-    plt.loglog(ssp.wavelength, ssp.L_lambda[3, -1])
-    plt.loglog(ssp.wavelength, red_ssp.L_lambda[3, -1])
-    plt.xlim(800, 1e5)
-    plt.ylim(1e-8, 1e-4)
-    
-    # Little performance test
-    from time import time
-    a_v = np.linspace(0.1, 3, 1)
-    tstart = time()
-    ssps = [dust_model.redden_ssp_model(ssp, a_v=av) for av in a_v]
-    tend = time()
-    print(f"Time for generating {a_v.size} SSP models: {tend - tstart}")
