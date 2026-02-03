@@ -246,7 +246,7 @@ class ChemicalEvolutionModel(ABC):
         sed_val = np.einsum("za,zaw,an->nw", weights.value, ssp.L_lambda.value, M)
         return sed_val * (weights.unit * ssp.L_lambda.unit)
 
-    def compute_photometry(self, ssp, t_obs, photometry=None) -> u.Quantity:
+    def compute_photometry(self, ssp, t_obs, photometry=None, age_bin_edges=None) -> u.Quantity:
         """
         Compute the synthetic photometry using a SSP at a given time.
 
@@ -281,7 +281,7 @@ class ChemicalEvolutionModel(ABC):
             print("Assuming input photometry array in Jy/Msun")
             photometry = photometry << u.Jy / u.Msun
 
-        if age_bins is None:
+        if age_bin_edges is None:
             # (band, z, age) * (z, age) -> band
             out_val = np.einsum("bza,za->b", photometry.value, weights.value)
             return out_val * (photometry.unit * weights.unit)
