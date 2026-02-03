@@ -193,8 +193,19 @@ class ChemicalEvolutionModel(ABC):
         ))
         return t_frac
 
+    def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
+        # idx: (A,)
+        a = np.arange(idx.size)[:, None]
+        b = np.arange(nbin)[None, :]
+        M = (idx[:, None] == b).astype(float)  # (A, Nbin)
+
+        # zero out invalid ages outside [edges[0], edges[-1])
+        valid = (idx >= 0) & (idx < nbin)
+        M *= valid[:, None]
+        return M
+
     def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
-                    allow_negative=False) -> u.Quantity:
+                    allow_negative=False, age_bin_edges=None) -> u.Quantity:
         """
         Compute the Spectral Energy Distribution (SED) resulting from the SFH.
 
@@ -221,13 +232,19 @@ class ChemicalEvolutionModel(ABC):
         :func:`interpolate_ssp_masses`
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
+        weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
         if not allow_negative:
-            mask = (weights > 0) & np.isfinite(weights)
-        else:
-            mask = np.isfinite(weights)
-        sed = np.sum(weights[mask, np.newaxis] * ssp.L_lambda[mask, :],
-                    axis=(0))
-        return sed
+            weights = np.where(weights > 0, weights, 0.0 << weights.unit)
+        
+        if age_bin_edges is None:
+            sed_val = np.einsum("za,zaw->w", weights.value, ssp.L_lambda.value)
+            return sed_val * (weights.unit * ssp.L_lambda.unit)
+
+        idx = np.digitize(ssp.ages, check_unit(age_bin_edges, ssp.ages.unit)
+                          ).clip(0, len(age_bin_edges) - 1) - 1
+        M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
+        sed_val = np.einsum("za,zaw,an->nw", weights.value, ssp.L_lambda.value, M)
+        return sed_val * (weights.unit * ssp.L_lambda.unit)
 
     def compute_photometry(self, ssp, t_obs, photometry=None) -> u.Quantity:
         """
@@ -254,18 +271,26 @@ class ChemicalEvolutionModel(ABC):
             The photometry of the galaxy in the same units as the input photometry.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
+        weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
+        if not allow_negative:
+            weights = np.where(weights > 0, weights, 0.0 << weights.unit)
+
         if photometry is None:
             photometry = ssp.photometry
         if not isinstance(photometry, u.Quantity):
             print("Assuming input photometry array in Jy/Msun")
-            photometry *= u.Jy / u.Msun
-        extra_dim = photometry.ndim - weights.ndim
-        if extra_dim > 0:
-            new_dims = tuple(np.arange(extra_dim))
-            np.expand_dims(weights, new_dims)
-        
-        model_photometry = np.sum(photometry * weights, axis=(-1, -2))
-        return model_photometry
+            photometry = photometry << u.Jy / u.Msun
+
+        if age_bins is None:
+            # (band, z, age) * (z, age) -> band
+            out_val = np.einsum("bza,za->b", photometry.value, weights.value)
+            return out_val * (photometry.unit * weights.unit)
+
+        idx = np.digitize(ssp.ages, check_unit(age_bin_edges, ssp.ages.unit)
+                          ).clip(0, len(age_bin_edges) - 1) - 1
+        M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
+        out_val = np.einsum("bza,za,an->nb", photometry.value, weights.value, M)
+        return out_val * (photometry.unit * weights.unit)
 
 
 #-------------------------------------------------------------------------------
