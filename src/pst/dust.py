@@ -561,7 +561,7 @@ class CharlotFall00Attenuation(AttenuationModel):
 @dataclass
 class Casey2012DustComponent(SedComponent):
     """
-    Dust emission component based on Casey 2012 style templates.
+    Dust emission component based on Casey 2012.
 
     This component generates a dust emission spectrum as a sum of a modified
     blackbody component and a mid infrared power law component. The shape is
@@ -584,10 +584,10 @@ class Casey2012DustComponent(SedComponent):
 
     Notes
     -----
-    The public method emission_spectrum expects a target integrated luminosity
-    lum_ir. Internally the code builds a shape template on the input wavelength
+    The method emission_spectrum expects a target integrated luminosity
+    ``lum_ir``. Internally the code builds a shape template on the input wavelength
     grid and then normalizes it such that the integral of L_lambda over ir_range
-    equals lum_ir.
+    equals ``lum_ir``.
 
     The implementation assumes integrate_sed integrates L_lambda over wavelength
     and returns units of luminosity.
@@ -638,7 +638,7 @@ class Casey2012DustComponent(SedComponent):
             Pivot wavelength connecting the two components. If None, it is
             computed from t_dust and alpha.
         **kwargs
-            Additional unused parameters reserved for future extensions.
+            Additional unused parameters for compatibility.
 
         Returns
         -------
