@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Set
 import numpy as np
 from astropy import units as u
 
@@ -216,7 +216,6 @@ class ParameterPack:
             self.params[name_to_idx[k]].set(v, validate=validate)
 
 
-@dataclass
 class ModelBase:
     """
     Base class for models with named parameters.
@@ -237,7 +236,7 @@ class ModelBase:
     - conversion to plain dictionaries for IO
     """
 
-    name: str
+    name: str = "model"
 
     def models_recursive(
         self,
