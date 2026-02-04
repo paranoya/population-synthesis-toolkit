@@ -70,6 +70,7 @@ class TabularSedComponent(SedComponent):
 class StellarComponent(SedComponent):
     ssp: "SSP"
     sfh: "ChemicalEvolutionModel"
+    name: str = "stellar_emission"
     default_unit = u.Lsun / u.AA
 
     def emission_spectrum(self, wavelength: u.Quantity, **params):
