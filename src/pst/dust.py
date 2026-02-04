@@ -10,6 +10,7 @@ Usage
 This module is intended for applying dust extinction or emission to stellar spectra, either
 to synthetic stellar populations or other types of spectra.
 """
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -27,6 +28,7 @@ from pst.utils import check_unit, check_parameter, broadcast_to_axis
 from pst.sed import SedComponent, StellarComponent
 
 ## Utils ###
+
 
 def modified_blackbody(
     lam: u.Quantity,
@@ -114,8 +116,8 @@ def modified_blackbody(
     return (Bnu * factor).to("erg / (Angstrom s sr cm2)", u.spectral_density(lam))
 
 
-
 ### Attenuation curve (wavelength dependence) ###
+
 
 class AttenuationCurve(ModelBase):
     """
@@ -141,6 +143,7 @@ class AttenuationCurve(ModelBase):
     name : str
         Curve identifier.
     """
+
     name: str = "attenuation_curve"
 
     @abstractmethod
@@ -163,7 +166,9 @@ class AttenuationCurve(ModelBase):
         """
         raise NotImplementedError
 
-    def a_lambda(self, wavelength: u.Quantity, *, a_v: u.Quantity, **params) -> u.Quantity:
+    def a_lambda(
+        self, wavelength: u.Quantity, *, a_v: u.Quantity, **params
+    ) -> u.Quantity:
         """
         Convert curve shape to attenuation in magnitudes.
 
@@ -192,7 +197,9 @@ class AttenuationCurve(ModelBase):
         k = self.k_lambda(wavelength, **params).to_value(u.dimensionless_unscaled)
         return (a_v.to_value(u.mag) * k) << u.mag
 
-    def tau_lambda(self, wavelength: u.Quantity, *, a_v: float = None, **params) -> u.Quantity:
+    def tau_lambda(
+        self, wavelength: u.Quantity, *, a_v: float = None, **params
+    ) -> u.Quantity:
         """
         Convert attenuation in magnitudes to optical depth.
 
@@ -219,7 +226,9 @@ class AttenuationCurve(ModelBase):
         a_lam = self.a_lambda(wavelength, a_v=a_v, **params).to_value(u.mag)
         return (a_lam / 1.086) << u.dimensionless_unscaled
 
-    def attenuation_factor(self, wavelength: u.Quantity, *, a_v: u.Quantity, **params) -> u.Quantity:
+    def attenuation_factor(
+        self, wavelength: u.Quantity, *, a_v: u.Quantity, **params
+    ) -> u.Quantity:
         """
         Compute the multiplicative attenuation factor.
 
@@ -277,9 +286,16 @@ class PowerLawAttenuationCurve(AttenuationCurve):
     AttenuationCurve
         Base interface for attenuation curve shapes.
     """
+
     name: str = "powerlaw_attenuation_curve"
-    alpha: Parameter = field(default_factory=lambda: Parameter(-0.7, unit=u.dimensionless_unscaled, doc="Power law exponent"))
-    pivot: Parameter = field(default_factory=lambda: Parameter(5500.0, unit=u.AA, doc="Pivot wavelength"))
+    alpha: Parameter = field(
+        default_factory=lambda: Parameter(
+            -0.7, unit=u.dimensionless_unscaled, doc="Power law exponent"
+        )
+    )
+    pivot: Parameter = field(
+        default_factory=lambda: Parameter(5500.0, unit=u.AA, doc="Pivot wavelength")
+    )
 
     def __post_init__(self):
         """
@@ -354,9 +370,12 @@ class ExtinctionLibCurve(AttenuationCurve):
     AttenuationCurve
         Base interface for attenuation curve shapes.
     """
+
     name: str = "extinction_lib"
     law: str = "ccm89"
-    r_v: Parameter = field(default_factory=lambda: Parameter(3.1, unit=u.dimensionless_unscaled, doc="R_V"))
+    r_v: Parameter = field(
+        default_factory=lambda: Parameter(3.1, unit=u.dimensionless_unscaled, doc="R_V")
+    )
 
     def __post_init__(self):
         """
@@ -370,7 +389,9 @@ class ExtinctionLibCurve(AttenuationCurve):
         try:
             self._law = getattr(_extinction_lib, self.law)
         except AttributeError as e:
-            raise ValueError(f"Unknown extinction law '{self.law}' in extinction package.") from e
+            raise ValueError(
+                f"Unknown extinction law '{self.law}' in extinction package."
+            ) from e
 
     def k_lambda(self, wavelength: u.Quantity, **params) -> u.Quantity:
         """
@@ -415,6 +436,7 @@ class AttenuationModel(ModelBase, ABC):
     name : str
         Model identifier.
     """
+
     name: str = "attenuation_model"
 
     @abstractmethod
@@ -507,9 +529,16 @@ class DustScreenAttenuation(AttenuationModel):
     AttenuationCurve
         Curve interface used to compute k_lambda.
     """
+
     name: str = "dust_screen"
-    curve: AttenuationCurve = field(default_factory=lambda: ExtinctionLibCurve(law="ccm89"))
-    a_v: Parameter = field(default_factory=lambda: Parameter(0.0, unit=u.mag, vrange=(0.0 * u.mag, np.inf * u.mag), doc="Screen A_V"))
+    curve: AttenuationCurve = field(
+        default_factory=lambda: ExtinctionLibCurve(law="ccm89")
+    )
+    a_v: Parameter = field(
+        default_factory=lambda: Parameter(
+            0.0, unit=u.mag, vrange=(0.0 * u.mag, np.inf * u.mag), doc="Screen A_V"
+        )
+    )
 
     def __post_init__(self):
         """
@@ -525,7 +554,9 @@ class DustScreenAttenuation(AttenuationModel):
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
 
-    def attenuation_factor(self, wavelength: u.Quantity, *, a_v: float = None, **params) -> u.Quantity:
+    def attenuation_factor(
+        self, wavelength: u.Quantity, *, a_v: float = None, **params
+    ) -> u.Quantity:
         """
         Compute the attenuation factor for a foreground screen.
 
@@ -589,12 +620,35 @@ class CharlotFall00Attenuation(AttenuationModel):
     CalorimetricDustComponent
         Uses the returned factors to compute absorbed luminosity by component.
     """
+
     name: str = "CF00"
-    curve_young: AttenuationCurve = field(default_factory=lambda: PowerLawAttenuationCurve())
-    curve_old: AttenuationCurve = field(default_factory=lambda: PowerLawAttenuationCurve())
-    a_v_young: Parameter = field(default_factory=lambda: Parameter(1.0, unit=u.mag, vrange=(0.0 << u.mag, np.inf << u.mag), doc="A_V for young SSPs"))
-    a_v_old: Parameter = field(default_factory=lambda: Parameter(0.3, unit=u.mag, vrange=(0.0 << u.mag, np.inf << u.mag), doc="A_V for old SSPs"))
-    young_age: Parameter = field(default_factory=lambda: Parameter(10.0, unit=u.Myr, doc="Maximum age of young SSPs"))
+    curve_young: AttenuationCurve = field(
+        default_factory=lambda: PowerLawAttenuationCurve()
+    )
+    curve_old: AttenuationCurve = field(
+        default_factory=lambda: PowerLawAttenuationCurve()
+    )
+    a_v_young: Parameter = field(
+        default_factory=lambda: Parameter(
+            1.0,
+            unit=u.mag,
+            vrange=(0.0 << u.mag, np.inf << u.mag),
+            doc="A_V for young SSPs",
+        )
+    )
+    a_v_old: Parameter = field(
+        default_factory=lambda: Parameter(
+            0.3,
+            unit=u.mag,
+            vrange=(0.0 << u.mag, np.inf << u.mag),
+            doc="A_V for old SSPs",
+        )
+    )
+    young_age: Parameter = field(
+        default_factory=lambda: Parameter(
+            10.0, unit=u.Myr, doc="Maximum age of young SSPs"
+        )
+    )
 
     def __post_init__(self):
         self.a_v_young = check_parameter(self.a_v_young, u.mag)
@@ -633,8 +687,12 @@ class CharlotFall00Attenuation(AttenuationModel):
             corresponds to the old component.
         """
         lam = check_unit(wavelength, u.AA)
-        fy = self.curve_young.attenuation_factor(lam, a_v=self.a_v_young.q).to_value(u.dimensionless_unscaled)
-        fo = self.curve_old.attenuation_factor(lam, a_v=self.a_v_old.q).to_value(u.dimensionless_unscaled)
+        fy = self.curve_young.attenuation_factor(lam, a_v=self.a_v_young.q).to_value(
+            u.dimensionless_unscaled
+        )
+        fo = self.curve_old.attenuation_factor(lam, a_v=self.a_v_old.q).to_value(
+            u.dimensionless_unscaled
+        )
         return np.stack([fy, fo], axis=0) << u.dimensionless_unscaled
 
 
@@ -677,19 +735,50 @@ class Casey2012DustComponent(SedComponent):
     modified_blackbody
         Function used to compute the modified blackbody component.
     """
+
     name: str = "Casey2012"
 
-    t_dust: Parameter = field(default_factory=lambda: Parameter(35.0, unit=u.K, vrange=(1.0 << u.K, 200.0 << u.K), doc="Dust temperature"))
-    beta: Parameter = field(default_factory=lambda: Parameter(1.5, unit=u.dimensionless_unscaled, vrange=(0.0, 5.0), doc="Emissivity index"))
-    alpha: Parameter = field(default_factory=lambda: Parameter(2.0, unit=u.dimensionless_unscaled, vrange=(-10.0, 10.0), doc="MIR power law slope"))
-    lam0: Parameter = field(default_factory=lambda: Parameter(200.0, unit=u.um, vrange=(1.0 << u.um, 1e6 << u.um), doc="Optical depth scale wavelength"))
+    t_dust: Parameter = field(
+        default_factory=lambda: Parameter(
+            35.0, unit=u.K, vrange=(1.0 << u.K, 200.0 << u.K), doc="Dust temperature"
+        )
+    )
+    beta: Parameter = field(
+        default_factory=lambda: Parameter(
+            1.5,
+            unit=u.dimensionless_unscaled,
+            vrange=(0.0, 5.0),
+            doc="Emissivity index",
+        )
+    )
+    alpha: Parameter = field(
+        default_factory=lambda: Parameter(
+            2.0,
+            unit=u.dimensionless_unscaled,
+            vrange=(-10.0, 10.0),
+            doc="MIR power law slope",
+        )
+    )
+    lam0: Parameter = field(
+        default_factory=lambda: Parameter(
+            200.0,
+            unit=u.um,
+            vrange=(1.0 << u.um, 1e6 << u.um),
+            doc="Optical depth scale wavelength",
+        )
+    )
     min_wavelength: u.Quantity = 1.0 << u.um
     ir_range: Tuple[u.Quantity, u.Quantity] = (8.0 << u.um, 1000.0 << u.um)
     default_unit = u.Lsun / u.AA
 
     def emission_spectrum(
         self,
-        wavelength: u.Quantity, *, lum_ir: u.Quantity, lam_pivot: Optional[u.Quantity] = None, **kwargs) -> u.Quantity:
+        wavelength: u.Quantity,
+        *,
+        lum_ir: u.Quantity,
+        lam_pivot: Optional[u.Quantity] = None,
+        **kwargs,
+    ) -> u.Quantity:
         """
         Compute the dust emission spectrum.
 
@@ -725,8 +814,10 @@ class Casey2012DustComponent(SedComponent):
 
         # shape template in L_lambda-like units (arbitrary normalization)
         mbb = modified_blackbody(lam, T, beta, lam_0=lam0, per_freq=False)
-        pl = (lam / lam_pivot).to_value(u.dimensionless_unscaled) ** alpha * np.exp(-(lam / lam_pivot).to_value(u.dimensionless_unscaled) ** 2)
-        pl = (mbb[np.argmin(np.abs(lam - lam_pivot))] * pl)  # match scale near pivot
+        pl = (lam / lam_pivot).to_value(u.dimensionless_unscaled) ** alpha * np.exp(
+            -(lam / lam_pivot).to_value(u.dimensionless_unscaled) ** 2
+        )
+        pl = mbb[np.argmin(np.abs(lam - lam_pivot))] * pl  # match scale near pivot
 
         shape = mbb + pl
         shape[lam < self.min_wavelength.to(u.um)] = 0.0
@@ -736,7 +827,9 @@ class Casey2012DustComponent(SedComponent):
         wl_min, wl_max = self.ir_range
         L_ir = self.integrate_sed(lam, shape, wl_min.to(u.um), wl_max.to(u.um))
         if L_ir <= 0:
-            raise ValueError("Dust template has zero integrated luminosity in IR range; cannot normalize.")
+            raise ValueError(
+                "Dust template has zero integrated luminosity in IR range; cannot normalize."
+            )
         shape = shape * (lum_ir / L_ir).decompose()
 
         return shape.to(self.default_unit, equivalencies=u.spectral_density(wavelength))
@@ -805,7 +898,8 @@ class CalorimetricDustComponent(SedComponent):
         Two component attenuation model.
     Casey2012DustComponent
         Dust emission model normalized by lum_ir.
-    """ 
+    """
+
     attenuation: AttenuationModel
     dust_sed_component: SedComponent
     default_unit = u.Lsun / u.AA
@@ -857,7 +951,9 @@ class CalorimetricDustComponent(SedComponent):
 
         if isinstance(self.attenuation, CharlotFall00Attenuation):
             # request binned output for CF00
-            source_params["age_bin_edges"] = u.Quantity([0, self.attenuation.young_age.to_value(u.Myr), 15e3], u.Myr)
+            source_params["age_bin_edges"] = u.Quantity(
+                [0, self.attenuation.young_age.to_value(u.Myr), 15e3], u.Myr
+            )
             Lsrc = source.emission_spectrum(lam, **source_params).to(self.default_unit)
             if Lsrc.ndim != 2:
                 raise ValueError(
@@ -874,11 +970,15 @@ class CalorimetricDustComponent(SedComponent):
             Labs_spec = Lsrc - Latt
 
         Labs = self.integrate_sed(lam, Labs_spec)
-        Ldust = self.dust_sed_component.emission_spectrum(lam, lum_ir=Labs, **params).to(self.default_unit)
+        Ldust = self.dust_sed_component.emission_spectrum(
+            lam, lum_ir=Labs, **params
+        ).to(self.default_unit)
 
         return Lsrc, Latt, Ldust
 
+
 # Legacy code for backwards compatibility
+
 
 class DustModelBase(ABC):
     """
@@ -888,11 +988,11 @@ class DustModelBase(ABC):
     -----------
     This class provides the framework for implementing dust models. Subclasses
     should define methods to compute the extinction and emission due to dust.
-    
+
     Attributes
     ----------
     extinction_law : str
-        The name of the extinction law to be used. This is retrieved from the 
+        The name of the extinction law to be used. This is retrieved from the
         `extinction` library.
     """
 
@@ -900,7 +1000,7 @@ class DustModelBase(ABC):
     def get_extinction(self, *args, **kwargs):
         """
         Compute the dust extinction for a given set of parameters.
-        
+
         This method must be implemented by subclasses.
         """
         pass
@@ -909,7 +1009,7 @@ class DustModelBase(ABC):
     def get_emission(self, *args, **kwargs):
         """
         Compute the dust emission for a given set of parameters.
-        
+
         This method must be implemented by subclasses.
         """
         pass
@@ -967,7 +1067,7 @@ class DustModelBase(ABC):
             new_dims = tuple(np.delete(np.arange(spectra.ndim), axis))
             emission = np.expand_dims(emission, new_dims)
         return spectra + emission
-        
+
     def redden_ssp_model(self, ssp_model, **kwargs):
         """
         Apply extinction to a simple stellar population (SSP) model.
@@ -986,7 +1086,8 @@ class DustModelBase(ABC):
         """
         reddened_ssp_model = ssp_model.copy()
         reddened_ssp_model.L_lambda = self.apply_extinction(
-            ssp_model.wavelength, reddened_ssp_model.L_lambda, axis=-1, **kwargs)
+            ssp_model.wavelength, reddened_ssp_model.L_lambda, axis=-1, **kwargs
+        )
         return reddened_ssp_model
 
 
@@ -1004,6 +1105,7 @@ class DustScreen(DustModelBase):
     r_extinction : float
         The R_V value for the extinction law. Default is 3.1.
     """
+
     def __init__(self, extinction_law_name, r_extinction=3.1):
         # super().__init__(extinction_law)
         self.extinction_law_name = extinction_law_name
@@ -1027,9 +1129,18 @@ class DustScreen(DustModelBase):
         extinction_curve : np.ndarray
             Dimensionless extinction factor to be applied to the spectra.
         """
-        return 10**(-0.4 * self.extinction_law(
-            np.array(wavelength.to_value("angstrom"), dtype=float),
-            a_v, self.r_extinction)) <<  u.dimensionless_unscaled
+        return (
+            10
+            ** (
+                -0.4
+                * self.extinction_law(
+                    np.array(wavelength.to_value("angstrom"), dtype=float),
+                    a_v,
+                    self.r_extinction,
+                )
+            )
+            << u.dimensionless_unscaled
+        )
 
     def get_emission(self, wavelength):
         """
@@ -1049,6 +1160,7 @@ class DustScreen(DustModelBase):
         """
         return np.zeros(wavelength.size)
 
+
 class CF03DustScreen(DustScreen):
     """
     Charlot & Fall (2000) dust screen model for young and old stellar populations.
@@ -1065,11 +1177,14 @@ class CF03DustScreen(DustScreen):
     r_extinction : float, optional
         The R_V value for the extinction law. Default is 3.1.
     """
+
     def __init__(self, extinction_law_name, young_ssp_age, r_extinction=3.1):
-        assert isinstance(young_ssp_age, u.Quantity), "young_ssp_age must be an astropy.Quantity"
+        assert isinstance(
+            young_ssp_age, u.Quantity
+        ), "young_ssp_age must be an astropy.Quantity"
         self.young_ssp_age = young_ssp_age
         super().__init__(extinction_law_name, r_extinction=r_extinction)
-    
+
     def get_extinction(self, wavelength, age, a_v_young=1.0, a_v_old=0.3):
         """
         Compute the dust extinction for young and old stellar populations.
@@ -1093,7 +1208,6 @@ class CF03DustScreen(DustScreen):
         age = np.atleast_1d(age)
         young = age < self.young_ssp_age
         ext = np.zeros((age.size, wavelength.size))
-        ext[young] = super().get_extinction(wavelength, a_v_young) 
+        ext[young] = super().get_extinction(wavelength, a_v_young)
         ext[~young] = super().get_extinction(wavelength, a_v_old)
         return ext
-
