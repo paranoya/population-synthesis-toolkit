@@ -38,6 +38,14 @@ class Parameter:
         """Return the underlying Quantity."""
         return self._q
 
+    @q.setter
+    def q(self, value):
+        if not isinstance(self.value, u.Quantity):
+            raise ValueError("Input value must be a quantity")
+        elif not value.unit.is_equivalent(self._q.unit):
+            raise ValueError(f"Input quantity ({value.unit}) must be equivalent to current units ({self._q.unit})")
+        self._q = value
+
     @property
     def value_raw(self):
         """Raw numeric value of the underlying Quantity (unit-stripped)."""
