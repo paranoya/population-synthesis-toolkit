@@ -22,6 +22,7 @@ import numpy as np
 
 import extinction as _extinction_lib
 
+from pst.model import Parameter, ModelBase
 from pst.utils import check_unit, broadcast_to_axis
 from pst.sed import SedComponent, StellarComponent
 
@@ -91,7 +92,7 @@ def modified_blackbody(
 
 ### Attenuation curve (wavelength dependence) ###
 
-class AttenuationCurve(ABC):
+class AttenuationCurve(ABC, ModelBase):
     """
     Base class for dust attenuation curves.
 
@@ -338,7 +339,7 @@ class ExtinctionLibCurve(AttenuationCurve):
         return a_lam << u.mag
 
 
-class AttenuationModel(ABC):
+class AttenuationModel(ModelBase, ABC):
     """
     Base class for geometry dependent attenuation models.
 
@@ -439,12 +440,12 @@ class DustScreenAttenuation(AttenuationModel):
     The main parameter is a_v, interpreted as V band attenuation in magnitudes.
     Additional curve parameters such as r_v are forwarded to the curve.
     """
-
     curve: AttenuationCurve | str = "ccm89"
+    name: str = "dust_screen"
 
     def __post_init__(self):
         """
-        Construct an ExtinctionLibCurve when curve is given by name.
+        Construct an ExtinctionLibCurve when curve is given by nmiame.
         """
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
@@ -500,9 +501,9 @@ class CharlotFall00Attenuation(AttenuationModel):
     The returned attenuation factor has shape (2, n_wave). The first entry
     corresponds to the young component and the second to the old component.
     """
-
-    curve: str | List[AttenuationCurve] | List[str]
+    curve: str | List[AttenuationCurve] | List[str] = "ccm89"
     young_age: u.Quantity = 10.0 << u.Myr
+    name: str = "CF00"
 
     def __post_init__(self):
         """
@@ -596,7 +597,7 @@ class Casey2012DustComponent(SedComponent):
     --------
     CalorimetricDustComponent : Dust emission coupled to absorbed stellar energy.
     """
-
+    name: str = "Casey2012"
     optically_thin: bool = False
     ir_range: Tuple[u.Quantity, u.Quantity] = (8 << u.um, 1000 << u.um)
     default_unit = u.Lsun / u.AA
