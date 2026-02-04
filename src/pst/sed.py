@@ -9,8 +9,9 @@ from astropy import units as u
 from astropy import constants as const
 
 from pst.utils import check_unit, flux_conserving_interpolation
+from pst.model import Parameter, ModelBase
 
-class SedComponent(ABC):
+class SedComponent(ModelBase, ABC):
     """
     Dust emission component.
 
