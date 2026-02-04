@@ -152,13 +152,14 @@ class TestModels(unittest.TestCase):
 
         spectra = model.compute_SED(self.ssp_model, t_obs=13.7 * u.Gyr,
                                     age_bin_edges=[0, 1e9, 1e10])
-        from matplotlib import pyplot as plt
-        plt.figure()
-        for s in spectra:
-            plt.plot(self.ssp_model.wavelength, s)
-        plt.yscale("log")
-        plt.xscale("log")
-        plt.show()
+        self.assertTrue(spectra.ndim == 2)
+        # from matplotlib import pyplot as plt
+        # plt.figure()
+        # for s in spectra:
+        #     plt.plot(self.ssp_model.wavelength, s)
+        # plt.yscale("log")
+        # plt.xscale("log")
+        # plt.show()
 
 
 if __name__ == '__main__':
