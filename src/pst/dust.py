@@ -626,17 +626,10 @@ class CharlotFall00Attenuation(AttenuationModel):
             row corresponds to the young component and the second row
             corresponds to the old component.
         """
-        wavelength = check_unit(wavelength, u.AA)
-
-        f_y = self.curve[0].attenuation_factor(
-            wavelength, a_v=float(a_v_young), **params
-        ).to_value(u.dimensionless_unscaled)
-
-        f_o = self.curve[1].attenuation_factor(
-            wavelength, a_v=float(a_v_old), **params
-        ).to_value(u.dimensionless_unscaled)
-
-        return np.array([f_y, f_o]) << u.dimensionless_unscaled
+        lam = check_unit(wavelength, u.AA)
+        fy = self.curve_young.attenuation_factor(lam, a_v=self.a_v_young.q).to_value(u.dimensionless_unscaled)
+        fo = self.curve_old.attenuation_factor(lam, a_v=self.a_v_old.q).to_value(u.dimensionless_unscaled)
+        return np.stack([fy, fo], axis=0) << u.dimensionless_unscaled
 
 
 @dataclass(kw_only=True)
