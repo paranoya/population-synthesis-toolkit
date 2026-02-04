@@ -1,6 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, Mapping, List, Optional, Tuple
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -9,16 +9,18 @@ from astropy import units as u
 from astropy import constants as const
 from astropy.cosmology import WMAP9
 
-from pst.utils import check_unit, flux_conserving_interpolation
+from pst.utils import check_unit, check_parameter, flux_conserving_interpolation
 from pst import observables
 
 from pst.sed import SedComponent
 from pst.dust import AttenuationModel, CalorimetricDustComponent
-
+from pst.model import Parameter, ModelBase
 
 class GalaxySED(SedComponent):
+    name: str = "galaxy_sed"
     rest_unit = u.Lsun / u.AA  # Rest-frame default units
     obs_unit = u.erg / (u.s * u.cm**2 * u.AA)  # Observed-frame default units
+    _param_index: Dict[str, Parameter] = field(default_factory=dict, init=False, repr=False)
 
     def __init__(self, *,
                  stellar_model: SedComponent=None,
@@ -38,10 +40,13 @@ class GalaxySED(SedComponent):
             if self.dust_em is None:
                 self.target_wavelength = self.stellar_em.ssp.wavelength
             else:
-                dust_wl = np.geomspace(1, 1000, 100) << u.um
-                wl = np.concatenate(
-                    (self.stellar_em.ssp.wavelength.to_value(u.AA),
-                    dust_wl.to_value(u.AA)))
+                if self.stellar_em is not None:
+                    dust_wl = np.geomspace(1, 1000, 100) << u.um
+                    wl = np.concatenate(
+                        (self.stellar_em.ssp.wavelength.to_value(u.AA),
+                        dust_wl.to_value(u.AA)))
+                else:
+                    wl = np.geomspace(0.1, 1e3, 1000) << u.um
                 self.target_wavelength = np.unique(wl) << u.AA
             print("Target wavelength range", self.target_wavelength[[0, -1]],
                    "\nNo. pixels:", self.target_wavelength.size)
@@ -50,7 +55,7 @@ class GalaxySED(SedComponent):
         self.energy_balance = True if isinstance(
             self.dust_em, CalorimetricDustComponent) else False
         # Setup observation properties
-        self.redshift = redshift
+        self.redshift = check_parameter(redshift)
         if cosmology is None:
             self.cosmology = WMAP9
         self.t_obs = self.cosmology.age(self.redshift)
@@ -66,6 +71,55 @@ class GalaxySED(SedComponent):
             print("Interpolating filters to target wavelength")
             filters.interpolate(self.target_wavelength)
             self.filters = filters
+
+    def build_param_index(self, *, include_fixed: bool = True, prefix: str = "") -> Dict[str, Parameter]:
+        """
+        Build and cache a mapping from parameter path to Parameter object.
+
+        Parameters
+        ----------
+        include_fixed : bool, optional
+            If True include fixed parameters in the index.
+        prefix : str, optional
+            Optional path prefix.
+
+        Returns
+        -------
+        index : dict
+            Mapping from dotted parameter path to Parameter.
+        """
+        self._param_index = self.parameters_recursive(prefix=prefix, include_fixed=include_fixed)
+        return self._param_index
+
+    def update_parameters(self, values: Mapping[str, Any], *, validate: bool = True, strict: bool = True) -> None:
+        """
+        Update parameters from a dict.
+
+        Parameters
+        ----------
+        values : mapping
+            Mapping from dotted parameter path to value. Values may be floats
+            or Quantities.
+        validate : bool, optional
+            If True, checks fixed and vrange constraints.
+        strict : bool, optional
+            If True, unknown keys raise KeyError. If False, unknown keys are ignored.
+
+        Notes
+        -----
+        This uses a cached parameter index when available. If the cache has not
+        been built, it is built on the fly.
+        """
+        if not self._param_index:
+            self.build_param_index(include_fixed=True)
+
+        for path, val in values.items():
+            p = self._param_index.get(path, None)
+            if p is None:
+                if strict:
+                    raise KeyError(f"Unknown parameter path '{path}'")
+                continue
+            p.set(val, validate=validate)
 
     def emission_components(self, stellar_em_params=None, dust_att_params=None,
                             dust_em_params=None):
