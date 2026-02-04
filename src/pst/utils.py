@@ -574,8 +574,10 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
 
 def check_parameter(quantity):
     """TODO"""
-    if not isinstance(quantity):
+    if not isinstance(quantity, Parameter):
         return Parameter(quantity)
+    else:
+        return quantity
 
 def broadcast_to_axis(x: np.ndarray, target_ndim: int, axis: int) -> np.ndarray:
     """
