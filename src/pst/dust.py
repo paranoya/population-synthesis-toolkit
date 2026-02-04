@@ -91,9 +91,9 @@ def modified_blackbody(
 
     The per-wavelength conversion uses astropy spectral density equivalencies.
     """
-    lam = check_unit(lam, u.um).to(u.um)
-    T = check_unit(T, u.K).to(u.K)
-    lam_ref = check_unit(lam_ref, u.um).to(u.um)
+    lam = check_unit(lam, u.um)
+    T = check_unit(T, u.K)
+    lam_ref = check_unit(lam_ref, u.um)
 
     nu = (const.c / lam).to(u.Hz)
     bb = BlackBody(temperature=T)
@@ -101,7 +101,7 @@ def modified_blackbody(
 
     if lam_0 is not None:
         lam_0 = check_unit(lam_0, u.um).to(u.um)
-        tau = (lam_0 / lam) ** beta
+        tau = (lam_0 / lam).decompose() ** beta
         factor = -np.expm1(-tau) * u.dimensionless_unscaled
     else:
         nu_ref = (const.c / lam_ref).to(u.Hz)
@@ -520,6 +520,8 @@ class DustScreenAttenuation(AttenuationModel):
         If curve is provided as a string, it is interpreted as an extinction
         package law name and converted into an ExtinctionLibCurve.
         """
+        self.a_v = check_parameter(self.a_v, u.mag)
+
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
 
@@ -593,6 +595,10 @@ class CharlotFall00Attenuation(AttenuationModel):
     a_v_young: Parameter = field(default_factory=lambda: Parameter(1.0, unit=u.mag, vrange=(0.0 << u.mag, np.inf << u.mag), doc="A_V for young SSPs"))
     a_v_old: Parameter = field(default_factory=lambda: Parameter(0.3, unit=u.mag, vrange=(0.0 << u.mag, np.inf << u.mag), doc="A_V for old SSPs"))
     young_age: Parameter = field(default_factory=lambda: Parameter(10.0, unit=u.Myr, doc="Maximum age of young SSPs"))
+
+    def __post_init__(self):
+        self.a_v_young = check_parameter(self.a_v_young, u.mag)
+        self.a_v_old = check_parameter(self.a_v_old, u.mag)
 
     def attenuation_factor(
         self,
