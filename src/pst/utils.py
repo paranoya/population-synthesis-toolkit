@@ -565,6 +565,20 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
         else:
             return quantity.to(default_unit)
 
+    elif isinstance(quantity, Parameter):
+        if default_unit is not None:
+            if not quantity.unit.is_equivalent(default_unit):
+                if equivalence is not None:
+                    quantity.q = quantity.q.to(default_unit,
+                    equivalencies=equivalence(**equiv_kwargs))
+                    return quantity
+                else:
+                    raise u.UnitTypeError(
+                        "Input quantity does not have the appropriate units")
+            else:
+                quantity.q = quantity.q.to(default_unit)
+                return quantity
+
     elif not isq and default_unit is not None:
         return quantity << default_unit
     elif not isq and default_unit is None:
@@ -572,9 +586,11 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
     else:
         return quantity
 
-def check_parameter(quantity):
+def check_parameter(quantity, default_unit=None):
     """TODO"""
     if not isinstance(quantity, Parameter):
+        if default_unit is not None:
+            return Parameter(check_unit(quantity, default_unit))
         return Parameter(quantity)
     else:
         return quantity
