@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, List, Optional, Tuple
+from typing import Any, Dict, Mapping, List, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -14,7 +14,7 @@ from pst import observables
 
 from pst.sed import SedComponent
 from pst.dust import AttenuationModel, CalorimetricDustComponent
-from pst.model import Parameter, ModelBase
+from pst.model import Parameter
 
 class GalaxySED(SedComponent):
     name: str = "galaxy_sed"
@@ -27,8 +27,9 @@ class GalaxySED(SedComponent):
                  dust_attenuation_model: AttenuationModel=None,  # Fix typing
                  dust_model: SedComponent=None,
                  target_wavelength: u.Quantity=None,
-                 redshift: float=0.0, cosmology=None,
-                 filters: List(observables.Filter)=None):
+                 redshift: Union[Parameter, float]=0.0,
+                 cosmology=None,
+                 filters: List[observables.Filter]=None):
         # Setup components
         self.stellar_em = stellar_model
         self.dust_attenuation = dust_attenuation_model
