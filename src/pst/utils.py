@@ -7,6 +7,7 @@ from astropy import units as u
 from scipy.sparse import csr_matrix
 from scipy.interpolate import PchipInterpolator
 from scipy.integrate import cumulative_trapezoid
+from pst.model import Parameter
 
 SQRT_2 = np.sqrt(2)
 
@@ -570,6 +571,11 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
         raise ValueError("Input value must be a astropy.units.Quantity")
     else:
         return quantity
+
+def check_parameter(quantity):
+    """TODO"""
+    if not isinstance(quantity):
+        return Parameter(quantity)
 
 def broadcast_to_axis(x: np.ndarray, target_ndim: int, axis: int) -> np.ndarray:
     """
