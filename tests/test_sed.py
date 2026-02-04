@@ -11,16 +11,16 @@ class TestGalaxySED(unittest.TestCase):
     def setUpClass(self):
         print("Setting SSP model for testing dust models")
 
-        # ssp = SSP.PopStar(IMF="cha")
-        ssp = SSP.BC03_2016()
+        ssp = SSP.PopStar(IMF="cha")
+        # ssp = SSP.BC03_2016()
         sfh = models.ExponentialDelayedCEM(tau=10, today=13.7, mass_today=1e10,
         ism_metallicity_today=0.02)
         self.stellar_em = sed.StellarComponent(ssp=ssp, sfh=sfh)
-        self.dust_att = dust.DustScreenAttenuation()
+        self.dust_att = dust.DustScreenAttenuation(a_v=1.0 << u.mag)
         
         self.dust_em = dust.CalorimetricDustComponent(
             attenuation=self.dust_att,
-            dust=dust.Casey2012DustComponent())
+            dust_sed_component=dust.Casey2012DustComponent())
 
     def test_model(self):
 
@@ -38,7 +38,15 @@ class TestGalaxySED(unittest.TestCase):
                               redshift=0.5, cosmology=None,
                               filters=filters)
 
-        spec = model.emission_components(dust_att_params=dict(a_v=1.0))
+        params = model.build_param_index(include_fixed=True)
+        print(params)
+
+        new_params = {"redshift": 0.2}
+        model.update_parameters(new_params)
+        update = model.parameters_recursive()
+        print(update)
+        spec = model.emission_components(dust_att_params=dict())
+
         spec_tot = model.emission_spectrum(dust_att_params=dict(a_v=1.0),
                                             to_obs_frame=False)
         
@@ -58,35 +66,32 @@ class TestGalaxySED(unittest.TestCase):
         spec_tot = model.emission_spectrum(dust_att_params=dict(a_v=1.0),
                                             to_obs_frame=True)
 
-        # from matplotlib import pyplot as plt
-        # plt.figure()
-        # plt.plot(model.target_wavelength, spec["dust_sed"])
+        from matplotlib import pyplot as plt
+        plt.figure()
+        for k, v in spec.items():
+            if k == "dust_sed":
+                plt.plot(model.target_wavelength, v, label=k, lw=3)
+            else:
+                plt.plot(model.target_wavelength, v, label=k, lw=1)
+        plt.plot(model.target_wavelength, (spec_tot * model.distance_factor).to(v.unit), label="Total")
+        plt.yscale("log")
+        plt.xscale("log")
+        # plt.ylim(1, 1e7)
+        plt.legend()
+        plt.ylabel("Flux (" + str(v.unit) + ")")
         # plt.show()
-        # plt.figure()
-        # for k, v in spec.items():
-        #     if k == "dust_sed":
-        #         plt.plot(model.target_wavelength, v, label=k, lw=3)
-        #     else:
-        #         plt.plot(model.target_wavelength, v, label=k, lw=1)
-        # plt.plot(model.target_wavelength, (spec_tot * model.distance_factor).to(v.unit), label="Total")
-        # plt.yscale("log")
-        # plt.xscale("log")
-        # # plt.ylim(1, 1e7)
-        # plt.legend()
-        # plt.ylabel("Flux (" + str(v.unit) + ")")
-        # # plt.show()
 
-        # spec_tot_fnu = spec_tot.to("3631 Jy", u.spectral_density(model.target_wavelength))
-        # fig, ax = plt.subplots()
-        # twax = ax.twinx()
-        # ax.plot(model.target_wavelength, -2.5 * np.log10(spec_tot_fnu.value))
-        # for filtr, mag in zip(filters.filters, mags):
-        #     ax.scatter(filtr.effective_wavelength(), mag)
-        #     twax.plot(filtr.filter_wavelength, filtr.filter_resp)
-        # ax.set_xscale("log")
-        # ax.set_ylim(12, 35)
+        spec_tot_fnu = spec_tot.to("3631 Jy", u.spectral_density(model.target_wavelength))
+        fig, ax = plt.subplots()
+        twax = ax.twinx()
+        ax.plot(model.target_wavelength, -2.5 * np.log10(spec_tot_fnu.value))
+        for filtr, mag in zip(filters.filters, mags):
+            ax.scatter(filtr.effective_wavelength(), mag)
+            twax.plot(filtr.filter_wavelength, filtr.filter_resp)
+        ax.set_xscale("log")
+        ax.set_ylim(12, 35)
         
-        # plt.show()
+        plt.show()
 
 if __name__ == '__main__':
     unittest.main()
