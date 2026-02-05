@@ -549,51 +549,71 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
     ----------
     quantity : np.ndarray or astropy.units.Quantity
         Input quantity.
-    default_unit : astropy.units.Quantity, default=None
+    default_unit : astropy.units.Unit, default=None
         If `quantity` has not units, it corresponds to the unit assigned to it.
         Otherwise, it is used to check the equivalency with `quantity`.
     """
+    # Quantity
     isq = isinstance(quantity, u.Quantity)
-    if isq and default_unit is not None:
-        if not quantity.unit.is_equivalent(default_unit):
-            if equivalence is not None:
-                return quantity.to(default_unit,
-                equivalencies=equivalence(**equiv_kwargs))
-            else:
-                raise u.UnitTypeError(
-                    "Input quantity does not have the appropriate units")
-        else:
+    if isq:
+        if default_unit is None:
+            return quantity
+
+        if quantity.unit.is_equivalent(default_unit):
             return quantity.to(default_unit)
 
-    elif isinstance(quantity, Parameter):
-        if default_unit is not None:
-            if not quantity.unit.is_equivalent(default_unit):
-                if equivalence is not None:
-                    quantity.q = quantity.q.to(default_unit,
-                    equivalencies=equivalence(**equiv_kwargs))
-                    return quantity
-                else:
-                    raise u.UnitTypeError(
-                        "Input quantity does not have the appropriate units")
-            else:
-                quantity.q = quantity.q.to(default_unit)
-                return quantity
+        if equivalence is not None:
+            return quantity.to(default_unit, equivalencies=equivalence(**equiv_kwargs))
 
-    elif not isq and default_unit is not None:
-        return quantity << default_unit
-    elif not isq and default_unit is None:
+        raise u.UnitTypeError("Input quantity does not have the appropriate units")
+
+    # Parameter
+    if isinstance(quantity, Parameter):
+        if default_unit is None:
+            return quantity
+
+        if quantity.q.unit.is_equivalent(default_unit):
+            quantity.q = quantity.q.to(default_unit)
+            return quantity
+
+        if equivalence is not None:
+            quantity.q = quantity.q.to(default_unit, equivalencies=equivalence(**equiv_kwargs))
+            return quantity
+
+        raise u.UnitTypeError("Input quantity does not have the appropriate units")
+
+    # Bare number
+    if default_unit is None:
         raise ValueError("Input value must be a astropy.units.Quantity")
-    else:
-        return quantity
+    return quantity << default_unit
 
-def check_parameter(quantity, default_unit=None):
-    """TODO"""
-    if not isinstance(quantity, Parameter):
+def check_parameter(x, default_unit=None, **param_kwargs):
+    """
+    Coerce input into a Parameter.
+
+    Parameters
+    ----------
+    x : number, astropy.units.Quantity, or Parameter
+        Input value.
+    default_unit : astropy.units.Unit, optional
+        Unit to assume for bare numbers and conversion target.
+    **param_kwargs
+        Forwarded to Parameter constructor when wrapping a non-Parameter.
+
+    Returns
+    -------
+    p : Parameter
+    """
+    if isinstance(x, Parameter):
         if default_unit is not None:
-            return Parameter(check_unit(quantity, default_unit))
-        return Parameter(quantity)
-    else:
-        return quantity
+            x = check_unit(x, default_unit)  # converts in place
+        return x
+
+    if default_unit is not None:
+        q = check_unit(x, default_unit)
+        return Parameter(q, unit=q.unit, **param_kwargs)
+
+    return Parameter(x, **param_kwargs)
 
 def broadcast_to_axis(x: np.ndarray, target_ndim: int, axis: int) -> np.ndarray:
     """
