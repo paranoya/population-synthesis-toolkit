@@ -1,4 +1,8 @@
+from __future__ import annotations
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Set
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+from functools import wraps
 
 import numpy as np
 from astropy import units as u
@@ -6,129 +10,253 @@ from scipy import special
 from scipy import interpolate
 
 from pst.SSP import SSPBase
-from pst.utils import check_unit, SQRT_2
+from pst.model import ModelBase, Parameter
+from pst.utils import SQRT_2, check_parameter, check_unit
 
-
+# ---------------------------------------------------------------------
 # CEM utils and mixins
+# ---------------------------------------------------------------------
+def _check_time_dec(func):
+    """
+    Decorator that normalizes a ``time`` argument to an ``astropy.units.Quantity``.
+
+    The wrapped method may be called with:
+
+    - a bare number / numpy array (assumed to be in Gyr),
+    - an :class:`astropy.units.Quantity` convertible to Gyr,
+    - a :class:`pst.model.Parameter` whose ``.q`` is convertible to Gyr.
+
+    The wrapped function is always called with a Quantity in Gyr.
+
+    Notes
+    -----
+    This decorator only converts the *first* positional argument after ``self``
+    (conventionally named ``time`` or ``times``). Any additional positional
+    and keyword arguments are passed through unchanged.
+    """
+    @wraps(func)
+    def wrapper(self, time, *args, **kwargs):
+        if isinstance(time, Parameter):
+            tq = time.q
+        else:
+            tq = check_unit(time, u.Gyr)
+        return func(self, tq, *args, **kwargs)
+    return wrapper
 
 class MassPropMetallicityMixin:
-    r"""Model mixin where the metallicity is proportional to the stellar mass
-    
+    r"""
+    Mixin implementing a mass-dependent metallicity evolution.
+
+    This mixin provides a default implementation of
+    :meth:`~pst.cem.ChemicalEvolutionModel.ism_metallicity` where the ISM
+    metallicity scales with the cumulative stellar mass formed:
+
     .. math::
-        Z(t) = Z_{\rm today} \cdot \left(\frac{M_{\star}(t)}{M_{\star}(\rm today)}\right)^\alpha
-        :label: powlaw-metallicity
+        Z(t) = Z_{\rm today}\,\left(\frac{M_\star(t)}{M_\star({\rm today})}\right)^\alpha
 
-    where :math:`Z_{\rm today}` is the ISM metallicity at present,
-    :math:`M_{\star}(t)` is the stellar mass formed at time :math:`t`, and
-    :math:`M_{\star}(\rm today)` is the stellar mass at present.
-    The exponent :math:`\alpha` regulates the chemical enrichment rate with stellar mass.
+    The intention is to allow any star-formation-history (SFH) model to be
+    combined with a simple analytic chemical enrichment prescription.
 
+    Required host attributes
+    ------------------------
+    The host class must define:
+
+    - ``mass_today`` : :class:`~astropy.units.Quantity` or :class:`pst.model.Parameter`
+        Total stellar mass formed at the observing time (same units as
+        :meth:`stellar_mass_formed`).
+    - ``ism_metallicity_today`` : Quantity or Parameter
+        Present-day ISM metallicity (dimensionless mass fraction).
+    - ``alpha_powerlaw`` : Quantity/Parameter or float
+        Power-law exponent controlling the enrichment rate.
+    - :meth:`stellar_mass_formed(times)`
+        Cumulative stellar mass formed as a function of cosmic time.
+
+    Notes
+    -----
+    - The returned metallicity is dimensionless (mass fraction).
+    - For physical results, host models should ensure
+      :meth:`stellar_mass_formed` is non-decreasing and non-negative.
     """
     @property
-    def ism_metallicity_today(self):
+    def ism_metallicity_today(self) -> Parameter:
         """ISM metals mass fraction at present."""
         return self._ism_metallicity_today
     
     @ism_metallicity_today.setter
-    def ism_metallicity_today(self, value):
+    def ism_metallicity_today(self, value: Parameter):
         self._ism_metallicity_today = value
     
     @property
-    def alpha_powerlaw(self):
+    def alpha_powerlaw(self) -> Parameter:
         """Stellar mass power-law exponent."""
         return self._alpha_powerlaw
 
     @alpha_powerlaw.setter
-    def alpha_powerlaw(self, value):
+    def alpha_powerlaw(self, value: Parameter):
         self._alpha_powerlaw = value
 
-    def ism_metallicity(self, times):
-        """Evaluate the ISM metallicity at a given set of times, see eq. :eq:`powlaw-metallicity`.
+    def ism_metallicity(self, times: Union[np.array, u.Quantity]) -> u.Quantity:
+        """
+        Evaluate ISM metallicity at one or more cosmic times.
 
         Parameters
         ----------
-        times : :class:`astropy.units.Quantity`
-            Cosmic times at which the metallicity will be evaluated.
+        times : array-like or :class:`astropy.units.Quantity`
+            Cosmic times since the Big Bang. If a bare array is provided, it is
+            interpreted as Gyr.
 
         Returns
         -------
         z_t : :class:`astropy.units.Quantity`
-            Vector with the ISM metallicity at each input time.
+            Dimensionless ISM metallicity (mass fraction) evaluated at each input
+            time. Shape matches ``times``.
         """
         m = self.stellar_mass_formed(times)
         return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
 
 def sfh_quenching_decorator(stellar_mass_formed):
-    """A decorator for including a quenching event in a given SFH."""
-    def wrapper_stellar_mass_formed(*args):
-        quenching_time = getattr(args[0], "quenching_time", 20.0 << u.Gyr)
-        stellar_mass = stellar_mass_formed(*args)
-        final_mass = stellar_mass_formed(args[0], quenching_time)
-        return np.where(args[1] < quenching_time, stellar_mass, final_mass)
-    return wrapper_stellar_mass_formed
-
-
-class ChemicalEvolutionModel(ABC):
     """
-    Abstract base class for chemical evolution models.
+    Decorator that enforces a hard quenching event in a cumulative SFH.
 
-    This class provides an interface for modeling the chemical and stellar
-    evolution of a galaxy over time. It includes methods for computing the 
-    Spectral Energy Distribution (SED), stellar mass, and photometry from 
-    a given Simple Stellar Population (SSP) model. The specific methods for 
-    computing the star formation rate (SFR) and the metallicity evolution 
-    (Z-SFR) need to be implemented in a subclass.
+    The decorated :meth:`stellar_mass_formed` behaves normally for
+    ``time < quenching_time``. For later times it returns the constant value
+    :math:`M_\\star(\\mathrm{quenching\\_time})`, i.e. no further stellar mass
+    is formed.
+
+    The host instance is expected to provide an attribute ``quenching_time``,
+    which may be a :class:`pst.model.Parameter`, an
+    :class:`astropy.units.Quantity`, or a bare number (assumed Gyr).
+
+    Notes
+    -----
+    - This decorator assumes the wrapped function returns the *cumulative*
+      stellar mass formed.
+    - The quenching is instantaneous and permanent (a step in the cumulative SFH).
     """
-    
-    @property
-    def today(self):
-        return self._today
+    @wraps(stellar_mass_formed)
+    def wrapper(self, time, *args, **kwargs):
+        tq = time.q if isinstance(time, Parameter) else check_unit(time, u.Gyr)
+        qt = getattr(self, "quenching_time", None)
+        if qt is None:
+            return stellar_mass_formed(self, tq, *args, **kwargs)
+        qtq = qt.q if isinstance(qt, Parameter) else check_unit(qt, u.Gyr)
 
-    @today.setter
-    def today(self, value):
-        if value is not None:
-            self._today = check_unit(value, u.Gyr)
-        else:
-            self._today = None
+        m = stellar_mass_formed(self, tq, *args, **kwargs)
+        m_q = stellar_mass_formed(self, qtq, *args, **kwargs)
+        return np.where(tq < qtq, m, m_q)
+    return wrapper
 
-    def __init__(self, **kwargs):
-        self.today = kwargs.get("today")
+@dataclass
+class ChemicalEvolutionModel(ModelBase, ABC):
+    """
+    Base class for chemical evolution models (CEMs).
+
+    A Chemical Evolution Model defines two core functions of cosmic time:
+
+    - :meth:`stellar_mass_formed(t)`: cumulative stellar mass formed up to time ``t``
+    - :meth:`ism_metallicity(t)`: ISM metallicity (mass fraction) at time ``t``
+
+    The class also provides utilities to synthesize spectra and photometry from
+    a :class:`pst.SSP.SSPBase` grid by integrating the SFH over SSP age bins.
+
+    Time convention
+    ---------------
+    All "time" arguments are **cosmic time since the Big Bang**, not lookback time.
+    The optional attribute ``today`` represents the cosmic age of the Universe
+    at the observing epoch and is used by helper methods that require a
+    normalization point (e.g. formation-time percentiles).
+
+    Parameters
+    ----------
+    today : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
+        Cosmic time of observation. If a bare number is provided it is assumed
+        to be in Gyr.
+
+    Notes
+    -----
+    Implementations should strive to ensure:
+
+    - :meth:`stellar_mass_formed` is non-decreasing with time,
+    - :meth:`stellar_mass_formed(t < 0) = 0`,
+    - behavior for ``t > today`` is well-defined (commonly clipped to
+      :math:`M_\\star(\\mathrm{today})`).
+    """
+
+    name: str = field(default="base_cem", init=False)
+    today: Optional[Parameter | u.Quantity | float] = None
+
+    def __post_init__(self):
+        if self.today is not None:
+            self.today = check_parameter(self.today, u.Gyr,
+                                         doc="Age of the Universe at observation")
 
     @abstractmethod
-    def stellar_mass_formed(self, time) -> u.Quantity:
-        """Total stellar mass formed at a given time."""
+    def stellar_mass_formed(self, time: u.Quantity) -> u.Quantity:
+        """
+        Cumulative stellar mass formed as a function of cosmic time.
+
+        Parameters
+        ----------
+        time : :class:`astropy.units.Quantity`
+            Cosmic time(s) since the Big Bang.
+
+        Returns
+        -------
+        mstar : :class:`astropy.units.Quantity`
+            Cumulative stellar mass formed up to each input time. Units should be
+            mass (typically Msun). Shape matches ``time``.
+        """
         return
 
     @abstractmethod
-    def ism_metallicity(self, time) -> u.Quantity:
-        """ISM metals mass fraction at a given time."""
+    def ism_metallicity(self, time: u.Quantity) -> u.Quantity:
+        """
+        ISM metallicity (mass fraction) as a function of cosmic time.
+
+        Parameters
+        ----------
+        time : :class:`astropy.units.Quantity`
+            Cosmic time(s) since the Big Bang.
+
+        Returns
+        -------
+        z_t : :class:`astropy.units.Quantity`
+            Dimensionless metallicity (mass fraction). Shape matches ``time``.
+        """
         return
 
     @u.quantity_input
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr,
                                oversample_factor=10) -> u.Quantity:
         """
-        Interpolate the star formation history to compute the SSP stellar masses.
+        Compute SSP mass weights by integrating the SFH over SSP age bins.
 
-        This method computes the star formation history of a galaxy over time
-        and uses it to interpolate the stellar masses for a given Simple Stellar
-        Population (SSP) model at the time of observation.
+        This routine discretizes the interval ``[0, t_obs]`` into SSP age bins and
+        computes the stellar mass formed in each bin via differences of the cumulative
+        SFH, then maps each bin to the SSP grid using :meth:`pst.SSP.SSPBase.get_weights`.
 
         Parameters
         ----------
-        SSP : :class:`pst.SSP.SSPBase`
-            The Simple Stellar Population (SSP) model used for synthesizing the SED.
-        t_obs : astropy.Quantity
-            The cosmic time at which the galaxy is observed. Only SSPs with ages
-            younger than `t_obs` are used.
-        oversample_factor : int
-            Ages oversampling factor. 
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        oversample_factor : int, optional
+            Factor by which SSP age bins are oversampled for smoother integration.
+            Default is 10.
 
         Returns
         -------
-        weights : astropy.Quantity
-            Stellar masses corresponding to each SSP age and metallicity, in units
-            of solar masses.
+        weights : :class:`astropy.units.Quantity`
+            Mass weights on the SSP grid. The expected shape is ``(Z, A)``
+            (metallicity, age). Units are mass (typically Msun).
+
+        Notes
+        -----
+        The method uses midpoints of SSP age bins and evaluates
+        :meth:`stellar_mass_formed` and :meth:`ism_metallicity` at corresponding
+        cosmic times (``t_obs - age``).
         """
         # define age bins from 0 to t_obs
         age_bins = np.hstack(
@@ -153,32 +281,42 @@ class ChemicalEvolutionModel(ABC):
 
     def time_at_stellar_mass_frac(self, frac, today=None, time_res=30 << u.Myr):
         """
-        Get the cosmic time at which the model formed a fraction of the total stellar mass.
+        Time at which a fraction of the final stellar mass has formed.
+
+        This function samples the cumulative SFH on a regular cosmic-time grid and
+        linearly interpolates the time(s) at which:
+
+        .. math::
+            \\frac{M_\\star(t)}{M_\\star(\\mathrm{today})} = f
 
         Parameters
         ----------
-        frac : float
-            Input fraction.
-        today : float or astropy.units.Quantity
-            Age of the Universe at the time of the observation. If not provided,
-            the defult is to use ``self.today'' (returning an error if not set).
-        time_res : float or astropy.units.Quantity
-            Time-step resolution for sampling the SFH.
+        frac : float or array-like
+            Target mass fraction(s) in the range [0, 1].
+        today : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
+            Cosmic observing time. If not provided, uses ``self.today``.
+        time_res : float or :class:`astropy.units.Quantity`, optional
+            Sampling resolution of the time grid. If a bare number is provided it is
+            assumed to be in Gyr. Default is 30 Myr.
+
         Returns
         -------
-        frac_times : astropy.units.Quantity
-            Fraction formation times.
+        t_frac : :class:`astropy.units.Quantity`
+            Cosmic time(s) at which the specified fraction(s) are reached.
+            Shape matches ``frac``.
+
+        Raises
+        ------
+        ValueError
+            If neither ``today`` nor ``self.today`` is set.
         """
         frac = np.atleast_1d(frac)
         if today is None:
             if self.today is None:
-                raise ValueError(
-                    "current CEM does not have attribute 'today' set,"
-                    + " it must be provided by the user")
-            else:
-                today = self.today
+                raise ValueError("Attribute today is not set; provide today.")
+            today = self.today.q
         else:
-            today = check_unit(today, u.Gyr)
+            today = check_unit(today.q if isinstance(today, Parameter) else today, u.Gyr)
 
         time_res = check_unit(time_res, u.Gyr)
         dummy_time = np.arange(0, today.to_value("Gyr"),
@@ -204,32 +342,38 @@ class ChemicalEvolutionModel(ABC):
         M *= valid[:, None]
         return M
 
-    def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity,
-                    allow_negative=False, age_bin_edges=None) -> u.Quantity:
+    def compute_SED(self, ssp : SSPBase, t_obs : u.Quantity, *,
+                    allow_negative: bool=False, age_bin_edges=None) -> u.Quantity:
         """
-        Compute the Spectral Energy Distribution (SED) resulting from the SFH.
+        Synthesize the spectral energy distribution (SED) at an observing time.
 
-        This method synthesizes the SED resulting from the chemical evolution model,
-        observed at a given time, using the provided SSP model.
+        The SED is obtained by summing SSP spectra weighted by the stellar mass formed
+        in each SSP age/metallicity bin.
 
         Parameters
         ----------
-        SSP : pst.SSP.SSPBase
-            The Simple Stellar Population (SSP) model used for synthesizing the SED.
-        t_obs : astropy.Quantity
-            The cosmic time at which the galaxy is observed.
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing ``ssp.L_lambda`` with shape ``(Z, A, W)`` where
+            ``W`` is wavelength.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation.
         allow_negative : bool, optional
-            Whether to allow SSPs with negative masses in the SED computation.
-            Default is True.
+            If False (default), any negative SSP weights are clipped to zero.
+        age_bin_edges : array-like or :class:`astropy.units.Quantity`, optional
+            If provided, the SED is returned in coarse age bins. Edges are in the
+            same units as ``ssp.ages`` and define ``Nbin = len(edges) - 1`` bins.
 
         Returns
         -------
-        sed : astropy.Quantity
-            The spectral energy distribution, in the same units as `SSP.L_lambda`.
-        
-        See also
-        --------
-        :func:`interpolate_ssp_masses`
+        sed : :class:`astropy.units.Quantity`
+            If ``age_bin_edges`` is None: shape ``(W,)``.
+            If ``age_bin_edges`` is provided: shape ``(Nbin, W)``.
+            Units are ``(mass unit) * (ssp.L_lambda unit)``.
+
+        Notes
+        -----
+        ``age_bin_edges`` bins SSP *ages* (not cosmic times). Internally the
+        mapping is performed using :func:`numpy.digitize` on ``ssp.ages``.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
         weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
@@ -246,29 +390,41 @@ class ChemicalEvolutionModel(ABC):
         sed_val = np.einsum("za,zaw,an->nw", weights.value, ssp.L_lambda.value, M)
         return sed_val * (weights.unit * ssp.L_lambda.unit)
 
-    def compute_photometry(self, ssp, t_obs, photometry=None, age_bin_edges=None) -> u.Quantity:
+    def compute_photometry(self, ssp, t_obs, *,
+                           photometry: u.Quantity=None, allow_negative: bool=False,
+                           age_bin_edges=None) -> u.Quantity:
         """
-        Compute the synthetic photometry using a SSP at a given time.
-
-        This method computes the photometric fluxes associated to
-        the SFH by synthesizing the fluxes of the input SSP model.
+        Synthesize broadband photometry at an observing time.
 
         Parameters
         ----------
-        ssp : pst.SSP.SSPBase
-            The Simple Stellar Population (SSP) model used for generating the
-            synthetic photometry.
-        t_obs : astropy.Quantity
-            The cosmic time at which the galaxy is observed.
-        photometry : np.ndarray, optional
-            A grid of luminosities in multiple photometric bands. If None, the 
-            default SSP photometry will be used. The last two dimensions must 
-            match the metallicity and age grid of the SSP model.
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model defining the SSP grid used to compute weights.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation.
+        photometry : :class:`astropy.units.Quantity` or ndarray, optional
+            Photometry grid on the SSP axes with shape ``(B, Z, A)``, where
+            ``B`` is the number of bands. If an ndarray is provided, it is assumed
+            to be in ``Jy / Msun``.
+            If None, uses ``ssp.photometry``.
+        allow_negative : bool, optional
+            If False (default), negative SSP weights are clipped to zero.
+        age_bin_edges : array-like or :class:`astropy.units.Quantity`, optional
+            If provided, photometry is returned per coarse age bin defined over
+            SSP ages. Output will have ``Nbin = len(edges) - 1`` bins.
 
         Returns
         -------
-        model_photometry : astropy.Quantity
-            The photometry of the galaxy in the same units as the input photometry.
+        model_photometry : :class:`astropy.units.Quantity`
+            If ``age_bin_edges`` is None: shape ``(B,)``.
+            If ``age_bin_edges`` is provided: shape ``(Nbin, B)``.
+            Units are ``photometry.unit * weights.unit``.
+
+        Notes
+        -----
+        This method assumes the photometry grid is expressed per unit formed mass
+        (e.g. ``Jy / Msun``). The output is therefore an absolute flux/luminosity
+        in the same system as the input grid.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
         weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
@@ -294,89 +450,114 @@ class ChemicalEvolutionModel(ABC):
 
 
 #-------------------------------------------------------------------------------
+@dataclass
 class SingleBurstCEM(ChemicalEvolutionModel):
     """
-    Single-burst star formation model.
+    Instantaneous single-burst star formation history.
 
-    This class models a galaxy's star formation history as a single burst
-    occurring at a specific time, after which no further star formation occurs.
+    The model forms a total mass ``mass_burst`` at cosmic time ``time_burst`` and
+    forms no additional stars thereafter. The cumulative formed mass is:
 
-    Attributes
+    - 0 for ``t < time_burst``
+    - ``mass_burst`` for ``t >= time_burst``
+
+    Parameters
     ----------
-    mass_burst : astropy.Quantity
-        Total stellar mass formed in the burst.
-    time_burst : astropy.Quantity
-        Time of the starburst in cosmic time.
-    burst_metallicity : astropy.Quantity
-        Metallicity of the burst.
-    """
-    def __init__(self, **kwargs):
-        self.mass_burst = check_unit(kwargs['mass_burst'], u.Msun)
-        self.time_burst = check_unit(kwargs['time_burst'], u.Gyr)
-        self.burst_metallicity = kwargs.get("burst_metallicity",
-                                            0.02 * u.dimensionless_unscaled)
-        ChemicalEvolutionModel.__init__(self, **kwargs)
+    mass_burst : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
+        Total stellar mass formed in the burst. Bare numbers are assumed in Msun.
+    time_burst : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
+        Cosmic time of the burst. Bare numbers are assumed in Gyr.
+    burst_metallicity : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
+        Constant ISM metallicity assigned to all stars (dimensionless mass fraction).
 
-    @u.quantity_input
-    def stellar_mass_formed(self, time : u.Gyr):
+    Notes
+    -----
+    This is a cumulative SFH model; the instantaneous SFR is a delta function.
+    """
+    mass_burst: Parameter | u.Quantity | float = 1 << u.Msun
+    time_burst: Parameter | u.Quantity | float = 0 << u.Gyr
+    burst_metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
+    name: str = field(default="single_burst_cem", init=False)
+
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.mass_burst = check_parameter(self.mass_burst, u.Msun,
+                                          doc="Total stellar mass in the burst")
+        self.time_burst = check_parameter(self.time_burst, u.Gyr,
+                                          doc="Cosmic time of the burst")
+        self.burst_metallicity = check_parameter(self.burst_metallicity,
+                                                 u.dimensionless_unscaled,
+                                                 doc="Burst metallicity")
+
+    @_check_time_dec
+    def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
         """Total stellar mass formed at a given time."""
-        mass = np.zeros(time.size, dtype=float) * self.mass_burst.unit
-        mass[time >= self.time_burst] = self.mass_burst
+        mass = np.zeros(time.size, dtype=float) * self.mass_burst.q.unit
+        mass[time >= self.time_burst] = self.mass_burst.q
         return mass
 
-    @u.quantity_input
-    def ism_metallicity(self, time : u.Gyr):
+    @_check_time_dec
+    def ism_metallicity(self, time: u.Gyr) -> u.Quantity:
         """ISM metals mass fraction at a given time."""
-        return np.full(time.size, fill_value=self.burst_metallicity)
+        return np.full(time.size,
+                       fill_value=self.burst_metallicity.q.value) << self.burst_metallicity.q.unit
 
 
 #-------------------------------------------------------------------------------
+@dataclass
 class ExponentialCEM(ChemicalEvolutionModel):
     r"""
-    Exponentially declining star formation history model.
+    Exponentially-declining cumulative SFH.
 
-    This class models a galaxy's star formation rate as an exponentially
-    declining function of time:
+    The cumulative formed mass follows:
 
     .. math::
-        M_\star(t) = M_{\rm inf} \cdot (1 - e^{-t/\tau})
- 
-    Attributes
+        M_\star(t) = M_{\infty}\,\left(1 - e^{-t/\tau}\right)
+
+    where ``M_infty`` is the asymptotic formed mass and ``tau`` is the
+    e-folding time.
+
+    Parameters
     ----------
-    stellar_mass_inf : astropy.Quantity
-        Asymptotic stellar mass at infinite time.
-    tau : astropy.Quantity
-        Timescale of the exponential decline in star formation.
-    metallicity : float
-        Metallicity of the gas (constant).
+    stellar_mass_inf : float, Quantity, or Parameter, optional
+        Asymptotic formed stellar mass ``M_infty``. Bare numbers assumed in Msun.
+    tau : float, Quantity, or Parameter, optional
+        E-folding time in Gyr.
+    metallicity : float, Quantity, or Parameter, optional
+        Constant ISM metallicity (dimensionless mass fraction).
 
-    Examples
-    --------
-    Create an instance of the `ExponentialCEM` model and compute the stellar mass formed:
-
-    >>> from astropy import units as u
-    >>> from pst.models import ExponentialCEM
-    >>> model = ExponentialCEM(stellar_mass_inf=1e10 * u.Msun, tau=2 * u.Gyr, metallicity=0.02)
-    >>> time = [0.5, 1.0, 2.0] * u.Gyr
-    >>> model.stellar_mass_formed(time)
-    <Quantity [2.21199217e+09, 3.93469340e+09, 6.32120559e+09] solMass>    
+    Notes
+    -----
+    The metallicity returned by :meth:`ism_metallicity` is constant in time.
     """
-    def __init__(self, **kwargs):
-        self.stellar_mass_inf = check_unit(kwargs['stellar_mass_inf'],
-                                           default_unit=u.Msun)
-        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
-        self.metallicity = kwargs['metallicity']
-        super().__init__(**kwargs)
+    stellar_mass_inf: Parameter = 1 << u.Msun
+    tau: Parameter = 1 << u.Gyr
+    metallicity: Parameter = 0.02 << u.dimensionless_unscaled
+    today: Parameter | None = None
 
-    @u.quantity_input
-    def stellar_mass_formed(self, time : u.Gyr):
+    name: str = field(default="exponential_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.stellar_mass_inf = check_parameter(self.stellar_mass_inf, u.Msun,
+                                                doc="Total stellar mass at infinity")
+        self.tau = check_parameter(self.tau, u.Gyr,
+                                   doc="E-folding SFH timescale")
+        self.metallicity = check_parameter(self.metallicity,
+                                           u.dimensionless_unscaled,
+                                           doc="Burst metallicity")
+
+    @_check_time_dec
+    def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
       return self.stellar_mass_inf * ( 1 - np.exp(-time/self.tau) )
 
-    @u.quantity_input
-    def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.metallicity)
+    @_check_time_dec
+    def ism_metallicity(self, time: u.Gyr) -> u.Quantity:
+        return np.full(time.size, fill_value=self.metallicity.q)
 
 
+@dataclass
 class ExponentialQuenchedCEM(ExponentialCEM):
     """
     Exponentially declining CEM model including a quenching event.
@@ -397,74 +578,83 @@ class ExponentialQuenchedCEM(ExponentialCEM):
     --------
     :class:`ExponentialCEM`
     """
-    def __init__(self, **kwargs):
-        self.quenching_time = check_unit(kwargs['quenching_time'], u.Gyr)
-        super().__init__(**kwargs)
+    quenching_time: Parameter | u.Quantity | float = None
+    name: str = field(default="exponential_quenched_cem", init=False)
 
+    def __post_init__(self):
+        super().__post_init__()
+        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
+                                                doc="Cosmic quenching time")
+
+    @_check_time_dec
     @sfh_quenching_decorator
     def stellar_mass_formed(self, time : u.Gyr):
         return super().stellar_mass_formed(time)
 
 
 #-------------------------------------------------------------------------------
+@dataclass
 class ExponentialDelayedCEM(ChemicalEvolutionModel):
     r"""
-    Exponentially delayed star formation history model.
+    Delayed-exponential cumulative SFH normalized at ``today``.
 
-    This CEM models a galaxy's star formation rate as a delayed exponential
-    function of time, where the SFR rises initially and then decays.
+    The cumulative formed mass is:
 
     .. math::
-        M_\star(t) = M_{\rm inf} \cdot (1 - \frac{t + \tau}{\tau} \cdot e^{-t/\tau})
- 
-    The main difference from the :class:`ExponentialCEM` is that the stellar mass 
-    grows linearly at early times before transitioning to an exponential decay.
+        M_\star(t) \propto 1 - e^{-t/\tau}\,\frac{t+\tau}{\tau}
 
-    Attributes
+    This class rescales the proportional form so that
+    :math:`M_\star(\\mathrm{today}) = \\mathrm{mass\\_today}`.
+
+    Parameters
     ----------
-    tau : astropy.Quantity
-        Timescale of the delayed exponential star formation rate.
-    today : float or astropy.Quantity
-        Cosmic time at the the time of the observation.
-    mass_today : float or astropy.Quantity
-        Total stellar mass formed at present.
-    ism_metallicity_today : float
-        Metallicity of the gas (constant).
-    
-    Examples
-    --------
-    Create an instance of the `ExponentialDelayedCEM` model and compute the stellar mass formed:
+    tau : float, Quantity, or Parameter, optional
+        Timescale parameter (Gyr).
+    mass_today : float, Quantity, or Parameter, optional
+        Total formed stellar mass at ``today`` (Msun).
+    ism_metallicity_today : float, Quantity, or Parameter, optional
+        Constant metallicity (dimensionless mass fraction).
+    today : float, Quantity, or Parameter
+        Cosmic observing time required for normalization.
 
-    >>> from astropy import units as u
-    >>> from pst.models import ExponentialDelayedCEM
-    >>> model = ExponentialDelayedCEM(tau=2 * u.Gyr, today=10 * u.Gyr,
-    ...                                mass_today=1e10 * u.Msun, ism_metallicity_today=0.02)
-    >>> time = [0.5, 1.0, 2.0] * u.Gyr
-    >>> model.stellar_mass_formed(time)
-    <Quantity [2.76154498e+08, 9.40043900e+08, 2.75373844e+09] solMass>
+    Raises
+    ------
+    ValueError
+        If ``today`` is not set.
     """
 
-    def __init__(self, **kwargs):
-        self.tau = check_unit(kwargs['tau'], default_unit=u.Gyr)
-        self.today = check_unit(kwargs['today'], u.Gyr)
-        self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
+    tau: Parameter | u.Quantity | float = 2.0 * u.Gyr
+    mass_today: Parameter | u.Quantity | float = 1.0 * u.Msun
+    ism_metallicity_today: Parameter | u.Quantity | float = 0.02
+
+    name: str = field(default="exponential_delayed_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.mass_today = check_parameter(self.mass_today, u.Msun,
+                                          doc="Total stellar mass at observing time")
+        self.tau = check_parameter(self.tau, u.Gyr,
+                                   doc="E-folding SFH timescale")
+        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
+                                           u.dimensionless_unscaled,
+                                           doc="Constant stellar metallicity")
+
         self._mass_norm = 1
+        if self.today is None:
+            raise ValueError("Parameter ``today`` must be set for ExponentialDelayedCEM")
         mtoday = self.stellar_mass_formed(self.today)
         self._mass_norm = self.mass_today / mtoday
 
-        self.ism_metallicity_today =  kwargs['ism_metallicity_today']
-        ChemicalEvolutionModel.__init__(self, **kwargs)
-
-    @u.quantity_input
+    @_check_time_dec
     def stellar_mass_formed(self, time):
         return self.mass_today * (1 - np.exp(-time / self.tau)
             * (self.tau + time) / self.tau) * self._mass_norm
 
-    @u.quantity_input
+    @_check_time_dec
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.ism_metallicity_today)
+        return np.full(time.size, fill_value=self.ism_metallicity_today.q)
 
-
+@dataclass
 class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelayedCEM):
     """A :class:`ExponentialDelayedCEM` with a Mass-dependent Metallicity chemical model.
     
@@ -472,25 +662,45 @@ class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelaye
     --------
     :class:`MassPropMetallicityMixin`
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.ism_metallicity_today = kwargs["ism_metallicity_today"]
-        self.alpha_powerlaw = kwargs["alpha_powerlaw"]
+
+    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
+    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
+
+    name: str = field(default="exponential_delayed_zpowlaw_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
+                                                     u.dimensionless_unscaled,
+                                                     doc="Metallicity of stars born at present")
+        self.alpha_powerlaw = check_parameter(self.alpha_powerlaw,
+                                              u.dimensionless_unscaled,
+                                              doc="Metallicity evolution power-law exponent")    
 
 
+@dataclass
 class ExponentialDelayedQuenchedCEM(ExponentialDelayedZPowerLawCEM):
     """A :class:`ExponentialDelayedZPowerLawCEM` with a quenching event."""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
+
+    quenching_time: Parameter | u.Quantity | float = None
+
+    name: str = field(default="exponential_quenched_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
+                                                doc="Cosmic quenching time")
         mtoday = self.stellar_mass_formed(self.today)
         self._mass_norm *= self.mass_today / mtoday
 
+    @_check_time_dec
     @sfh_quenching_decorator
     def stellar_mass_formed(self, times: u.Quantity):
         return super().stellar_mass_formed(times)
 
 #-------------------------------------------------------------------------------
+
+@dataclass(kw_only=True)
 class GaussianBurstCEM(ChemicalEvolutionModel):
     """
     Gaussian burst star formation model.
@@ -522,25 +732,36 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
     >>> model.stellar_mass_formed(time)
     <Quantity [2.27501319e+08, 5.00000000e+09, 9.77249868e+09] solMass>
     """
- 
-    def __init__(self, **kwargs):
-        self.mass_burst = check_unit(kwargs["mass_burst"], u.Msun)
-        self.time_burst = check_unit(kwargs["time_burst"], u.Gyr)
-        self.sigma_burst = check_unit(kwargs["sigma_burst"], u.Gyr)
-        self.burst_metallicity = kwargs["burst_metallicity"]
-        ChemicalEvolutionModel.__init__(self, **kwargs)
+    mass_burst: Parameter | u.Quantity | float = None
+    time_burst: Parameter | u.Quantity | float = None
+    sigma_burst: Parameter | u.Quantity | float = None
+    burst_metallicity: Parameter | u.Quantity | float = None
+    name: str = field(default="gaussian_burst_cem", init=False)
 
-    @u.quantity_input
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.mass_burst = check_parameter(self.mass_burst, u.Msun,
+                                          doc="Total stellar mass formed during the burst")
+        self.time_burst = check_parameter(self.time_burst, u.Gyr,
+                                          doc="Burst cosmic time")
+        self.sigma_burst = check_parameter(self.sigma_burst, u.Gyr,
+                                           doc="Burst duration (Gaussian sigma)")
+        self.burst_metallicity = check_parameter(self.burst_metallicity, u.dimensionless_unscaled,
+                                                  doc="Burst stellar metallicity")
+
+    @_check_time_dec
     def stellar_mass_formed(self, time):
-        return self.mass_burst / 2 * (1 + special.erf(
-            (time-self.time_burst) / (SQRT_2 * self.sigma_burst))
+        return self.mass_burst.q / 2 * (1 + special.erf(
+            (time-self.time_burst.q) / (SQRT_2 * self.sigma_burst.q))
             )
   
-    @u.quantity_input
+    @_check_time_dec
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.burst_metallicity)
+        return np.full(time.size, fill_value=self.burst_metallicity.q)
 
 
+@dataclass
 class LogNormalCEM(ChemicalEvolutionModel):
     r"""
     Log-normal star formation history model.
@@ -563,30 +784,41 @@ class LogNormalCEM(ChemicalEvolutionModel):
     metallicity : float
         Metallicity of the gas (constant).
     """
+    t0: Parameter | u.Quantity | float = 1 << u.Gyr
+    scale: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled
+    mass_today: Parameter | u.Quantity | float = 1 << u.Msun
+    ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.t0 = check_unit(kwargs['t0'], u.Gyr)
-        self.scale = kwargs['scale']
-        self.today = check_unit(kwargs['today'], u.Gyr)
-        self.mass_today = check_unit(kwargs['mass_today'], u.Msun)
+    name: str = field(default="lognormal_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        # do the checks and add default docs
+        self.t0 = check_parameter(self.t0, u.Gyr)
+        self.scale = check_parameter(self.scale, u.dimensionless_unscaled)
+        self.mass_today = check_parameter(self.mass_today, u.Msun)
+        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today, u.dimensionless_unscaled)
+
+        if self.today is None:
+            raise ValueError("Parameter ``today`` must be set")
+        # re-scale mass normalization
         self.mass_norm = 1
         mtoday = self.stellar_mass_formed(self.today)
         self.mass_norm = self.mass_today / mtoday
-        self.ism_metallicity_today =  kwargs['ism_metallicity_today']
 
-    @u.quantity_input
+    @_check_time_dec
     def stellar_mass_formed(self, times: u.Quantity):
         z = - np.log(times[times > 0] / self.t0) / self.scale
         m = np.zeros(times.shape)
         m[times > 0] = 0.5 * (1 - special.erf(z / SQRT_2))
         return m * self.mass_norm
 
-    @u.quantity_input
+    @_check_time_dec
     def ism_metallicity(self, time : u.Gyr):
-        return np.full(time.size, fill_value=self.ism_metallicity_today)
+        return np.full(time.size, fill_value=self.ism_metallicity_today.q)
 
 
+@dataclass
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
     """A :class:`LogNormalCEM` with a Mass-dependent Metallicity chemical model.
     
@@ -594,26 +826,42 @@ class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
     --------
     :class:`MassPropMetallicityMixin`
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.ism_metallicity_today = kwargs["ism_metallicity_today"]
-        self.alpha_powerlaw = kwargs["alpha_powerlaw"]
+
+    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
+    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
+
+    name: str = field(default="lognormal_zpowlaw_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
+                                                     u.dimensionless_unscaled,
+                                                     doc="Metallicity of stars born at present")
+        self.alpha_powerlaw = check_parameter(self.alpha_powerlaw,
+                                              u.dimensionless_unscaled,
+                                              doc="Metallicity evolution power-law exponent")    
+
 
 
 class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """A :class:`LogNormalCEM` with a quenching event."""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.quenching_time = check_unit(kwargs["quenching_time"], u.Gyr)
-        mtoday = self.stellar_mass_formed(self.today)
-        self.mass_norm *= self.mass_today / mtoday
+    quenching_time: Parameter | u.Quantity | float = None
+    name: str = field(default="lognormal_quenched_cem", init=False)
 
+    def __post_init__(self):
+        super().__post_init__()
+        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
+                                                doc="Cosmic quenching time")
+        mtoday = self.stellar_mass_formed(self.today)
+        self._mass_norm *= self.mass_today / mtoday
+
+    @_check_time_dec
     @sfh_quenching_decorator
     def stellar_mass_formed(self, times: u.Quantity):
         return super().stellar_mass_formed(times)
 
-
 #-------------------------------------------------------------------------------
+@dataclass
 class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
     
@@ -635,16 +883,37 @@ class TabularCEM(ChemicalEvolutionModel):
     --------
     :class:`pst.models.ChemicalEvolutionModel` documentation.
     """
-    def __init__(self, times, masses, metallicities, **kwargs):
-        super().__init__(**kwargs)
-        self.table_t = check_unit(times, u.Gyr)
-        # Make sure that time is crescent
-        sort_times = np.argsort(self.table_t)
-        self.table_t = self.table_t[sort_times]
-        self.table_mass = check_unit(masses[sort_times], u.Msun)
-        self.table_metallicity = metallicities[sort_times]
+    times: Parameter | u.Quantity | np.array = None
+    masses: Parameter | u.Quantity | np.array = None
+    metallicities: Parameter | u.Quantity | np.array = None
 
-    @u.quantity_input
+    name: str = field(default="tabular_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.times = check_parameter(self.times, u.Gyr, doc="")
+        self.masses = check_parameter(self.masses, u.Msun, doc="")
+        self.metallicities = check_parameter(self.metallicities, u.dimensionless_unscaled,
+                                             doc="")
+        
+        sort_times = np.argsort(self.times.q)
+        self.times.q = self.times.q[sort_times]
+        self.masses.q = self.masses.q[sort_times]
+        self.metallicities.q = self.metallicities.q[sort_times]
+
+    @property
+    def table_t(self):
+        return self.times.q
+
+    @property
+    def table_mass(self):
+        return self.masses.q
+
+    @property
+    def table_metallicity(self):
+        return self.metallicities.q
+
+    @_check_time_dec
     def stellar_mass_formed(self, times: u.Gyr):
         r"""Evaluate the integral of the SFR over a given set of times.
         
@@ -675,7 +944,7 @@ class TabularCEM(ChemicalEvolutionModel):
         integral[times < self.table_t[0]] = 0
         return integral
 
-    @u.quantity_input
+    @_check_time_dec
     def ism_metallicity(self, times: u.Gyr):
         """Evaluate the integral of the SFR over a given set of times.
         
@@ -701,7 +970,7 @@ class TabularCEM(ChemicalEvolutionModel):
         integral[times < self.table_t[0]] = self.table_metallicity[0]
         return integral
 
-
+@dataclass
 class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     """Chemical evolution model based on a grid of times that assumes an analytic chemical enrichment history.
 
@@ -710,15 +979,30 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     :class:`TabularCEM`
     :class:`MassPropMetallicityMixin`
     """
-    def __init__(self, times, masses, alpha_powerlaw, ism_metallicity_today,
-                 mass_today, **kwargs):
-        self.ism_metallicity_today = ism_metallicity_today
-        self.alpha_powerlaw = alpha_powerlaw
-        self.mass_today = mass_today
-        # Create a dummy metallicity that is passed to the TabularCEM constructor
-        # but never used
-        metallicity = np.zeros(times.size)
-        super().__init__(times, masses, metallicity, **kwargs)
+    mass_today: Parameter | u.Quantity | float = None
+    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
+    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
+    name: str = field(default="tabular_zpowlaw_cem", init=False)
+
+    def __post_init__(self):
+        # If metallicities were not provided, create a dummy one BEFORE TabularCEM __post_init__
+        if self.metallicities is None and self.times is not None:
+            # times may be Parameter/Quantity/array; we just need a length
+            t = self.times.q if isinstance(self.times, Parameter) else check_unit(self.times, u.Gyr)
+            self.metallicities = np.zeros(np.size(t)) << u.dimensionless_unscaled
+
+        super().__post_init__()
+
+        if self.mass_today is None:
+            self.mass_today = Parameter(self.stellar_mass_formed(self.today),
+                                        doc="Stellar mass at observing time")
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled, doc="Metallicity at present"
+        )
+        self.alpha_powerlaw = check_parameter(
+            self.alpha_powerlaw, u.dimensionless_unscaled, doc="Metallicity evolution exponent"
+        )
+
 
 class CC25TabularCEM(TabularCEM_ZPowerLaw):
     r"""Chemical evolution model based on the SFH parameterization from Corcho-Caballero et al. (2025).
@@ -735,34 +1019,68 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
     :class:`TabularCEM_ZPowerLaw`
     :class:`MassPropMetallicityMixin`
     """
-    def __init__(self, tau_ssfr, ssfr, alpha_powerlaw, ism_metallicity_today,
-                 mass_today=1, **kwargs):
-        self.today = kwargs["today"]
-        self.tau_ssfr = check_unit(tau_ssfr, u.Gyr)
-        # Check positive tau
-        assert np.all(self.tau_ssfr > 0 << u.Gyr), "All tau_ssfr values must be positive"
-        # Check tau smaller than age of the Universe
-        if np.any(self.tau_ssfr > self.today):
-            raise ValueError(
-                "All tau_ssfr values must be less than 'today'"
-                + f" ({self.today.to_value('Gyr')} Gyr)"
-                + f", but max(tau_ssfr) = {np.max(self.tau_ssfr).to_value('Gyr')} Gyr")
 
-        sort_idx = np.argsort(self.tau_ssfr)[::-1]
-        self.tau_ssfr = self.tau_ssfr[sort_idx]  # Sort descending
-        self.ssfr = check_unit(ssfr, 1 / u.Gyr)[sort_idx]
-        self.mass_today = check_unit(mass_today, u.Msun)
-        # Compute mass fraction array from ssfr and tau_ssfr
-        times = self.today - self.tau_ssfr
-        times = np.insert(times, (0, times.size), (0 << u.Gyr, self.today))
-        masses = self.mass_today * (1 - self.tau_ssfr * self.ssfr)
-        masses = np.insert(masses, (0, masses.size),
-                           (0.0 << u.Msun, self.mass_today))
-        super().__init__(times, masses, alpha_powerlaw,
-                         ism_metallicity_today, self.mass_today, **kwargs)
+    def __init__(self, *, tau_ssfr, ssfr, **kwargs):
+        # Read-only, set by parent class
+        today = check_unit(kwargs["today"], u.Gyr)
+        mass_today = check_unit(kwargs["mass_today"], u.Msun)
+
+        self._tau_ssfr = check_parameter(tau_ssfr, u.Gyr)
+        self._ssfr = check_parameter(ssfr, 1 / u.Gyr)
+        
+        if np.any(self.tau_ssfr.q <= 0 * u.Gyr):
+            raise ValueError("All tau_ssfr values must be positive.")
+        if np.any(self.tau_ssfr.q > check_unit(today, u.Gyr)):
+            raise ValueError("All tau_ssfr values must be less than today.")
+
+        # Sort in descending order
+        sort_idx = np.argsort(self.tau_ssfr.q)[::-1]
+        self.tau_ssfr.q = self.tau_ssfr.q[sort_idx]
+        self.ssfr.q = self.ssfr.q[sort_idx]
+
+        times = today - self.tau_ssfr.q
+        times = np.insert(times, (0, times.size), (0 * u.Gyr, today))
+
+        masses = mass_today * (1 - self.tau_ssfr.q * self.ssfr.q)
+        masses = np.insert(masses, (0, masses.size), (0.0 * u.Msun, mass_today))
+
+        super().__init__(
+            times=times,
+            masses=masses,
+            **kwargs,
+        )
+    
+    @property
+    def ssfr(self):
+        return self._ssfr
+
+    @ssfr.setter
+    def ssfr(self, value):
+        value = check_parameter(value, 1 / u.Gyr)
+        self._ssfr = value
+        masses = self.mass_today.q * (1 - self.tau_ssfr.q * self._ssfr.q)
+        self.masses = Parameter(np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today)))
+
+    @property
+    def tau_ssfr(self):
+        return self._tau_ssfr
+    
+    @tau_ssfr.setter
+    def tau_ssfr(self, value):
+        value = check_parameter(value, u.Gyr)
+        if np.any(value.q <= 0 * u.Gyr):
+            raise ValueError("All tau_ssfr values must be positive.")
+        if np.any(value.q > self.today):
+            raise ValueError("All tau_ssfr values must be less than today.")
+        if np.diff(value.q) >= 0:
+            raise ValueError("Input ``tau_ssfr`` must be strictly decreasing")
+        self._tau_ssfr = value
+
+        times = self.today - self._tau_ssfr.q
+        self.times = Parameter(np.insert(times, (0, times.size), (0 * u.Gyr, self.today)))
 
 
-
+@dataclass
 class ParticleListCEM(ChemicalEvolutionModel):
     """
     Chemical Evolution Model using individual Simple Stellar Population (SSP) data.
@@ -784,45 +1102,18 @@ class ParticleListCEM(ChemicalEvolutionModel):
         Array representing the masses of each SSP particle. If the input is a 
         `numpy.array`, it is assumed to be in solar masses.
     """
-    def __init__(self, time_form, metallicities, masses):
-        self.time_form, self.metallicities, self.masses = (
-            time_form, metallicities, masses)
+    time_form: Parameter | u.Quantity | np.array = None
+    metallicities: Parameter | u.Quantity | np.array = None
+    masses: Parameter | u.Quantity | np.array = None
 
-    @property
-    def time_form(self) -> u.Quantity:
-        """Array of SSP formation times in Gyr."""
-        return self._time_form
-
-    @time_form.setter
-    def time_form(self, values):
-        if not isinstance(values, u.Quantity):
-            self._time_form = values << u.Gyr
-        else:
-            self._time_form = values
-
-    @property
-    def metallicities(self) -> u.Quantity:
-        """Array of SSP metallicities, assumed to be dimensionless."""
-        return self._metallicities
-
-    @metallicities.setter
-    def metallicities(self, values):
-        if not isinstance(values, u.Quantity):
-            self._metallicities = values << u.dimensionless_unscaled
-        else:
-            self._metallicities = values
-
-    @property
-    def masses(self) -> u.Quantity:
-        """Array of SSP masses in solar masses."""
-        return self._masses
-
-    @masses.setter
-    def masses(self, values):
-        if not isinstance(values, u.Quantity):
-            self._masses = values << u.Msun
-        else:
-            self._masses = values
+    def __post_init__(self):
+        super().__post_init__()
+        self.time_form = check_parameter(self.time_form, u.Gyr,
+                                         doc="Particle formation time")
+        self.metallicities = check_parameter(self.metallicities, u.dimensionless_unscaled,
+                                             doc="Particle metallicity (at observing time)")
+        self.masses = check_parameter(self.masses, u.Msun,
+                                      doc="Particle stellar mass")
 
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
         """
@@ -845,15 +1136,15 @@ class ParticleListCEM(ChemicalEvolutionModel):
             A 2D array representing the stellar mass associated with each SSP 
             particle in the base SSP grid. Units are in solar masses.
         """
-        valid_particles = self.time_form <= t_obs
-        return ssp.get_weights(ages=t_obs - self.time_form[valid_particles],
-                               metallicities=self.metallicities[valid_particles],
-                               masses=self.masses[valid_particles])
+        valid_particles = self.time_form.q <= t_obs
+        return ssp.get_weights(ages=t_obs - self.time_form.q[valid_particles],
+                               metallicities=self.metallicities.q[valid_particles],
+                               masses=self.masses.q[valid_particles])
 
     def stellar_mass_formed(self, time):
-        sort_idx = np.argsort(self.time_form)
-        mass_history = np.cumsum(self.masses[sort_idx])
-        return np.interp(time, self.time_form[sort_idx], mass_history)
+        sort_idx = np.argsort(self.time_form.q)
+        mass_history = np.cumsum(self.masses.q[sort_idx])
+        return np.interp(time, self.time_form.q[sort_idx], mass_history)
 
     def ism_metallicity(self, time):
         return np.full(time.size, fill_value=np.nan)
