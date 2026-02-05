@@ -225,7 +225,6 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         """
         return
 
-    @u.quantity_input
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr,
                                oversample_factor=10) -> u.Quantity:
         """
@@ -842,7 +841,7 @@ class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
                                               doc="Metallicity evolution power-law exponent")    
 
 
-
+@dataclass
 class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """A :class:`LogNormalCEM` with a quenching event."""
     quenching_time: Parameter | u.Quantity | float = None
@@ -853,7 +852,7 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
         self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
                                                 doc="Cosmic quenching time")
         mtoday = self.stellar_mass_formed(self.today)
-        self._mass_norm *= self.mass_today / mtoday
+        self.mass_norm *= self.mass_today / mtoday
 
     @_check_time_dec
     @sfh_quenching_decorator
