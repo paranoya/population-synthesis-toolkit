@@ -17,10 +17,28 @@ from pst.dust import AttenuationModel, CalorimetricDustComponent
 from pst.model import Parameter
 
 class GalaxySED(SedComponent):
+    """
+    Composite galaxy SED model (stellar emission + attenuation + dust emission).
+
+    This component combines:
+    - a stellar emission component (typically driven by a CEM/SSP model),
+    - an optional attenuation model applied to the stellar emission, and
+    - an optional dust emission component (optionally calorimetric / energy-balance).
+
+    Parameters are handled via :class:`pst.model.Parameter` objects and may be
+    updated at runtime using dotted parameter paths (see :meth:`build_param_index`
+    and :meth:`update_parameters`), enabling integration with samplers/fitters
+    such as BESTA.
+
+    Notes
+    -----
+    - The internal spectral grid is ``target_wavelength`` in the rest frame.
+    - If ``to_obs_frame=True``, spectra are converted to observed-frame fluxes
+      using luminosity distance and redshift and resampled onto ``lambda_obs``.
+    """
     name: str = "galaxy_sed"
     rest_unit = u.Lsun / u.AA  # Rest-frame default units
     obs_unit = u.erg / (u.s * u.cm**2 * u.AA)  # Observed-frame default units
-    _param_index: Dict[str, Parameter] = field(default_factory=dict, init=False, repr=False)
 
     def __init__(self, *,
                  stellar_model: SedComponent=None,
@@ -30,6 +48,7 @@ class GalaxySED(SedComponent):
                  redshift: Union[Parameter, float]=0.0,
                  cosmology=None,
                  filters: List[observables.Filter]=None):
+        self._param_index: Dict[str, Parameter] = {}
         # Setup components
         self.stellar_em = stellar_model
         self.dust_attenuation = dust_attenuation_model
@@ -124,7 +143,17 @@ class GalaxySED(SedComponent):
 
     def emission_components(self, stellar_em_params=None, dust_att_params=None,
                             dust_em_params=None):
-        """TODO"""
+        """
+        Compute individual SED components on the rest-frame wavelength grid.
+
+        Returns a dict with (when available):
+        - ``stellar_sed_unatt`` : intrinsic stellar emission (no attenuation)
+        - ``stellar_sed``       : attenuated stellar emission (if attenuation model is set)
+        - ``dust_sed``          : dust emission component (if present)
+
+        If ``self.dust_em`` is calorimetric (energy-balance), the dust component is
+        computed consistently from the absorbed stellar energy.
+        """
         components = {
             "stellar_sed": None,
             "stellar_sed_unatt": None,
@@ -164,7 +193,7 @@ class GalaxySED(SedComponent):
                 att_factor = self.dust_attenuation.attenuation_factor(
                     self.target_wavelength, **dust_att_params)
                 stellar_sed = stellar_sed_unatt * att_factor
-                components["stellar_sed"] = stellar_sed_unatt.to(
+                components["stellar_sed"] = stellar_sed.to(
                     self.rest_unit,
                     u.spectral_density(self.target_wavelength))
             else:
@@ -184,7 +213,15 @@ class GalaxySED(SedComponent):
     def emission_spectrum(self,
                           stellar_em_params=None, dust_att_params=None,
                           dust_em_params=None, to_obs_frame=False):
-        """TODO"""
+        """
+        Compute the composite SED (stellar + dust).
+
+        Parameters
+        ----------
+        to_obs_frame : bool
+            If True, returns observed-frame flux density and shifts/resamples the
+            spectrum to ``lambda_obs = (1+z) lambda_rest``.
+        """
         components = self.emission_components(
             stellar_em_params=stellar_em_params,
             dust_att_params=dust_att_params,
@@ -205,6 +242,15 @@ class GalaxySED(SedComponent):
 
     def emission_photometry(self, stellar_em_params=None, dust_att_params=None,
                             dust_em_params=None, to_obs_frame=False):
+        """
+        Compute synthetic photometry from the composite spectrum.
+
+        Notes
+        -----
+        Requires filters to be provided at initialization (or set later). The filter
+        container must support evaluation of fluxes from a spectrum sampled on
+        ``target_wavelength``.
+        """
         spec = self.emission_spectrum(stellar_em_params=stellar_em_params,
                                       dust_att_params=dust_att_params,
                                       dust_em_params=dust_em_params,
