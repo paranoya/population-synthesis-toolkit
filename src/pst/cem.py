@@ -860,6 +860,275 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     def stellar_mass_formed(self, times: u.Quantity):
         return super().stellar_mass_formed(times)
 
+
+@dataclass
+class BetaCEM(ChemicalEvolutionModel):
+    r"""
+    Beta-CMF chemical evolution model.
+
+    This model defines the *cumulative formed* stellar mass using the regularised
+    incomplete Beta function:
+
+    .. math::
+        f_\star(t) = I_x(\alpha, \beta), \qquad
+        x = \frac{t - t_{\rm start}}{t_{\rm end} - t_{\rm start}} \in [0,1]
+
+    and
+
+    .. math::
+        M_{\rm formed}(t) = M_{\rm today}\, f_\star(t)
+
+    where :math:`I_x` is the regularised incomplete Beta function.
+
+    Parameterisation
+    ----------------
+    You can specify the Beta shape parameters directly (``alpha``, ``beta``),
+    or provide the mean formation time and concentration (``t_mean``, ``kappa``):
+
+    - ``kappa = alpha + beta``
+    - ``m = t_mean / t_end`` (fractional mean in (0,1))
+    - ``alpha = m * kappa``, ``beta = (1-m) * kappa``
+
+    Parameters
+    ----------
+    mass_today : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`
+        Total formed stellar mass by ``t_end``. Bare numbers are assumed in Msun.
+    alpha, beta : float, Quantity, or Parameter, optional
+        Beta-CMF shape parameters (>0). Provide both if using the direct form.
+        If provided as Quantity/Parameter they must be dimensionless.
+    t_mean : float, Quantity, or Parameter, optional
+        Mean formation time. If a Quantity/Parameter, interpreted as cosmic time (Gyr).
+        If a bare float, interpreted as fractional mean ``m`` in (0,1).
+        Must be provided together with ``kappa``.
+    kappa : float, Quantity, or Parameter, optional
+        Concentration parameter (>0). Dimensionless. Used with ``t_mean``.
+    t_start : float, Quantity, or Parameter, optional
+        Cosmic time at which star formation begins. Default is 0 Gyr.
+    t_end : float, Quantity, or Parameter, optional
+        Cosmic time at which the model stops. If None, uses ``today``.
+        Must satisfy ``t_end > t_start``.
+    ism_metallicity_today : float, Quantity, or Parameter, optional
+        Constant ISM metallicity (dimensionless mass fraction). Default 0.02.
+
+    Notes
+    -----
+    - All time arguments are **cosmic time since the Big Bang** (not lookback).
+    - :meth:`ism_metallicity` returns a constant metallicity (no enrichment model).
+    """
+    mass_today: Parameter | u.Quantity | float = 1.0 << u.Msun
+
+    # Either set (alpha, beta) or set (t_mean, kappa)
+    alpha: Optional[Parameter | u.Quantity | float] = None
+    beta: Optional[Parameter | u.Quantity | float] = None
+    t_mean: Optional[Parameter | u.Quantity | float] = None
+    kappa: Optional[Parameter | u.Quantity | float] = None
+
+    t_start: Parameter | u.Quantity | float = 0.0 << u.Gyr
+    t_end: Optional[Parameter | u.Quantity | float] = None
+
+    ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
+
+    name: str = field(default="beta_cem", init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.mass_today = check_parameter(self.mass_today, u.Msun,
+                                          doc="Total formed stellar mass by t_end")
+        self.t_start = check_parameter(self.t_start, u.Gyr,
+                                       doc="Cosmic start time of star formation")
+        if self.t_end is not None:
+            self.t_end = check_parameter(self.t_end, u.Gyr,
+                                         doc="Cosmic end time of star formation horizon")
+
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled,
+            doc="Constant ISM metallicity (mass fraction)"
+        )
+
+        # Resolve t_end (needs today if not provided)
+        _ = self._t_end_q  # triggers validation + today requirement
+
+        # Resolve alpha/beta from either (alpha,beta) or (t_mean,kappa)
+        self._resolve_shape_params()
+
+    # -----------------------------------------------------------------
+    # Internal helpers / validated quantities
+    # -----------------------------------------------------------------
+    @property
+    def _t_end_q(self) -> u.Quantity:
+        """Return t_end as a Quantity (falls back to today)."""
+        if self.t_end is not None:
+            te = self.t_end.q if isinstance(self.t_end, Parameter) else check_unit(self.t_end, u.Gyr)
+        else:
+            if self.today is None:
+                raise ValueError("t_end is not set and `today` is None; set one of them.")
+            te = self.today.q if isinstance(self.today, Parameter) else check_unit(self.today, u.Gyr)
+
+        ts = self.t_start.q if isinstance(self.t_start, Parameter) else check_unit(self.t_start, u.Gyr)
+        if not np.all(te > ts):
+            raise ValueError(f"Require t_end > t_start, got t_end={te}, t_start={ts}.")
+        return te
+
+    def _resolve_shape_params(self) -> None:
+        """
+        Set internal dimensionless Parameters _alpha/_beta from either:
+        - direct alpha/beta, or
+        - mean+concentration (t_mean,kappa)
+        """
+        if (self.t_mean is not None) or (self.kappa is not None):
+            if (self.t_mean is None) or (self.kappa is None):
+                raise ValueError("Provide both `t_mean` and `kappa` (or neither).")
+            a, b = self._alpha_beta_from_mean_concentration(self.t_mean, self.kappa)
+            self._alpha = a
+            self._beta = b
+            return
+
+        # direct alpha/beta
+        if (self.alpha is None) or (self.beta is None):
+            raise ValueError("Provide either (alpha,beta) or (t_mean,kappa).")
+
+        a = check_parameter(self.alpha, u.dimensionless_unscaled, doc="Beta-CMF alpha").q.value
+        b = check_parameter(self.beta, u.dimensionless_unscaled, doc="Beta-CMF beta").q.value
+        if a <= 0 or b <= 0:
+            raise ValueError("Beta-CMF shape parameters alpha and beta must be > 0.")
+
+        self._alpha = float(a)
+        self._beta = float(b)
+
+    @property
+    def alpha_val(self) -> float:
+        """Beta-CMF early-time shape parameter (alpha > 0)."""
+        return self._alpha
+
+    @property
+    def beta_val(self) -> float:
+        """Beta-CMF late-time shape parameter (beta > 0)."""
+        return self._beta
+
+    @property
+    def kappa_val(self) -> float:
+        """Concentration parameter kappa = alpha + beta."""
+        return self._alpha + self._beta
+
+    @property
+    def t_mean_q(self) -> u.Quantity:
+        """Mean formation time E[t] implied by alpha/beta (in Gyr)."""
+        te = self._t_end_q
+        return te * (self._alpha / (self._alpha + self._beta))
+
+    def _alpha_beta_from_mean_concentration(
+        self,
+        t_mean: Parameter | u.Quantity | float,
+        kappa: Parameter | u.Quantity | float
+    ) -> tuple[float, float]:
+        """
+        Map mean+concentration to alpha/beta.
+
+        Parameters
+        ----------
+        t_mean : float or Quantity or Parameter
+            If float: fractional mean m in (0,1).
+            If Quantity/Parameter: cosmic mean time in Gyr, converted to m=t_mean/t_end.
+        kappa : float or Quantity or Parameter
+            Concentration (>0), dimensionless.
+
+        Returns
+        -------
+        alpha, beta : float
+        """
+        te = self._t_end_q
+
+        # kappa
+        kq = check_parameter(kappa, u.dimensionless_unscaled).q.value
+        if kq <= 0:
+            raise ValueError("kappa must be > 0.")
+
+        # fractional mean m
+        if isinstance(t_mean, (u.Quantity, Parameter)):
+            tmq = t_mean.q if isinstance(t_mean, Parameter) else check_unit(t_mean, u.Gyr)
+            m = (tmq / te).decompose().value
+        else:
+            m = float(t_mean)
+
+        if not (0.0 < m < 1.0):
+            raise ValueError("Mean fraction m must be in (0,1).")
+
+        alpha = m * float(kq)
+        beta = (1.0 - m) * float(kq)
+        if alpha <= 0 or beta <= 0:
+            raise ValueError("Derived alpha/beta must be > 0.")
+        return alpha, beta
+
+    def _rescaled_x(self, time: u.Quantity) -> np.ndarray:
+        """
+        Rescale cosmic time to x in [0,1] over [t_start, t_end], clipping outside.
+        """
+        t = check_unit(time, u.Gyr).to_value("Gyr")
+        t0 = (self.t_start.q if isinstance(self.t_start, Parameter) else check_unit(self.t_start, u.Gyr)).to_value("Gyr")
+        t1 = self._t_end_q.to_value("Gyr")
+        x = (t - t0) / (t1 - t0)
+        return np.clip(x, 0.0, 1.0)
+
+    # -----------------------------------------------------------------
+    # CEM API
+    # -----------------------------------------------------------------
+    @_check_time_dec
+    def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
+        """
+        Cumulative formed stellar mass M_formed(t).
+        """
+        x = self._rescaled_x(time)
+        f = special.betainc(self._alpha, self._beta, x)  # regularised incomplete beta
+        return self.mass_today.q * f
+
+    @_check_time_dec
+    def ism_metallicity(self, time: u.Gyr) -> u.Quantity:
+        """
+        Constant ISM metallicity (mass fraction).
+        """
+        # handle scalar and array times
+        shape = np.shape(time.value)
+        z = np.full(shape, self.ism_metallicity_today.q.value)
+        return z << self.ism_metallicity_today.q.unit
+
+    @_check_time_dec
+    def sfr(self, time: u.Gyr) -> u.Quantity:
+        """
+        Instantaneous SFR(t) (analytic Beta PDF mapped onto [t_start,t_end]).
+
+        Notes
+        -----
+        - Outside (t_start, t_end) the SFR is set to 0 by construction.
+        - Integrating this over time yields ``mass_today``.
+        """
+        x = self._rescaled_x(time)  # clipped to [0,1]
+        dt = self._t_end_q - (self.t_start.q if isinstance(self.t_start, Parameter) else check_unit(self.t_start, u.Gyr))
+
+        # Beta PDF (0 at endpoints after clipping); ensure zeros outside open interval
+        pdf = np.zeros_like(x, dtype=float)
+        mask = (x > 0.0) & (x < 1.0)
+        if np.any(mask):
+            # betapdf = x^(a-1) (1-x)^(b-1) / B(a,b)
+            logB = (special.gammaln(self._alpha) + special.gammaln(self._beta) - special.gammaln(self._alpha + self._beta))
+            logpdf = ((self._alpha - 1.0) * np.log(x[mask]) +
+                      (self._beta - 1.0) * np.log1p(-x[mask]) -
+                      logB)
+            pdf[mask] = np.exp(logpdf)
+
+        return (self.mass_today.q / dt) * pdf  # Msun/Gyr
+
+    def t_peak(self) -> Optional[u.Quantity]:
+        """
+        Cosmic time of peak SFR (exists only if alpha>1 and beta>1).
+        """
+        if (self._alpha > 1.0) and (self._beta > 1.0):
+            t0 = self.t_start.q if isinstance(self.t_start, Parameter) else check_unit(self.t_start, u.Gyr)
+            dt = self._t_end_q - t0
+            x_peak = (self._alpha - 1.0) / (self._alpha + self._beta - 2.0)
+            return t0 + x_peak * dt
+        return None
+
 #-------------------------------------------------------------------------------
 @dataclass
 class TabularCEM(ChemicalEvolutionModel):
