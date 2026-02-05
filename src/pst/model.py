@@ -40,11 +40,12 @@ class Parameter:
 
     @q.setter
     def q(self, value):
-        if not isinstance(self.value, u.Quantity):
+        if not isinstance(value, u.Quantity):
             raise ValueError("Input value must be a quantity")
-        elif not value.unit.is_equivalent(self._q.unit):
+        if not value.unit.is_equivalent(self._q.unit):
             raise ValueError(f"Input quantity ({value.unit}) must be equivalent to current units ({self._q.unit})")
         self._q = value
+        self.unit = self._q.unit
 
     @property
     def value_raw(self):
@@ -90,17 +91,19 @@ class Parameter:
             vmin, vmax = self.vrange
             # Compare with units safely
             if isinstance(vmin, u.Quantity) or isinstance(vmax, u.Quantity) or isinstance(q, u.Quantity):
-                vmin_q = vmin if isinstance(vmin, u.Quantity) else (vmin << q.unit)
-                vmax_q = vmax if isinstance(vmax, u.Quantity) else (vmax << q.unit)
-                if np.any(q < vmin_q) or np.any(q > vmax_q):
-                    raise ValueError(f"Value {q} outside allowed range [{vmin_q}, {vmax_q}].")
+                vmin_q = vmin if isinstance(vmin, u.Quantity) else (vmin << self.unit)
+                vmax_q = vmax if isinstance(vmax, u.Quantity) else (vmax << self.unit)
+                q_cmp = q.to(self.unit) if isinstance(q, u.Quantity) else (q << self.unit)
+                if np.any(q_cmp < vmin_q) or np.any(q_cmp > vmax_q):
+                    raise ValueError(f"Value {q_cmp} outside allowed range [{vmin_q}, {vmax_q}].")
             else:
                 if float(q) < float(vmin) or float(q) > float(vmax):
                     raise ValueError(f"Value {q} outside allowed range [{vmin}, {vmax}].")
 
         self._q = q
+        self.unit = self._q.unit
 
-    # --- Make it act like a Quantity / ndarray ---------------------------------
+    # --- Quantity / ndarray layer ---------------------------------
 
     def __repr__(self) -> str:
         meta = []
@@ -113,7 +116,7 @@ class Parameter:
 
     def __float__(self) -> float:
         # Only valid if dimensionless or unit is compatible with float conversion expectation
-        return float(self._q.to_value(self.unit_raw))
+        return float(self.value_raw)
 
     def __array__(self, dtype=None):
         # Allows np.asarray(Parameter) to work
