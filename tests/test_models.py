@@ -18,8 +18,10 @@ class TestModels(unittest.TestCase):
     def test_single_burst(self):
         model = models.SingleBurstCEM(time_burst=5 * u.Gyr,
                                       mass_burst=1 * u.Msun,
+                                      today=13.7 * u.Gyr,
                                       burst_metallicity=0.02)
         mass = model.stellar_mass_formed(self.dummy_times)
+        self.assertTrue(model.name == "single_burst_cem")
         self.assertTrue(mass[0] == 0 * u.Msun)
         self.assertTrue(mass[-1] == 1 * u.Msun)
 
@@ -30,6 +32,7 @@ class TestModels(unittest.TestCase):
         model = models.ExponentialCEM(tau= 0.1 * u.Gyr,
                                       stellar_mass_inf=1 * u.Msun,
                                       metallicity=0.02)
+        self.assertTrue(model.name == "exponential_cem")
         mass = model.stellar_mass_formed(self.dummy_times)
         self.assertTrue(np.isclose(mass[0], 0 * u.Msun))
         self.assertTrue(np.isclose(mass[-1], 1 * u.Msun))
@@ -42,6 +45,7 @@ class TestModels(unittest.TestCase):
                                       stellar_mass_inf=1 * u.Msun,
                                       metallicity=0.02,
                                       quenching_time=13.0 * u.Gyr)
+        self.assertTrue(model.name == "exponential_quenched_cem")
         quenched_times = self.dummy_times >= 13.0 * u.Gyr
         mass = model.stellar_mass_formed(self.dummy_times)
         self.assertTrue(np.isclose(mass[0], 0 * u.Msun))
