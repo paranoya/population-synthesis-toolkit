@@ -114,6 +114,7 @@ class MassPropMetallicityMixin:
         m = self.stellar_mass_formed(times)
         return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
 
+    
 def sfh_quenching_decorator(stellar_mass_formed):
     """
     Decorator that enforces a hard quenching event in a cumulative SFH.
@@ -146,7 +147,7 @@ def sfh_quenching_decorator(stellar_mass_formed):
         return np.where(tq < qtq, m, m_q)
     return wrapper
 
-@dataclass
+
 class ChemicalEvolutionModel(ModelBase, ABC):
     """
     Base class for chemical evolution models (CEMs).
@@ -181,15 +182,23 @@ class ChemicalEvolutionModel(ModelBase, ABC):
     - behavior for ``t > today`` is well-defined (commonly clipped to
       :math:`M_\\star(\\mathrm{today})`).
     """
-
     name: str = field(default="base_cem", init=False)
-    today: Optional[Parameter | u.Quantity | float] = None
 
-    def __post_init__(self):
-        if self.today is not None:
-            self.today = check_parameter(self.today, u.Gyr,
-                                         doc="Age of the Universe at observation")
+    def __init__(self, today: Parameter | u.Quantity | float=None):
+        self.today = today
 
+    @property
+    def today(self):
+        return self._today
+
+    @today.setter
+    def today(self, v):
+        if v is not None:
+            self._today = check_parameter(
+                v, u.Gyr, doc="Age of the Universe at observation")
+        else:
+            self._today = None
+            
     @abstractmethod
     def stellar_mass_formed(self, time: u.Quantity) -> u.Quantity:
         """
@@ -473,21 +482,22 @@ class SingleBurstCEM(ChemicalEvolutionModel):
     -----
     This is a cumulative SFH model; the instantaneous SFR is a delta function.
     """
-    mass_burst: Parameter | u.Quantity | float = 1 << u.Msun
-    time_burst: Parameter | u.Quantity | float = 0 << u.Gyr
-    burst_metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
-    name: str = field(default="single_burst_cem", init=False)
+    name = "single_burst_cem"
 
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.mass_burst = check_parameter(self.mass_burst, u.Msun,
-                                          doc="Total stellar mass in the burst")
-        self.time_burst = check_parameter(self.time_burst, u.Gyr,
-                                          doc="Cosmic time of the burst")
-        self.burst_metallicity = check_parameter(self.burst_metallicity,
-                                                 u.dimensionless_unscaled,
-                                                 doc="Burst metallicity")
+    def __init__(
+        self,
+        *,
+        mass_burst: Parameter | u.Quantity | float = 1 << u.Msun,
+        time_burst: Parameter | u.Quantity | float = 0 << u.Gyr,
+        burst_metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
+        self.mass_burst = check_parameter(mass_burst, u.Msun, doc="Total stellar mass in the burst")
+        self.time_burst = check_parameter(time_burst, u.Gyr, doc="Cosmic time of the burst")
+        self.burst_metallicity = check_parameter(
+            burst_metallicity, u.dimensionless_unscaled, doc="Burst metallicity"
+        )
 
     @_check_time_dec
     def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
@@ -530,22 +540,21 @@ class ExponentialCEM(ChemicalEvolutionModel):
     -----
     The metallicity returned by :meth:`ism_metallicity` is constant in time.
     """
-    stellar_mass_inf: Parameter = 1 << u.Msun
-    tau: Parameter = 1 << u.Gyr
-    metallicity: Parameter = 0.02 << u.dimensionless_unscaled
-    today: Parameter | None = None
+    name = "exponential_cem"
 
-    name: str = field(default="exponential_cem", init=False)
+    def __init__(
+        self,
+        *,
+        stellar_mass_inf: Parameter | u.Quantity | float = 1 << u.Msun,
+        tau: Parameter | u.Quantity | float = 1 << u.Gyr,
+        metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
+        self.stellar_mass_inf = check_parameter(stellar_mass_inf, u.Msun, doc="Total stellar mass at infinity")
+        self.tau = check_parameter(tau, u.Gyr, doc="E-folding SFH timescale")
+        self.metallicity = check_parameter(metallicity, u.dimensionless_unscaled, doc="Constant ISM metallicity")
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.stellar_mass_inf = check_parameter(self.stellar_mass_inf, u.Msun,
-                                                doc="Total stellar mass at infinity")
-        self.tau = check_parameter(self.tau, u.Gyr,
-                                   doc="E-folding SFH timescale")
-        self.metallicity = check_parameter(self.metallicity,
-                                           u.dimensionless_unscaled,
-                                           doc="Burst metallicity")
 
     @_check_time_dec
     def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
@@ -577,13 +586,16 @@ class ExponentialQuenchedCEM(ExponentialCEM):
     --------
     :class:`ExponentialCEM`
     """
-    quenching_time: Parameter | u.Quantity | float = None
-    name: str = field(default="exponential_quenched_cem", init=False)
+    name = "exponential_quenched_cem"
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
-                                                doc="Cosmic quenching time")
+    def __init__(
+        self,
+        *,
+        quenching_time: Parameter | u.Quantity | float | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.quenching_time = check_parameter(quenching_time, u.Gyr, doc="Cosmic quenching time")
 
     @_check_time_dec
     @sfh_quenching_decorator
@@ -622,27 +634,30 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
         If ``today`` is not set.
     """
 
-    tau: Parameter | u.Quantity | float = 2.0 * u.Gyr
-    mass_today: Parameter | u.Quantity | float = 1.0 * u.Msun
-    ism_metallicity_today: Parameter | u.Quantity | float = 0.02
+    name = "exponential_delayed_cem"
 
-    name: str = field(default="exponential_delayed_cem", init=False)
+    def __init__(
+        self,
+        *,
+        tau: Parameter | u.Quantity | float = 2.0 * u.Gyr,
+        mass_today: Parameter | u.Quantity | float = 1.0 * u.Msun,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.mass_today = check_parameter(self.mass_today, u.Msun,
-                                          doc="Total stellar mass at observing time")
-        self.tau = check_parameter(self.tau, u.Gyr,
-                                   doc="E-folding SFH timescale")
-        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
-                                           u.dimensionless_unscaled,
-                                           doc="Constant stellar metallicity")
+        self.mass_today = check_parameter(mass_today, u.Msun, doc="Total stellar mass at observing time")
+        self.tau = check_parameter(tau, u.Gyr, doc="E-folding SFH timescale")
+        self.ism_metallicity_today = check_parameter(
+            ism_metallicity_today, u.dimensionless_unscaled, doc="Constant stellar metallicity"
+        )
 
-        self._mass_norm = 1
+        self._mass_norm = 1.0
         if self.today is None:
-            raise ValueError("Parameter ``today`` must be set for ExponentialDelayedCEM")
-        mtoday = self.stellar_mass_formed(self.today)
-        self._mass_norm = self.mass_today / mtoday
+            raise ValueError("Parameter `today` must be set for ExponentialDelayedCEM")
+
+        mtoday = self.stellar_mass_formed(self.today.q)
+        self._mass_norm = (self.mass_today.q / mtoday).decompose()
 
     @_check_time_dec
     def stellar_mass_formed(self, time):
@@ -662,35 +677,45 @@ class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelaye
     :class:`MassPropMetallicityMixin`
     """
 
-    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
-    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
+    name = "exponential_delayed_zpowlaw_cem"
 
-    name: str = field(default="exponential_delayed_zpowlaw_cem", init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
-                                                     u.dimensionless_unscaled,
-                                                     doc="Metallicity of stars born at present")
-        self.alpha_powerlaw = check_parameter(self.alpha_powerlaw,
-                                              u.dimensionless_unscaled,
-                                              doc="Metallicity evolution power-law exponent")    
-
+    def __init__(
+        self,
+        *,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        alpha_powerlaw: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled,
+        **kwargs,
+    ):
+        super().__init__(ism_metallicity_today=ism_metallicity_today, **kwargs)
+        # override/validate mixin params
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled,
+            doc="Metallicity of stars born at present",
+        )
+        self.alpha_powerlaw = check_parameter(
+            alpha_powerlaw, u.dimensionless_unscaled,
+            doc="Metallicity evolution power-law exponent",
+        )
 
 @dataclass
 class ExponentialDelayedQuenchedCEM(ExponentialDelayedZPowerLawCEM):
     """A :class:`ExponentialDelayedZPowerLawCEM` with a quenching event."""
 
-    quenching_time: Parameter | u.Quantity | float = None
+    name = "exponential_delayed_quenched_cem"
 
-    name: str = field(default="exponential_quenched_cem", init=False)
+    def __init__(
+        self,
+        *,
+        quenching_time: Parameter | u.Quantity | float | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.quenching_time = check_parameter(quenching_time, u.Gyr, doc="Cosmic quenching time")
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
-                                                doc="Cosmic quenching time")
-        mtoday = self.stellar_mass_formed(self.today)
-        self._mass_norm *= self.mass_today / mtoday
+        # re-normalise because quenching changes M(today)
+        mtoday = self.stellar_mass_formed(self.today.q)
+        self._mass_norm = self._mass_norm * (self.mass_today.q / mtoday).decompose()
+
 
     @_check_time_dec
     @sfh_quenching_decorator
@@ -731,23 +756,25 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
     >>> model.stellar_mass_formed(time)
     <Quantity [2.27501319e+08, 5.00000000e+09, 9.77249868e+09] solMass>
     """
-    mass_burst: Parameter | u.Quantity | float = None
-    time_burst: Parameter | u.Quantity | float = None
-    sigma_burst: Parameter | u.Quantity | float = None
-    burst_metallicity: Parameter | u.Quantity | float = None
-    name: str = field(default="gaussian_burst_cem", init=False)
+    name = "gaussian_burst_cem"
 
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(
+        self,
+        *,
+        mass_burst: Parameter | u.Quantity | float,
+        time_burst: Parameter | u.Quantity | float,
+        sigma_burst: Parameter | u.Quantity | float,
+        burst_metallicity: Parameter | u.Quantity | float,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
 
-        self.mass_burst = check_parameter(self.mass_burst, u.Msun,
-                                          doc="Total stellar mass formed during the burst")
-        self.time_burst = check_parameter(self.time_burst, u.Gyr,
-                                          doc="Burst cosmic time")
-        self.sigma_burst = check_parameter(self.sigma_burst, u.Gyr,
-                                           doc="Burst duration (Gaussian sigma)")
-        self.burst_metallicity = check_parameter(self.burst_metallicity, u.dimensionless_unscaled,
-                                                  doc="Burst stellar metallicity")
+        self.mass_burst = check_parameter(mass_burst, u.Msun, doc="Total stellar mass formed during the burst")
+        self.time_burst = check_parameter(time_burst, u.Gyr, doc="Burst cosmic time")
+        self.sigma_burst = check_parameter(sigma_burst, u.Gyr, doc="Burst duration (Gaussian sigma)")
+        self.burst_metallicity = check_parameter(
+            burst_metallicity, u.dimensionless_unscaled, doc="Burst stellar metallicity"
+        )
 
     @_check_time_dec
     def stellar_mass_formed(self, time):
@@ -783,27 +810,32 @@ class LogNormalCEM(ChemicalEvolutionModel):
     metallicity : float
         Metallicity of the gas (constant).
     """
-    t0: Parameter | u.Quantity | float = 1 << u.Gyr
-    scale: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled
-    mass_today: Parameter | u.Quantity | float = 1 << u.Msun
-    ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
+    name = "lognormal_cem"
 
-    name: str = field(default="lognormal_cem", init=False)
+    def __init__(
+        self,
+        *,
+        t0: Parameter | u.Quantity | float = 1 << u.Gyr,
+        scale: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled,
+        mass_today: Parameter | u.Quantity | float = 1 << u.Msun,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
 
-    def __post_init__(self):
-        super().__post_init__()
-        # do the checks and add default docs
-        self.t0 = check_parameter(self.t0, u.Gyr)
-        self.scale = check_parameter(self.scale, u.dimensionless_unscaled)
-        self.mass_today = check_parameter(self.mass_today, u.Msun)
-        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today, u.dimensionless_unscaled)
+        self.t0 = check_parameter(t0, u.Gyr)
+        self.scale = check_parameter(scale, u.dimensionless_unscaled)
+        self.mass_today = check_parameter(mass_today, u.Msun)
+        self.ism_metallicity_today = check_parameter(ism_metallicity_today, u.dimensionless_unscaled)
 
         if self.today is None:
-            raise ValueError("Parameter ``today`` must be set")
-        # re-scale mass normalization
-        self.mass_norm = 1
-        mtoday = self.stellar_mass_formed(self.today)
-        self.mass_norm = self.mass_today / mtoday
+            raise ValueError("Parameter `today` must be set")
+
+        # normalise so that M(today)=mass_today
+        self.mass_norm = 1.0
+        mtoday = self.stellar_mass_formed(self.today.q)
+        self.mass_norm = (self.mass_today.q / mtoday).decompose()
+
 
     @_check_time_dec
     def stellar_mass_formed(self, times: u.Quantity):
@@ -825,34 +857,41 @@ class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
     --------
     :class:`MassPropMetallicityMixin`
     """
+    name = "lognormal_zpowlaw_cem"
 
-    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
-    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
-
-    name: str = field(default="lognormal_zpowlaw_cem", init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-        self.ism_metallicity_today = check_parameter(self.ism_metallicity_today,
-                                                     u.dimensionless_unscaled,
-                                                     doc="Metallicity of stars born at present")
-        self.alpha_powerlaw = check_parameter(self.alpha_powerlaw,
-                                              u.dimensionless_unscaled,
-                                              doc="Metallicity evolution power-law exponent")    
-
+    def __init__(
+        self,
+        *,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        alpha_powerlaw: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled,
+        **kwargs,
+    ):
+        super().__init__(ism_metallicity_today=ism_metallicity_today, **kwargs)
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled,
+            doc="Metallicity of stars born at present",
+        )
+        self.alpha_powerlaw = check_parameter(
+            alpha_powerlaw, u.dimensionless_unscaled,
+            doc="Metallicity evolution power-law exponent",
+        )
 
 @dataclass
 class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """A :class:`LogNormalCEM` with a quenching event."""
-    quenching_time: Parameter | u.Quantity | float = None
-    name: str = field(default="lognormal_quenched_cem", init=False)
+    name = "lognormal_quenched_cem"
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.quenching_time = check_parameter(self.quenching_time, u.Gyr,
-                                                doc="Cosmic quenching time")
-        mtoday = self.stellar_mass_formed(self.today)
-        self.mass_norm *= self.mass_today / mtoday
+    def __init__(
+        self,
+        *,
+        quenching_time: Parameter | u.Quantity | float | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.quenching_time = check_parameter(quenching_time, u.Gyr, doc="Cosmic quenching time")
+
+        mtoday = self.stellar_mass_formed(self.today.q)
+        self.mass_norm = self.mass_norm * (self.mass_today.q / mtoday).decompose()
 
     @_check_time_dec
     @sfh_quenching_decorator
@@ -914,46 +953,39 @@ class BetaCEM(ChemicalEvolutionModel):
     - All time arguments are **cosmic time since the Big Bang** (not lookback).
     - :meth:`ism_metallicity` returns a constant metallicity (no enrichment model).
     """
-    mass_today: Parameter | u.Quantity | float = 1.0 << u.Msun
+    name = "beta_cem"
 
-    # Either set (alpha, beta) or set (t_mean, kappa)
-    alpha: Optional[Parameter | u.Quantity | float] = None
-    beta: Optional[Parameter | u.Quantity | float] = None
-    t_mean: Optional[Parameter | u.Quantity | float] = None
-    kappa: Optional[Parameter | u.Quantity | float] = None
+    def __init__(
+        self,
+        *,
+        mass_today: Parameter | u.Quantity | float = 1.0 << u.Msun,
+        alpha: Parameter | u.Quantity | float | None = None,
+        beta: Parameter | u.Quantity | float | None = None,
+        t_mean: Parameter | u.Quantity | float | None = None,
+        kappa: Parameter | u.Quantity | float | None = None,
+        t_start: Parameter | u.Quantity | float = 0.0 << u.Gyr,
+        t_end: Parameter | u.Quantity | float | None = None,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
 
-    t_start: Parameter | u.Quantity | float = 0.0 << u.Gyr
-    t_end: Optional[Parameter | u.Quantity | float] = None
-
-    ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled
-
-    name: str = field(default="beta_cem", init=False)
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        self.mass_today = check_parameter(self.mass_today, u.Msun,
-                                          doc="Total formed stellar mass by t_end")
-        self.t_start = check_parameter(self.t_start, u.Gyr,
-                                       doc="Cosmic start time of star formation")
-        if self.t_end is not None:
-            self.t_end = check_parameter(self.t_end, u.Gyr,
-                                         doc="Cosmic end time of star formation horizon")
-
+        self.mass_today = check_parameter(mass_today, u.Msun, doc="Total formed stellar mass by t_end")
+        self.t_start = check_parameter(t_start, u.Gyr, doc="Cosmic start time of star formation")
+        self.t_end = check_parameter(t_end, u.Gyr, doc="Cosmic end time of star formation horizon") if t_end is not None else None
         self.ism_metallicity_today = check_parameter(
-            self.ism_metallicity_today, u.dimensionless_unscaled,
-            doc="Constant ISM metallicity (mass fraction)"
+            ism_metallicity_today, u.dimensionless_unscaled, doc="Constant ISM metallicity (mass fraction)"
         )
 
-        # Resolve t_end (needs today if not provided)
-        _ = self._t_end_q  # triggers validation + today requirement
+        self.alpha = alpha
+        self.beta = beta
+        self.t_mean = t_mean
+        self.kappa = kappa
 
-        # Resolve alpha/beta from either (alpha,beta) or (t_mean,kappa)
+        # triggers validation
+        _ = self._t_end_q
         self._resolve_shape_params()
 
-    # -----------------------------------------------------------------
-    # Internal helpers / validated quantities
-    # -----------------------------------------------------------------
     @property
     def _t_end_q(self) -> u.Quantity:
         """Return t_end as a Quantity (falls back to today)."""
@@ -1151,31 +1183,76 @@ class TabularCEM(ChemicalEvolutionModel):
     --------
     :class:`pst.models.ChemicalEvolutionModel` documentation.
     """
-    times: Parameter | u.Quantity | np.array = None
-    masses: Parameter | u.Quantity | np.array = None
-    metallicities: Parameter | u.Quantity | np.array = None
+    name = "tabular_cem"
 
-    name: str = field(default="tabular_cem", init=False)
+    def __init__(self, *,
+                 times: Parameter | u.Quantity | np.array,
+                 masses: Parameter | u.Quantity | np.array,
+                 metallicities: Parameter | u.Quantity | np.array,
+                 **kwargs):
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.times = check_parameter(self.times, u.Gyr, doc="")
-        self.masses = check_parameter(self.masses, u.Msun, doc="")
-        self.metallicities = check_parameter(self.metallicities, u.dimensionless_unscaled,
-                                             doc="")
-        
+        super().__init__(**kwargs)
+
+        self.times = times
+        self.masses = masses
+        self.metallicities = metallicities
+
+        assert self.times.size == self.masses.size, "times and masses arrays must have same size"
+        assert self.times.size == self.metallicities.size, "times and metallicities arrays must have same size"
+
+        # Sort in ascending order (Big Bang -> Present)
         sort_times = np.argsort(self.times.q)
         self.times.q = self.times.q[sort_times]
         self.masses.q = self.masses.q[sort_times]
         self.metallicities.q = self.metallicities.q[sort_times]
 
     @property
+    def times(self):
+        return self._times
+    
+    @times.setter
+    def times(self, val):
+        val = check_parameter(val, u.Gyr,
+                              doc="Mass formation history cosmic time")
+        self._times = val
+
+    @property
+    def masses(self):
+        return self._masses
+
+    @masses.setter
+    def masses(self, val):
+        val = check_parameter(val, u.Msun,
+                              doc="Cumulative mass formation history")
+        self._masses = val
+
+    @property
+    def metallicities(self):
+        return self._metallicities
+    
+    @metallicities.setter
+    def metallicities(self, val):
+        val = check_parameter(val, u.dimensionless_unscaled,
+                              doc="Metallicity history")
+        self._metallicities = val
+
+    # Define some aliases for backwards compatibility
+
+    @property
     def table_t(self):
         return self.times.q
+
+    @table_t.setter
+    def table_t(self, v):
+        self.times = check_parameter(v, u.Gyr)
 
     @property
     def table_mass(self):
         return self.masses.q
+
+    @table_mass.setter
+    def table_mass(self, v):
+        self.masses = check_parameter(v, u.Msun)
 
     @property
     def table_metallicity(self):
@@ -1238,7 +1315,7 @@ class TabularCEM(ChemicalEvolutionModel):
         integral[times < self.table_t[0]] = self.table_metallicity[0]
         return integral
 
-@dataclass
+
 class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     """Chemical evolution model based on a grid of times that assumes an analytic chemical enrichment history.
 
@@ -1247,29 +1324,32 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
     :class:`TabularCEM`
     :class:`MassPropMetallicityMixin`
     """
-    mass_today: Parameter | u.Quantity | float = None
-    ism_metallicity_today: Parameter = 0.02 << u.dimensionless_unscaled
-    alpha_powerlaw: Parameter = 1 << u.dimensionless_unscaled
-    name: str = field(default="tabular_zpowlaw_cem", init=False)
+    name = "tabular_zpowlaw_cem"
 
-    def __post_init__(self):
-        # If metallicities were not provided, create a dummy one BEFORE TabularCEM __post_init__
-        if self.metallicities is None and self.times is not None:
-            # times may be Parameter/Quantity/array; we just need a length
-            t = self.times.q if isinstance(self.times, Parameter) else check_unit(self.times, u.Gyr)
-            self.metallicities = np.zeros(np.size(t)) << u.dimensionless_unscaled
+    def __init__(self, *,
+                 mass_today: Parameter,
+                 ism_metallicity_today: Parameter,
+                 alpha_powerlaw: Parameter, **kwargs):
 
-        super().__post_init__()
+        self.mass_today = check_parameter(mass_today, u.Msun,
+                                          doc="Stellar mass at observing time")
+        self.ism_metallicity_today = check_parameter(ism_metallicity_today,
+                                                     u.dimensionless_unscaled,
+                                                     doc="ISM metallicity at observing time")
+        self.alpha_powerlaw = check_parameter(alpha_powerlaw, u.dimensionless_unscaled,
+                                              doc="Metallicity enrichment power-law index")
 
-        if self.mass_today is None:
-            self.mass_today = Parameter(self.stellar_mass_formed(self.today),
-                                        doc="Stellar mass at observing time")
-        self.ism_metallicity_today = check_parameter(
-            self.ism_metallicity_today, u.dimensionless_unscaled, doc="Metallicity at present"
-        )
-        self.alpha_powerlaw = check_parameter(
-            self.alpha_powerlaw, u.dimensionless_unscaled, doc="Metallicity evolution exponent"
-        )
+        # Create a dummy one before TabularCEM __post_init__
+        if kwargs.get("metallicities") is None:
+            kwargs["metallicities"] = np.zeros(len(kwargs["times"]))
+
+        super().__init__(**kwargs)
+
+        # This parameter is controlled by the chemical enrichment history
+        self.metallicities.fixed = True
+
+        if self.today is None:
+            raise ValueError("Parameter ``today`` must be set")
 
 
 class CC25TabularCEM(TabularCEM_ZPowerLaw):
@@ -1289,35 +1369,17 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
     """
 
     def __init__(self, *, tau_ssfr, ssfr, **kwargs):
-        # Read-only, set by parent class
-        today = check_unit(kwargs["today"], u.Gyr)
-        mass_today = check_unit(kwargs["mass_today"], u.Msun)
-
-        self._tau_ssfr = check_parameter(tau_ssfr, u.Gyr)
-        self._ssfr = check_parameter(ssfr, 1 / u.Gyr)
-        
-        if np.any(self.tau_ssfr.q <= 0 * u.Gyr):
-            raise ValueError("All tau_ssfr values must be positive.")
-        if np.any(self.tau_ssfr.q > check_unit(today, u.Gyr)):
-            raise ValueError("All tau_ssfr values must be less than today.")
-
-        # Sort in descending order
-        sort_idx = np.argsort(self.tau_ssfr.q)[::-1]
-        self.tau_ssfr.q = self.tau_ssfr.q[sort_idx]
-        self.ssfr.q = self.ssfr.q[sort_idx]
-
-        times = today - self.tau_ssfr.q
-        times = np.insert(times, (0, times.size), (0 * u.Gyr, today))
-
-        masses = mass_today * (1 - self.tau_ssfr.q * self.ssfr.q)
-        masses = np.insert(masses, (0, masses.size), (0.0 * u.Msun, mass_today))
-
         super().__init__(
-            times=times,
-            masses=masses,
+            times=np.zeros(len(tau_ssfr) + 2),
+            masses=np.zeros(len(tau_ssfr) + 2),
             **kwargs,
         )
-    
+        if tau_ssfr[0] < tau_ssfr[1]:
+            raise ValueError("Input values of tau must be in descending order")
+
+        self.tau_ssfr = check_parameter(tau_ssfr, u.Gyr)
+        self.ssfr = check_parameter(ssfr, 1 / u.Gyr)
+
     @property
     def ssfr(self):
         return self._ssfr
@@ -1326,8 +1388,9 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
     def ssfr(self, value):
         value = check_parameter(value, 1 / u.Gyr)
         self._ssfr = value
-        masses = self.mass_today.q * (1 - self.tau_ssfr.q * self._ssfr.q)
-        self.masses = Parameter(np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today)))
+        masses = self.mass_today.q * np.cumsum(1 - self.tau_ssfr.q * self._ssfr.q)
+        self.masses = Parameter(np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today.q)),
+                                fixed=True)
 
     @property
     def tau_ssfr(self):
@@ -1340,12 +1403,81 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
             raise ValueError("All tau_ssfr values must be positive.")
         if np.any(value.q > self.today):
             raise ValueError("All tau_ssfr values must be less than today.")
-        if np.diff(value.q) >= 0:
+        if np.any(np.diff(value.q) >= 0):
             raise ValueError("Input ``tau_ssfr`` must be strictly decreasing")
         self._tau_ssfr = value
 
-        times = self.today - self._tau_ssfr.q
-        self.times = Parameter(np.insert(times, (0, times.size), (0 * u.Gyr, self.today)))
+        times = self.today.to(u.Gyr) - self._tau_ssfr.to(u.Gyr)
+        self.times = Parameter(np.insert(times, (0, times.size), (0 << u.Gyr, self.today.to(u.Gyr))),
+                               fixed=True)
+        
+        #TODO: update sSFR valid ranges
+        # for 
+
+
+class TabularMassFracCEM(TabularCEM_ZPowerLaw):
+    r"""Chemical evolution model based on mass percentiles.
+
+    The SFH is defined in terms of the time at which a given fraction of the total
+    stellar mass seen today was formed and normalized by the total mass at present.
+
+    Parameters
+    ----------
+    mass_frac: u.Quantity
+        Cumulative mass fraction at a given time.
+    times: u.Quantity
+        Times associated to ```mass_frac``.
+    See Also
+    --------
+    :class:`TabularCEM_ZPowerLaw`
+    :class:`MassPropMetallicityMixin`
+    """
+
+    def __init__(self, *, mass_frac, **kwargs):
+        kwargs.update({"masses": np.zeros(len(mass_frac) + 2),
+                      "metallicities": np.zeros(len(mass_frac) + 2)})
+        super().__init__(**kwargs)
+        # Ensure that the cumulative mass fraction is increasing
+        if mass_frac[0] > mass_frac[1]:
+            raise ValueError("Input mass fraction values must be in increasing order")
+        self.mass_frac = mass_frac
+        assert self.masses.size == self.times.size, "Input mass fraction and times must have the same size"
+
+    @property
+    def mass_frac(self):
+        return self._mass_frac
+    
+    @mass_frac.setter
+    def mass_frac(self, value):
+        # Check that input value is a parameter
+        value = check_parameter(value, u.dimensionless_unscaled)
+        if np.any(value.q < 0):
+            raise ValueError("All fraction values must be positive.")
+        if np.any(value.q > 1):
+            raise ValueError("Mass fractions cannot be larger than 1")
+        if np.any(np.diff(value.q) < 0):
+            raise ValueError("Input ``mass_frac`` array must be strictly increasing")
+
+        self._mass_frac = value
+        # Set the mas history
+        masses = np.insert(self._mass_frac,
+                           (0, self._mass_frac.size),
+                           (0.0 << u.dimensionless_unscaled, 1.0 << u.dimensionless_unscaled)
+                           ) * self.mass_today.q
+        self.masses = Parameter(masses, fixed=True)
+
+    @property
+    def times(self):
+        return self._times
+
+    @times.setter
+    def times(self, value):
+        value = check_parameter(value, u.Gyr)
+        # Add origin and present times
+        times = np.insert(value.q, (0, value.size),
+                           (0.0 << u.Gyr, self.today.q.to(u.Gyr))
+                           )
+        self._times = Parameter(times, fixed=False)
 
 
 @dataclass
@@ -1370,18 +1502,48 @@ class ParticleListCEM(ChemicalEvolutionModel):
         Array representing the masses of each SSP particle. If the input is a 
         `numpy.array`, it is assumed to be in solar masses.
     """
-    time_form: Parameter | u.Quantity | np.array = None
-    metallicities: Parameter | u.Quantity | np.array = None
-    masses: Parameter | u.Quantity | np.array = None
+    name = "particle_list_cem"
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.time_form = check_parameter(self.time_form, u.Gyr,
-                                         doc="Particle formation time")
-        self.metallicities = check_parameter(self.metallicities, u.dimensionless_unscaled,
+    def __init__(
+        self,
+        *,
+        time_form: Parameter | u.Quantity | np.ndarray,
+        metallicities: Parameter | u.Quantity | np.ndarray,
+        masses: Parameter | u.Quantity | np.ndarray,
+        today: Parameter | u.Quantity | float | None = None,
+    ):
+        super().__init__(today=today)
+        self.time_form = check_parameter(time_form, u.Gyr, doc="Particle formation time")
+        self.metallicities = check_parameter(metallicities, u.dimensionless_unscaled,
                                              doc="Particle metallicity (at observing time)")
-        self.masses = check_parameter(self.masses, u.Msun,
-                                      doc="Particle stellar mass")
+        self.masses = check_parameter(masses, u.Msun, doc="Particle stellar mass")
+
+    @property
+    def time_form(self):
+        return self._time_form
+    
+    @time_form.setter
+    def time_form(self, val):
+        self._time_form = check_parameter(val, u.Gyr,
+                                          doc="Particle formation time")
+    
+    @property
+    def metallicities(self):
+        return self._metallicities
+    
+    @metallicities.setter
+    def metallicities(self, val):
+        self._metallicities = check_parameter(val, u.dimensionless_unscaled,
+                                             doc="Particle metallicity (at observing time)")
+    
+    @property
+    def masses(self):
+        return self._masses
+    
+    @masses.setter
+    def masses(self, val):
+        self._masses = check_parameter(val, u.Msun,
+                                       doc="Particle stellar mass")
 
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity):
         """
