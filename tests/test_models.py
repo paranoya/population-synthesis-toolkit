@@ -80,7 +80,6 @@ class TestModels(unittest.TestCase):
         self.assertTrue(np.isclose(mass[-1], 1 * u.Msun, rtol=1e-4))
 
         z = model.ism_metallicity(self.dummy_times)
-        print(z[-1])
         self.assertTrue(np.isclose(z[-1], 0.02, rtol=1e-4))
 
     def test_delayed_tau_quenched(self):
@@ -127,17 +126,32 @@ class TestModels(unittest.TestCase):
         self.assertTrue(np.allclose(mass, real_mass * u.Msun, rtol=1e-2))
 
     def test_cc25tabular(self):
-        tau = np.array([0.1, 1.0]) << u.Gyr
-        ssfr = np.array([0.1, 1.0]) << (1 / u.Gyr)
+        tau = np.array([1.0, 0.1]) << u.Gyr
+        ssfr = np.array([1.0, 0.1]) << (1 / u.Gyr)
         model = models.CC25TabularCEM(
             tau_ssfr=tau, ssfr=ssfr, mass_today=1.0 * u.Msun,
             today=13.7 << u.Gyr,
             ism_metallicity_today=0.02, alpha_powerlaw=1.0)
 
+        parameters = model.parameters_recursive(include_fixed=False)
+        # This parameters should be fixed
+        self.assertFalse("times" in parameters)
+        self.assertFalse("masses" in parameters)
+        
         self.assertTrue(
             np.all(model.table_mass.to("Msun") == np.array([0., 0., 0.99, 1.0]) << u.Msun))
         self.assertTrue(
             np.all(model.table_t.to("Gyr") == np.array([0., 12.7, 13.6, 13.7]) << u.Gyr))
+
+    def test_fixedmassfrac(self):
+        m_frac = np.array([0, 0.5, 1.0])
+        times = np.array([0.1, 5, 10]) << u.Gyr        
+        model = models.TabularMassFracCEM(mass_frac=m_frac, times=times, today=13.7,
+                                          mass_today=1, ism_metallicity_today=0.02,
+                                          alpha_powerlaw=1.0)
+        parameters = model.parameters_recursive(include_fixed=False)
+        self.assertTrue("times" in parameters)
+        self.assertFalse("masses" in parameters)
 
     def test_particle_grid(self):
         n_particles = 10000
