@@ -40,6 +40,23 @@ class GalaxySED(SedComponent):
     rest_unit = u.Lsun / u.AA  # Rest-frame default units
     obs_unit = u.erg / (u.s * u.cm**2 * u.AA)  # Observed-frame default units
 
+    @property
+    def redshift(self) -> Parameter:
+        return self._redshift
+
+    @redshift.setter
+    def redshift(self, value):
+        value = check_parameter(value, u.dimensionless_unscaled)
+        self._redshift = value
+        self.t_obs = self.cosmology.age(self._redshift.q)
+        # Ensure that the stellar SFH is set to same today
+        if self.stars is not None:
+            self.stars.sfh.today = self.t_obs
+        self.dl = self.cosmology.luminosity_distance(
+            self._redshift).clip(10 << u.pc)
+        self.distance_factor = 4 * np.pi * self.dl.to("cm")**2 * (
+            1 + self._redshift)
+
     def __init__(self, *,
                  stellar_model: SedComponent=None,
                  dust_attenuation_model: AttenuationModel=None,  # Fix typing
@@ -50,42 +67,36 @@ class GalaxySED(SedComponent):
                  filters: List[observables.Filter]=None):
         self._param_index: Dict[str, Parameter] = {}
         # Setup components
-        self.stellar_em = stellar_model
+        self.stars = stellar_model
         self.dust_attenuation = dust_attenuation_model
-        self.dust_em = dust_model
+        self.dust = dust_model
         # Target wavelength range
         if target_wavelength is not None:
             self.target_wavelength = target_wavelength
         else:
-            if self.dust_em is None:
-                self.target_wavelength = self.stellar_em.ssp.wavelength
+            if self.dust is None:
+                self.target_wavelength = self.stars.ssp.wavelength
             else:
-                if self.stellar_em is not None:
+                if self.stars is not None:
                     dust_wl = np.geomspace(1, 1000, 100) << u.um
                     wl = np.concatenate(
-                        (self.stellar_em.ssp.wavelength.to_value(u.AA),
+                        (self.stars.ssp.wavelength.to_value(u.AA),
                         dust_wl.to_value(u.AA)))
                 else:
                     wl = np.geomspace(0.1, 1e3, 1000) << u.um
                 self.target_wavelength = np.unique(wl) << u.AA
             print("Target wavelength range", self.target_wavelength[[0, -1]],
                    "\nNo. pixels:", self.target_wavelength.size)
-        self.stellar_em.ssp.interpolate_sed(self.target_wavelength)
+        self.stars.ssp.interpolate_sed(self.target_wavelength)
         # Setup component transformers
         self.energy_balance = True if isinstance(
-            self.dust_em, CalorimetricDustComponent) else False
+            self.dust, CalorimetricDustComponent) else False
         # Setup observation properties
-        self.redshift = check_parameter(redshift)
         if cosmology is None:
             self.cosmology = WMAP9
-        self.t_obs = self.cosmology.age(self.redshift)
-        # Ensure that the stellar SFH is set to same today
-        self.stellar_em.sfh.today = self.t_obs
-        self.dl = self.cosmology.luminosity_distance(
-            self.redshift).clip(10 << u.pc)
-        self.distance_factor = 4 * np.pi * self.dl.to("cm")**2 * (
-            1 + self.redshift)
-        
+        else:
+            self.cosmology = cosmology
+        self.redshift = redshift
         # Setup observables
         if filters is not None:
             print("Interpolating filters to target wavelength")
@@ -141,7 +152,7 @@ class GalaxySED(SedComponent):
                 continue
             p.set(val, validate=validate)
 
-    def emission_components(self, stellar_em_params=None, dust_att_params=None,
+    def emission_components(self, stars_params=None, dust_att_params=None,
                             dust_em_params=None):
         """
         Compute individual SED components on the rest-frame wavelength grid.
@@ -151,7 +162,7 @@ class GalaxySED(SedComponent):
         - ``stellar_sed``       : attenuated stellar emission (if attenuation model is set)
         - ``dust_sed``          : dust emission component (if present)
 
-        If ``self.dust_em`` is calorimetric (energy-balance), the dust component is
+        If ``self.dust`` is calorimetric (energy-balance), the dust component is
         computed consistently from the absorbed stellar energy.
         """
         components = {
@@ -161,16 +172,16 @@ class GalaxySED(SedComponent):
             # "nebular_sed": None,
                       }
 
-        stellar_em_params = stellar_em_params or {}
-        stellar_em_params["t_obs"] = self.t_obs
+        stars_params = stars_params or {}
+        stars_params["t_obs"] = self.t_obs
         dust_att_params = dust_att_params or {}
         dust_em_params = dust_em_params or {}
 
         if self.energy_balance:
-            stellar_sed_unatt, stellar_sed, dust_sed = self.dust_em.emission_spectrum(
+            stellar_sed_unatt, stellar_sed, dust_sed = self.dust.emission_spectrum(
                 self.target_wavelength,
-                source=self.stellar_em,
-                source_params=stellar_em_params,
+                source=self.stars,
+                source_params=stars_params,
                 **{**dust_att_params, **dust_em_params}
                 )
             components["stellar_sed"] = stellar_sed.to(
@@ -183,9 +194,9 @@ class GalaxySED(SedComponent):
                     self.rest_unit,
                     u.spectral_density(self.target_wavelength))
         else:
-            if self.stellar_em is not None:
-                stellar_sed_unatt = self.stellar_em.emission_spectrum(
-                    self.target_wavelength, **stellar_em_params)
+            if self.stars is not None:
+                stellar_sed_unatt = self.stars.emission_spectrum(
+                    self.target_wavelength, **stars_params)
                 components["stellar_sed_unatt"] = stellar_sed_unatt.to(
                     self.rest_unit,
                     u.spectral_density(self.target_wavelength))
@@ -201,8 +212,8 @@ class GalaxySED(SedComponent):
                     self.rest_unit,
                     u.spectral_density(self.target_wavelength))
 
-            if self.dust_em is not None:
-                dust_sed = self.dust_em.emission_spectrum(
+            if self.dust is not None:
+                dust_sed = self.dust.emission_spectrum(
                     self.target_wavelength, **dust_em_params)
                 components["dust_sed"] = dust_sed.to(
                     self.rest_unit,
@@ -211,7 +222,7 @@ class GalaxySED(SedComponent):
         return components
 
     def emission_spectrum(self,
-                          stellar_em_params=None, dust_att_params=None,
+                          stars_params=None, dust_att_params=None,
                           dust_em_params=None, to_obs_frame=False):
         """
         Compute the composite SED (stellar + dust).
@@ -223,13 +234,15 @@ class GalaxySED(SedComponent):
             spectrum to ``lambda_obs = (1+z) lambda_rest``.
         """
         components = self.emission_components(
-            stellar_em_params=stellar_em_params,
+            stars_params=stars_params,
             dust_att_params=dust_att_params,
             dust_em_params=dust_em_params)
 
         composite_sed = np.zeros(self.target_wavelength.size) << self.rest_unit
-        composite_sed += components.get("stellar_sed", 0)
-        composite_sed += components.get("dust_sed", 0)
+        if components["stellar_sed"] is not None:
+            composite_sed += components["stellar_sed"]
+        if components["dust_sed"] is not None:
+            composite_sed += components["dust_sed"]
 
         if to_obs_frame:
             flux = (composite_sed / self.distance_factor).to(
@@ -240,7 +253,7 @@ class GalaxySED(SedComponent):
                 flux)
         return composite_sed
 
-    def emission_photometry(self, stellar_em_params=None, dust_att_params=None,
+    def emission_photometry(self, stars_params=None, dust_att_params=None,
                             dust_em_params=None, to_obs_frame=False):
         """
         Compute synthetic photometry from the composite spectrum.
@@ -251,7 +264,7 @@ class GalaxySED(SedComponent):
         container must support evaluation of fluxes from a spectrum sampled on
         ``target_wavelength``.
         """
-        spec = self.emission_spectrum(stellar_em_params=stellar_em_params,
+        spec = self.emission_spectrum(stars_params=stars_params,
                                       dust_att_params=dust_att_params,
                                       dust_em_params=dust_em_params,
                                       to_obs_frame=to_obs_frame)
