@@ -32,11 +32,11 @@ class TestGalaxySED(unittest.TestCase):
                                             to_filter_list=True)
 
         model = galaxy.GalaxySED(stellar_model=self.stellar_em,
-                              dust_attenuation_model=self.dust_att,
-                              dust_model=self.dust_em,
-                            #   target_wavelength=self.stellar_em.ssp.wavelength,
-                              redshift=0.5, cosmology=None,
-                              filters=filters)
+                                dust_attenuation_model=self.dust_att,
+                                dust_model=self.dust_em,
+                                #   target_wavelength=self.stellar_em.ssp.wavelength,
+                                redshift=0.5, cosmology=None,
+                                filters=filters)
 
         params = model.build_param_index(include_fixed=True)
         print(params)
