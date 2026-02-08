@@ -565,7 +565,7 @@ def check_unit(quantity, default_unit=None, equivalence=None, **equiv_kwargs):
         if equivalence is not None:
             return quantity.to(default_unit, equivalencies=equivalence(**equiv_kwargs))
 
-        raise u.UnitTypeError("Input quantity does not have the appropriate units")
+        raise u.UnitTypeError(f"Input quantity ({quantity.unit}) does not have the appropriate units ({default_unit})")
 
     # Parameter
     if isinstance(quantity, Parameter):
