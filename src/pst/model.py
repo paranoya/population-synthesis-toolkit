@@ -105,6 +105,10 @@ class Parameter:
 
     # --- Quantity / ndarray layer ---------------------------------
 
+    @property
+    def size(self):
+        return self.q.size
+    
     def __repr__(self) -> str:
         meta = []
         if self.fixed:
