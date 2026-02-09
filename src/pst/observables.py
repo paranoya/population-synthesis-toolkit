@@ -494,14 +494,22 @@ class Filter(object):
 
         return f_lambda, f_lambda_err
 
-    def plot(self, show=False):
+    def plot(self, add_props=False, ax=None, show=False):
         """Plot the filter response curve.
         
         Plot the original filter response curve together with the interpolated
         version computed using a new grid of wavelengths.
+
+        Parameters
+        ----------
+        show: bool
+            If True
         """
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+
         ax.step(self.filter_wavelength, self.filter_resp, label='Original',
                 color='k', where="mid")
         ax.plot(self.filter_wavelength, self.filter_resp, '.', color='k')
@@ -511,11 +519,16 @@ class Filter(object):
             ax.step(self.wavelength, self.response, label='Interpolated',
                       color='r', where="mid")
         ax.legend()
+        if add_props:
+            eff_wl = self.effective_wavelength()
+            eff_bw = self.effective_bandwidth()
+            ax.axvline(eff_wl.value - eff_bw.value / 2, c="k", ls=":")
+            ax.axvline(eff_wl.value + eff_bw.value / 2, c="k", ls=":")
         if show:
             plt.show()
         else:
             plt.close()
-        return fig
+        return fig, ax
 
 
 class TopHatFilter(Filter):
@@ -567,6 +580,20 @@ class FilterList:
     @property
     def n_bands(self) -> int:
         return len(self.filters)
+
+    def wavelength_range(self, kappa_bw=2.0) -> [u.Quantity, u.Quantity]:
+        """Get the net wavelength coverage by the filters."""
+        min_wl = 1e6 << u.AA
+        max_wl = 1 << u.AA
+
+        for f in self.filters:
+            eff_wl, eff_bw = f.effective_wavelength(), f.effective_bandwidth()
+            low, up = eff_wl - eff_bw * kappa_bw, eff_wl + eff_bw * kappa_bw
+            if low < min_wl:
+                min_wl = low
+            if up > max_wl:
+                max_wl = up
+        return [min_wl, max_wl]
 
     def interpolate(self, wavelength: ArrayLike) -> "FilterList":
         """
@@ -739,6 +766,29 @@ class FilterList:
         mag_err = (2.5 / np.log(10)) * (n_phot_err / n_phot)
         return mag, mag_err
 
+    def plot(self, add_props=False, ax=None, show=False):
+        """Plot the filters response curve.
+
+        Parameters
+        ----------
+        show: bool
+            If True
+        """
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+
+        for f in self.filters:
+            f.plot(ax=ax, add_props=add_props, show=False)
+
+        limits = self.wavelength_range()
+        ax.set_xlim(limits[0].value, limits[1].value)
+        if show:
+            plt.show()
+        else:
+            plt.close()
+        return fig, ax
 
 class EquivalentWidth(object):
     r"""Equivalent width of an spectral region.
