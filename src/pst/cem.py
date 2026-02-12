@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Set
-from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from functools import wraps
 
@@ -37,7 +36,7 @@ def _check_time_dec(func):
     @wraps(func)
     def wrapper(self, time, *args, **kwargs):
         if isinstance(time, Parameter):
-            tq = time.q
+            tq = time.q.to(u.Gyr)
         else:
             tq = check_unit(time, u.Gyr)
         return func(self, tq, *args, **kwargs)
@@ -112,7 +111,7 @@ class MassPropMetallicityMixin:
             time. Shape matches ``times``.
         """
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw)
+        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose()
 
     
 def sfh_quenching_decorator(stellar_mass_formed):
@@ -182,7 +181,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
     - behavior for ``t > today`` is well-defined (commonly clipped to
       :math:`M_\\star(\\mathrm{today})`).
     """
-    name: str = field(default="base_cem", init=False)
+    name = "base_cem"
 
     def __init__(self, today: Parameter | u.Quantity | float=None):
         self.today = today
@@ -234,7 +233,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         """
         return
 
-    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Gyr,
+    def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity,
                                oversample_factor=10) -> u.Quantity:
         """
         Compute SSP mass weights by integrating the SFH over SSP age bins.
@@ -333,18 +332,13 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         frac_history = mass_history / mass_history[-1]
         idx = np.searchsorted(frac_history, frac).clip(
             min=1, max=frac_history.size - 1)
-        t_frac = (
-            dummy_time[idx - 1] * (frac - frac_history[idx]) / (frac_history[idx] - frac_history[idx - 1])
-         + dummy_time[idx] * (1 - (frac - frac_history[idx]) / (frac_history[idx] - frac_history[idx - 1])
-        ))
+        w = (frac - frac_history[idx - 1]) / (frac_history[idx] - frac_history[idx - 1])
+        t_frac = (dummy_time[idx - 1] * (1 - w) + dummy_time[idx] * w)
         return t_frac
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
-        # idx: (A,)
-        a = np.arange(idx.size)[:, None]
         b = np.arange(nbin)[None, :]
         M = (idx[:, None] == b).astype(float)  # (A, Nbin)
-
         # zero out invalid ages outside [edges[0], edges[-1])
         valid = (idx >= 0) & (idx < nbin)
         M *= valid[:, None]
@@ -457,8 +451,6 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         return out_val * (photometry.unit * weights.unit)
 
 
-#-------------------------------------------------------------------------------
-@dataclass
 class SingleBurstCEM(ChemicalEvolutionModel):
     """
     Instantaneous single-burst star formation history.
@@ -513,8 +505,6 @@ class SingleBurstCEM(ChemicalEvolutionModel):
                        fill_value=self.burst_metallicity.q.value) << self.burst_metallicity.q.unit
 
 
-#-------------------------------------------------------------------------------
-@dataclass
 class ExponentialCEM(ChemicalEvolutionModel):
     r"""
     Exponentially-declining cumulative SFH.
@@ -565,7 +555,6 @@ class ExponentialCEM(ChemicalEvolutionModel):
         return np.full(time.size, fill_value=self.metallicity.q)
 
 
-@dataclass
 class ExponentialQuenchedCEM(ExponentialCEM):
     """
     Exponentially declining CEM model including a quenching event.
@@ -603,8 +592,6 @@ class ExponentialQuenchedCEM(ExponentialCEM):
         return super().stellar_mass_formed(time)
 
 
-#-------------------------------------------------------------------------------
-@dataclass
 class ExponentialDelayedCEM(ChemicalEvolutionModel):
     r"""
     Delayed-exponential cumulative SFH normalized at ``today``.
@@ -661,14 +648,14 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
 
     @_check_time_dec
     def stellar_mass_formed(self, time):
-        return self.mass_today * (1 - np.exp(-time / self.tau)
-            * (self.tau + time) / self.tau) * self._mass_norm
+        return self._mass_norm * (1 - np.exp(-time / self.tau)
+            * (self.tau + time) / self.tau)
 
     @_check_time_dec
     def ism_metallicity(self, time : u.Gyr):
         return np.full(time.size, fill_value=self.ism_metallicity_today.q)
 
-@dataclass
+
 class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelayedCEM):
     """A :class:`ExponentialDelayedCEM` with a Mass-dependent Metallicity chemical model.
     
@@ -697,7 +684,7 @@ class ExponentialDelayedZPowerLawCEM(MassPropMetallicityMixin, ExponentialDelaye
             doc="Metallicity evolution power-law exponent",
         )
 
-@dataclass
+
 class ExponentialDelayedQuenchedCEM(ExponentialDelayedZPowerLawCEM):
     """A :class:`ExponentialDelayedZPowerLawCEM` with a quenching event."""
 
@@ -722,9 +709,7 @@ class ExponentialDelayedQuenchedCEM(ExponentialDelayedZPowerLawCEM):
     def stellar_mass_formed(self, times: u.Quantity):
         return super().stellar_mass_formed(times)
 
-#-------------------------------------------------------------------------------
 
-@dataclass(kw_only=True)
 class GaussianBurstCEM(ChemicalEvolutionModel):
     """
     Gaussian burst star formation model.
@@ -787,7 +772,6 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
         return np.full(time.size, fill_value=self.burst_metallicity.q)
 
 
-@dataclass
 class LogNormalCEM(ChemicalEvolutionModel):
     r"""
     Log-normal star formation history model.
@@ -849,7 +833,6 @@ class LogNormalCEM(ChemicalEvolutionModel):
         return np.full(time.size, fill_value=self.ism_metallicity_today.q)
 
 
-@dataclass
 class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
     """A :class:`LogNormalCEM` with a Mass-dependent Metallicity chemical model.
     
@@ -876,7 +859,7 @@ class LogNormalZPowerLawCEM(MassPropMetallicityMixin, LogNormalCEM):
             doc="Metallicity evolution power-law exponent",
         )
 
-@dataclass
+
 class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
     """A :class:`LogNormalCEM` with a quenching event."""
     name = "lognormal_quenched_cem"
@@ -899,7 +882,6 @@ class LogNormalQuenchedCEM(LogNormalZPowerLawCEM):
         return super().stellar_mass_formed(times)
 
 
-@dataclass
 class BetaCEM(ChemicalEvolutionModel):
     r"""
     Beta-CMF chemical evolution model.
@@ -1160,8 +1142,7 @@ class BetaCEM(ChemicalEvolutionModel):
             return t0 + x_peak * dt
         return None
 
-#-------------------------------------------------------------------------------
-@dataclass
+
 class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
     
@@ -1236,7 +1217,7 @@ class TabularCEM(ChemicalEvolutionModel):
                               doc="Metallicity history")
         self._metallicities = val
 
-    # Define some aliases for backwards compatibility
+    # Aliases for backwards compatibility
 
     @property
     def table_t(self):
@@ -1259,7 +1240,7 @@ class TabularCEM(ChemicalEvolutionModel):
         return self.metallicities.q
 
     @_check_time_dec
-    def stellar_mass_formed(self, times: u.Gyr):
+    def stellar_mass_formed(self, times: u.Quantity):
         r"""Evaluate the integral of the SFR over a given set of times.
         
         Description
@@ -1282,7 +1263,7 @@ class TabularCEM(ChemicalEvolutionModel):
             The cumulative stellar mass formed at each input time.
         """
         interpolator = interpolate.PchipInterpolator(
-           self.table_t, self.table_mass)
+           self.table_t.value, self.table_mass.value)
         integral = interpolator(times.to_value(self.table_t.unit)
                                 ) << self.table_mass.unit
         integral[times > self.table_t[-1]] = self.table_mass[-1]
@@ -1290,7 +1271,7 @@ class TabularCEM(ChemicalEvolutionModel):
         return integral
 
     @_check_time_dec
-    def ism_metallicity(self, times: u.Gyr):
+    def ism_metallicity(self, times: u.Quantity):
         """Evaluate the integral of the SFR over a given set of times.
         
         Description
@@ -1309,8 +1290,8 @@ class TabularCEM(ChemicalEvolutionModel):
             Vector with the ISM metallicity at each input time.
         """
         interpolator = interpolate.PchipInterpolator(
-           self.table_t, self.table_metallicity)
-        integral = interpolator(times)
+           self.table_t.value, self.table_metallicity.value)
+        integral = interpolator(times) << self.table_metallicity.unit
         integral[times > self.table_t[-1]] = self.table_metallicity[-1]
         integral[times < self.table_t[0]] = self.table_metallicity[0]
         return integral
@@ -1480,7 +1461,6 @@ class TabularMassFracCEM(TabularCEM_ZPowerLaw):
         self._times = Parameter(times, fixed=False)
 
 
-@dataclass
 class ParticleListCEM(ChemicalEvolutionModel):
     """
     Chemical Evolution Model using individual Simple Stellar Population (SSP) data.
