@@ -29,6 +29,23 @@ from pst.sed import SedComponent, StellarComponent
 
 ## Utils ###
 
+_LOG_FLOAT_MAX = np.log(np.finfo(float).max)
+
+
+def _exp_bounded(exponent: np.ndarray) -> np.ndarray:
+    """Exponentiate with clipping to float64 finite range."""
+    exp_arg = np.asarray(exponent, dtype=float)
+    return np.exp(np.clip(exp_arg, -_LOG_FLOAT_MAX, _LOG_FLOAT_MAX))
+
+
+def _pow_positive_bounded(base: np.ndarray, exponent: float) -> np.ndarray:
+    """Compute base**exponent for positive bases using a log-space bounded form."""
+    base_arr = np.asarray(base, dtype=float)
+    base_arr = np.clip(base_arr, np.finfo(float).tiny, np.finfo(float).max)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_base = np.log(base_arr)
+    return _exp_bounded(exponent * log_base)
+
 
 def modified_blackbody(
     lam: u.Quantity,
@@ -99,15 +116,22 @@ def modified_blackbody(
 
     nu = (const.c / lam).to(u.Hz)
     bb = BlackBody(temperature=T)
-    Bnu = bb(nu)
+    # BlackBody evaluation is stable but can raise overflow warnings internally
+    # for very large h nu / kT values where the limiting value is zero.
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        Bnu = bb(nu)
 
     if lam_0 is not None:
         lam_0 = check_unit(lam_0, u.um).to(u.um)
-        tau = (lam_0 / lam).decompose() ** beta
+        tau = _pow_positive_bounded(
+            (lam_0 / lam).to_value(u.dimensionless_unscaled), beta
+        )
         factor = -np.expm1(-tau) * u.dimensionless_unscaled
     else:
         nu_ref = (const.c / lam_ref).to(u.Hz)
-        factor = (nu / nu_ref) ** beta * u.dimensionless_unscaled
+        factor = _pow_positive_bounded(
+            (nu / nu_ref).to_value(u.dimensionless_unscaled), beta
+        ) * u.dimensionless_unscaled
 
     if per_freq:
         return Bnu * factor
@@ -252,7 +276,8 @@ class AttenuationCurve(ModelBase):
             Dimensionless attenuation factor with the same shape as wavelength.
         """
         a_lam = self.a_lambda(wavelength, a_v=a_v, **params).to_value(u.mag)
-        return 10.0 ** (-0.4 * a_lam) << u.dimensionless_unscaled
+        exponent = -0.4 * np.log(10.0) * a_lam
+        return _exp_bounded(exponent) << u.dimensionless_unscaled
 
 
 @dataclass(kw_only=True)
@@ -328,7 +353,9 @@ class PowerLawAttenuationCurve(AttenuationCurve):
         lam = check_unit(wavelength, u.AA)
         pivot = check_unit(self.pivot.q, u.AA)
         alpha = float(self.alpha.to_value())
-        k = (lam / pivot).to_value(u.dimensionless_unscaled) ** alpha
+        k = _pow_positive_bounded(
+            (lam / pivot).to_value(u.dimensionless_unscaled), alpha
+        )
         return k << u.dimensionless_unscaled
 
 
@@ -814,8 +841,9 @@ class Casey2012DustComponent(SedComponent):
 
         # shape template in L_lambda-like units (arbitrary normalization)
         mbb = modified_blackbody(lam, T, beta, lam_0=lam0, per_freq=False)
-        pl = (lam / lam_pivot).to_value(u.dimensionless_unscaled) ** alpha * np.exp(
-            -(lam / lam_pivot).to_value(u.dimensionless_unscaled) ** 2
+        lam_ratio = (lam / lam_pivot).to_value(u.dimensionless_unscaled)
+        pl = _pow_positive_bounded(lam_ratio, alpha) * _exp_bounded(
+            -_pow_positive_bounded(lam_ratio, 2.0)
         )
         pl = mbb[np.argmin(np.abs(lam - lam_pivot))] * pl  # match scale near pivot
 
@@ -1130,9 +1158,9 @@ class DustScreen(DustModelBase):
             Dimensionless extinction factor to be applied to the spectra.
         """
         return (
-            10
-            ** (
+            _exp_bounded(
                 -0.4
+                * np.log(10.0)
                 * self.extinction_law(
                     np.array(wavelength.to_value("angstrom"), dtype=float),
                     a_v,

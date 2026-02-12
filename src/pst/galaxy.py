@@ -47,6 +47,11 @@ class GalaxySED(SedComponent):
     @redshift.setter
     def redshift(self, value):
         value = check_parameter(value, u.dimensionless_unscaled)
+        z = np.asarray(value.to_value(u.dimensionless_unscaled), dtype=float)
+        if not np.all(np.isfinite(z)):
+            raise ValueError("redshift must be finite.")
+        if np.any(z < 0.0):
+            raise ValueError("redshift must be non-negative.")
         self._redshift = value
         self.t_obs = self.cosmology.age(self._redshift.q)
         # Ensure that the stellar SFH is set to same today
@@ -55,7 +60,7 @@ class GalaxySED(SedComponent):
         self.dl = self.cosmology.luminosity_distance(
             self._redshift).clip(10 << u.pc)
         self.distance_factor = 4 * np.pi * self.dl.to("cm")**2 * (
-            1 + self._redshift)
+            1 + self._redshift.q)
 
     def __init__(self, *,
                  stellar_model: SedComponent=None,
@@ -253,7 +258,7 @@ class GalaxySED(SedComponent):
             # redshift spectra
             return flux_conserving_interpolation(
                 self.target_wavelength,
-                self.target_wavelength * (1 + self.redshift),
+                self.target_wavelength * (1 + self.redshift.q),
                 flux)
         return composite_sed
 
@@ -273,4 +278,3 @@ class GalaxySED(SedComponent):
                                       dust_em_params=dust_em_params,
                                       to_obs_frame=to_obs_frame)
         return self.filters.get_fnu(spec)[0]
-
