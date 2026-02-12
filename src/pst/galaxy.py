@@ -65,6 +65,7 @@ class GalaxySED(SedComponent):
                  redshift: Union[Parameter, float]=0.0,
                  cosmology=None,
                  filters: List[observables.Filter]=None):
+        print("Initialising Galaxy model")
         self._param_index: Dict[str, Parameter] = {}
         # Setup components
         self.stars = stellar_model
@@ -85,8 +86,9 @@ class GalaxySED(SedComponent):
                 else:
                     wl = np.geomspace(0.1, 1e3, 1000) << u.um
                 self.target_wavelength = np.unique(wl) << u.AA
-            print("Target wavelength range", self.target_wavelength[[0, -1]],
-                   "\nNo. pixels:", self.target_wavelength.size)
+            print(" - Target wavelength range",
+                  self.target_wavelength[[0, -1]],
+                  "\n - No. pixels:", self.target_wavelength.size)
         self.stars.ssp.interpolate_sed(self.target_wavelength)
         # Setup component transformers
         self.energy_balance = True if isinstance(
@@ -99,7 +101,7 @@ class GalaxySED(SedComponent):
         self.redshift = redshift
         # Setup observables
         if filters is not None:
-            print("Interpolating filters to target wavelength")
+            print("Interpolating input filters to target wavelength")
             filters.interpolate(self.target_wavelength)
             self.filters = filters
 
@@ -243,10 +245,12 @@ class GalaxySED(SedComponent):
             composite_sed += components["stellar_sed"]
         if components["dust_sed"] is not None:
             composite_sed += components["dust_sed"]
-
+        # TODO: Neb continuum
+        # TODO: AGN / non-thermal emission
         if to_obs_frame:
             flux = (composite_sed / self.distance_factor).to(
                     self.obs_unit, u.spectral_density(self.target_wavelength))
+            # redshift spectra
             return flux_conserving_interpolation(
                 self.target_wavelength,
                 self.target_wavelength * (1 + self.redshift),
