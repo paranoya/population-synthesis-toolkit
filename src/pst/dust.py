@@ -747,7 +747,7 @@ class Casey2012DustComponent(SedComponent):
         default_factory=lambda: Parameter(
             1.5,
             unit=u.dimensionless_unscaled,
-            vrange=(0.0, 5.0),
+            vrange=(0.5, 3.0),
             doc="Emissivity index",
         )
     )
@@ -755,7 +755,7 @@ class Casey2012DustComponent(SedComponent):
         default_factory=lambda: Parameter(
             2.0,
             unit=u.dimensionless_unscaled,
-            vrange=(-10.0, 10.0),
+            vrange=(0.1, 3.0),
             doc="MIR power law slope",
         )
     )
