@@ -581,6 +581,10 @@ class FilterList:
     def n_bands(self) -> int:
         return len(self.filters)
 
+    @property
+    def effective_wavelength(self) -> u.Quantity:
+        return u.Quantity([f.effective_wavelength() for f in self.filters], u.AA)
+
     def wavelength_range(self, kappa_bw=2.0) -> [u.Quantity, u.Quantity]:
         """Get the net wavelength coverage by the filters."""
         min_wl = 1e6 << u.AA
