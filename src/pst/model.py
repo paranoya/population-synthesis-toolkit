@@ -30,6 +30,7 @@ class Parameter:
             self._q = (self.value << (self.unit or u.dimensionless_unscaled))
             if self.unit is None:
                 self.unit = self._q.unit
+        self.value = self._q
 
     # --- Quantity-like accessors ------------------------------------------------
 
@@ -47,6 +48,7 @@ class Parameter:
             raise ValueError(f"Input quantity ({value.unit}) must be equivalent to current units ({self._q.unit})")
         self._q = value
         self.unit = self._q.unit
+        self.value = self._q
 
     @property
     def value_raw(self):
@@ -74,6 +76,7 @@ class Parameter:
             raise RuntimeError("Parameter is fixed and cannot be modified.")
         self._q = self._q.to(unit, equivalencies=equivalencies)
         self.unit = self._q.unit
+        self.value = self._q
         return self
 
     # --- Set and validate -------------------------------------------------------
@@ -112,6 +115,11 @@ class Parameter:
 
         self._q = q
         self.unit = self._q.unit
+        self.value = self._q
+
+    def as_quantity(self) -> u.Quantity:
+        """Return the current parameter value as an astropy Quantity."""
+        return self._q
 
     @property
     def size(self):

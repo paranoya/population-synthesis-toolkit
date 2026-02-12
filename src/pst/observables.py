@@ -621,6 +621,8 @@ class FilterList:
 
         if wl.ndim != 1:
             raise ValueError("wavelength must be 1D")
+        if wl.size < 2:
+            raise ValueError("wavelength grid must contain at least two points")
 
         # Enforce monotonic increasing for stable integration
         if np.any(np.diff(wl.to_value(wl.unit)) <= 0):
