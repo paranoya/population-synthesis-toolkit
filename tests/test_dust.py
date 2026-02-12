@@ -68,6 +68,13 @@ class TestUtils(unittest.TestCase):
         # Shapes should differ for typical parameters
         self.assertFalse(np.allclose(thin.value, thick.value))
 
+    def test_modified_blackbody_extreme_grid_stays_finite(self):
+        wavelength = np.geomspace(1e-6, 1e8, 800) * u.um
+        mbb = dust.modified_blackbody(
+            wavelength, T=40 * u.K, beta=2.8, lam_0=200 * u.um, per_freq=False
+        )
+        self.assertTrue(np.isfinite(mbb.value).all())
+
 
 class TestAttenuationCurves(unittest.TestCase):
     @classmethod
@@ -101,6 +108,13 @@ class TestAttenuationCurves(unittest.TestCase):
     def test_extinction_lib_unknown_law_raises(self):
         with self.assertRaises(ValueError):
             _ = dust.ExtinctionLibCurve(law="definitely_not_a_real_law")
+
+    def test_attenuation_factor_extreme_a_lambda_is_finite(self):
+        curve = dust.PowerLawAttenuationCurve()
+        f = curve.attenuation_factor(self.wl, a_v=-1e4 * u.mag)
+
+        self.assertEqual(f.unit, u.dimensionless_unscaled)
+        self.assertTrue(np.isfinite(f.value).all())
 
 
 class TestAttenuationModels(unittest.TestCase):
