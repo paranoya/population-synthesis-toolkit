@@ -65,33 +65,7 @@ class TestGalaxySED(unittest.TestCase):
 
         spec_tot = model.emission_spectrum(dust_att_params=dict(a_v=1.0),
                                             to_obs_frame=True)
-
-        from matplotlib import pyplot as plt
-        plt.figure()
-        for k, v in spec.items():
-            if k == "dust_sed":
-                plt.plot(model.target_wavelength, v, label=k, lw=3)
-            else:
-                plt.plot(model.target_wavelength, v, label=k, lw=1)
-        plt.plot(model.target_wavelength, (spec_tot * model.distance_factor).to(v.unit), label="Total")
-        plt.yscale("log")
-        plt.xscale("log")
-        # plt.ylim(1, 1e7)
-        plt.legend()
-        plt.ylabel("Flux (" + str(v.unit) + ")")
-        # plt.show()
-
-        spec_tot_fnu = spec_tot.to("3631 Jy", u.spectral_density(model.target_wavelength))
-        fig, ax = plt.subplots()
-        twax = ax.twinx()
-        ax.plot(model.target_wavelength, -2.5 * np.log10(spec_tot_fnu.value))
-        for filtr, mag in zip(filters.filters, mags):
-            ax.scatter(filtr.effective_wavelength(), mag)
-            twax.plot(filtr.filter_wavelength, filtr.filter_resp)
-        ax.set_xscale("log")
-        ax.set_ylim(12, 35)
-        
-        plt.show()
+        self.assertTrue(np.isfinite(spec_tot).all())
 
 if __name__ == '__main__':
     unittest.main()
