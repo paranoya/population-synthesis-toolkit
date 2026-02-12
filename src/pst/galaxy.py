@@ -52,7 +52,11 @@ class GalaxySED(SedComponent):
 
         This updates ``t_obs``, luminosity distance, and ``distance_factor``.
         """
-        value = check_parameter(value, u.dimensionless_unscaled)
+        value = check_parameter(
+            value,
+            u.dimensionless_unscaled,
+            doc="Cosmological redshift of the model galaxy",
+        )
         z = np.asarray(value.to_value(u.dimensionless_unscaled), dtype=float)
         if not np.all(np.isfinite(z)):
             raise ValueError("redshift must be finite.")

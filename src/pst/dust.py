@@ -315,11 +315,17 @@ class PowerLawAttenuationCurve(AttenuationCurve):
     name: str = "powerlaw_attenuation_curve"
     alpha: Parameter = field(
         default_factory=lambda: Parameter(
-            -0.7, unit=u.dimensionless_unscaled, doc="Power law exponent"
+            -0.7,
+            unit=u.dimensionless_unscaled,
+            doc="Attenuation slope alpha in k(lambda) = (lambda/lambda_pivot)^alpha",
         )
     )
     pivot: Parameter = field(
-        default_factory=lambda: Parameter(5500.0, unit=u.AA, doc="Pivot wavelength")
+        default_factory=lambda: Parameter(
+            5500.0,
+            unit=u.AA,
+            doc="Reference wavelength where the attenuation curve is normalized to unity",
+        )
     )
 
     def __post_init__(self):
@@ -401,7 +407,11 @@ class ExtinctionLibCurve(AttenuationCurve):
     name: str = "extinction_lib"
     law: str = "ccm89"
     r_v: Parameter = field(
-        default_factory=lambda: Parameter(3.1, unit=u.dimensionless_unscaled, doc="R_V")
+        default_factory=lambda: Parameter(
+            3.1,
+            unit=u.dimensionless_unscaled,
+            doc="Total-to-selective extinction ratio R_V used by the extinction law",
+        )
     )
 
     def __post_init__(self):
@@ -563,7 +573,10 @@ class DustScreenAttenuation(AttenuationModel):
     )
     a_v: Parameter = field(
         default_factory=lambda: Parameter(
-            0.0, unit=u.mag, vrange=(0.0 * u.mag, np.inf * u.mag), doc="Screen A_V"
+            0.0,
+            unit=u.mag,
+            vrange=(0.0 * u.mag, np.inf * u.mag),
+            doc="V-band attenuation normalization A_V for the foreground dust screen",
         )
     )
 
@@ -576,7 +589,9 @@ class DustScreenAttenuation(AttenuationModel):
         If curve is provided as a string, it is interpreted as an extinction
         package law name and converted into an ExtinctionLibCurve.
         """
-        self.a_v = check_parameter(self.a_v, u.mag)
+        self.a_v = check_parameter(
+            self.a_v, u.mag, doc="V-band attenuation normalization A_V for the foreground dust screen"
+        )
 
         if isinstance(self.curve, str):
             self.curve = ExtinctionLibCurve(name=self.curve)
@@ -660,7 +675,7 @@ class CharlotFall00Attenuation(AttenuationModel):
             1.0,
             unit=u.mag,
             vrange=(0.0 << u.mag, np.inf << u.mag),
-            doc="A_V for young SSPs",
+            doc="V-band attenuation A_V applied to the young stellar component",
         )
     )
     a_v_old: Parameter = field(
@@ -668,18 +683,28 @@ class CharlotFall00Attenuation(AttenuationModel):
             0.3,
             unit=u.mag,
             vrange=(0.0 << u.mag, np.inf << u.mag),
-            doc="A_V for old SSPs",
+            doc="V-band attenuation A_V applied to the old stellar component",
         )
     )
     young_age: Parameter = field(
         default_factory=lambda: Parameter(
-            10.0, unit=u.Myr, doc="Maximum age of young SSPs"
+            10.0,
+            unit=u.Myr,
+            doc="Age threshold separating young and old stellar populations",
         )
     )
 
     def __post_init__(self):
-        self.a_v_young = check_parameter(self.a_v_young, u.mag)
-        self.a_v_old = check_parameter(self.a_v_old, u.mag)
+        self.a_v_young = check_parameter(
+            self.a_v_young,
+            u.mag,
+            doc="V-band attenuation A_V applied to the young stellar component",
+        )
+        self.a_v_old = check_parameter(
+            self.a_v_old,
+            u.mag,
+            doc="V-band attenuation A_V applied to the old stellar component",
+        )
 
     def attenuation_factor(
         self,
@@ -767,7 +792,10 @@ class Casey2012DustComponent(SedComponent):
 
     t_dust: Parameter = field(
         default_factory=lambda: Parameter(
-            35.0, unit=u.K, vrange=(1.0 << u.K, 200.0 << u.K), doc="Dust temperature"
+            35.0,
+            unit=u.K,
+            vrange=(1.0 << u.K, 200.0 << u.K),
+            doc="Characteristic dust temperature of the modified blackbody component",
         )
     )
     beta: Parameter = field(
@@ -775,7 +803,7 @@ class Casey2012DustComponent(SedComponent):
             1.5,
             unit=u.dimensionless_unscaled,
             vrange=(0.5, 3.0),
-            doc="Emissivity index",
+            doc="Dust emissivity spectral index beta",
         )
     )
     alpha: Parameter = field(
@@ -783,7 +811,7 @@ class Casey2012DustComponent(SedComponent):
             2.0,
             unit=u.dimensionless_unscaled,
             vrange=(0.1, 3.0),
-            doc="MIR power law slope",
+            doc="Mid-infrared power-law slope for the warm dust tail",
         )
     )
     lam0: Parameter = field(
@@ -791,7 +819,7 @@ class Casey2012DustComponent(SedComponent):
             200.0,
             unit=u.um,
             vrange=(1.0 << u.um, 1e6 << u.um),
-            doc="Optical depth scale wavelength",
+            doc="Wavelength where optical depth reaches unity in the modified blackbody term",
         )
     )
     min_wavelength: u.Quantity = 1.0 << u.um

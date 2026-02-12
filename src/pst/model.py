@@ -68,7 +68,6 @@ class Parameter:
             return self._q.value
         return self._q.to_value(unit, equivalencies=equivalencies)
 
-    # Optional: in-place conversion
     def convert_to(self, unit: u.Unit, equivalencies=None) -> "Parameter":
         """Convert the parameter in place and return self."""
         if self.fixed:
@@ -114,8 +113,6 @@ class Parameter:
         self._q = q
         self.unit = self._q.unit
 
-    # --- Quantity / ndarray layer ---------------------------------
-
     @property
     def size(self):
         """Number of scalar elements in the underlying quantity."""
@@ -157,7 +154,7 @@ class Parameter:
 
         return result
 
-    # --- Arithmetic delegation (binary ops) ------------------------------------
+    # --- Arithmetic and binary operations -----------------------------------
 
     def _binop(self, other: Any, op):
         other_q = other._q if isinstance(other, Parameter) else other

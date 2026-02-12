@@ -807,10 +807,26 @@ class LogNormalCEM(ChemicalEvolutionModel):
     ):
         super().__init__(today=today)
 
-        self.t0 = check_parameter(t0, u.Gyr)
-        self.scale = check_parameter(scale, u.dimensionless_unscaled)
-        self.mass_today = check_parameter(mass_today, u.Msun)
-        self.ism_metallicity_today = check_parameter(ism_metallicity_today, u.dimensionless_unscaled)
+        self.t0 = check_parameter(
+            t0,
+            u.Gyr,
+            doc="Characteristic cosmic time t0 controlling the peak of the log-normal SFH",
+        )
+        self.scale = check_parameter(
+            scale,
+            u.dimensionless_unscaled,
+            doc="Dimensionless width (sigma in ln t) of the log-normal SFH",
+        )
+        self.mass_today = check_parameter(
+            mass_today,
+            u.Msun,
+            doc="Total cumulative stellar mass formed by the observing time",
+        )
+        self.ism_metallicity_today = check_parameter(
+            ism_metallicity_today,
+            u.dimensionless_unscaled,
+            doc="Present-day ISM metallicity used for enrichment normalization",
+        )
 
         if self.today is None:
             raise ValueError("Parameter `today` must be set")
@@ -1053,7 +1069,11 @@ class BetaCEM(ChemicalEvolutionModel):
         te = self._t_end_q
 
         # kappa
-        kq = check_parameter(kappa, u.dimensionless_unscaled).q.value
+        kq = check_parameter(
+            kappa,
+            u.dimensionless_unscaled,
+            doc="Beta-CMF concentration parameter kappa = alpha + beta",
+        ).q.value
         if kq <= 0:
             raise ValueError("kappa must be > 0.")
 
@@ -1225,7 +1245,9 @@ class TabularCEM(ChemicalEvolutionModel):
 
     @table_t.setter
     def table_t(self, v):
-        self.times = check_parameter(v, u.Gyr)
+        self.times = check_parameter(
+            v, u.Gyr, doc="Tabulated cosmic times defining the SFH control grid"
+        )
 
     @property
     def table_mass(self):
@@ -1233,7 +1255,11 @@ class TabularCEM(ChemicalEvolutionModel):
 
     @table_mass.setter
     def table_mass(self, v):
-        self.masses = check_parameter(v, u.Msun)
+        self.masses = check_parameter(
+            v,
+            u.Msun,
+            doc="Tabulated cumulative formed stellar mass at each control time",
+        )
 
     @property
     def table_metallicity(self):
@@ -1358,8 +1384,16 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
         if tau_ssfr[0] < tau_ssfr[1]:
             raise ValueError("Input values of tau must be in descending order")
 
-        self.tau_ssfr = check_parameter(tau_ssfr, u.Gyr)
-        self.ssfr = check_parameter(ssfr, 1 / u.Gyr)
+        self.tau_ssfr = check_parameter(
+            tau_ssfr,
+            u.Gyr,
+            doc="Lookback-time intervals where average specific SFR constraints are defined",
+        )
+        self.ssfr = check_parameter(
+            ssfr,
+            1 / u.Gyr,
+            doc="Average specific star-formation rates associated with each tau_ssfr bin",
+        )
 
     @property
     def ssfr(self):
@@ -1367,11 +1401,18 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
 
     @ssfr.setter
     def ssfr(self, value):
-        value = check_parameter(value, 1 / u.Gyr)
+        value = check_parameter(
+            value,
+            1 / u.Gyr,
+            doc="Average specific star-formation rates associated with each tau_ssfr bin",
+        )
         self._ssfr = value
         masses = self.mass_today.q * np.cumsum(1 - self.tau_ssfr.q * self._ssfr.q)
-        self.masses = Parameter(np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today.q)),
-                                fixed=True)
+        self.masses = Parameter(
+            np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today.q)),
+            fixed=True,
+            doc="Cumulative stellar mass history reconstructed from tau_ssfr and ssfr constraints",
+        )
 
     @property
     def tau_ssfr(self):
@@ -1379,7 +1420,11 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
     
     @tau_ssfr.setter
     def tau_ssfr(self, value):
-        value = check_parameter(value, u.Gyr)
+        value = check_parameter(
+            value,
+            u.Gyr,
+            doc="Lookback-time intervals where average specific SFR constraints are defined",
+        )
         if np.any(value.q <= 0 * u.Gyr):
             raise ValueError("All tau_ssfr values must be positive.")
         if np.any(value.q > self.today):
@@ -1389,8 +1434,11 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
         self._tau_ssfr = value
 
         times = self.today.to(u.Gyr) - self._tau_ssfr.to(u.Gyr)
-        self.times = Parameter(np.insert(times, (0, times.size), (0 << u.Gyr, self.today.to(u.Gyr))),
-                               fixed=True)
+        self.times = Parameter(
+            np.insert(times, (0, times.size), (0 << u.Gyr, self.today.to(u.Gyr))),
+            fixed=True,
+            doc="Cosmic-time control points derived from lookback tau_ssfr intervals",
+        )
         
         #TODO: update sSFR valid ranges
         # for 
@@ -1431,7 +1479,11 @@ class TabularMassFracCEM(TabularCEM_ZPowerLaw):
     @mass_frac.setter
     def mass_frac(self, value):
         # Check that input value is a parameter
-        value = check_parameter(value, u.dimensionless_unscaled)
+        value = check_parameter(
+            value,
+            u.dimensionless_unscaled,
+            doc="Monotonic cumulative mass fractions used to reconstruct the SFH",
+        )
         if np.any(value.q < 0):
             raise ValueError("All fraction values must be positive.")
         if np.any(value.q > 1):
@@ -1445,7 +1497,11 @@ class TabularMassFracCEM(TabularCEM_ZPowerLaw):
                            (0, self._mass_frac.size),
                            (0.0 << u.dimensionless_unscaled, 1.0 << u.dimensionless_unscaled)
                            ) * self.mass_today.q
-        self.masses = Parameter(masses, fixed=True)
+        self.masses = Parameter(
+            masses,
+            fixed=True,
+            doc="Cumulative stellar mass history inferred from cumulative mass fractions",
+        )
 
     @property
     def times(self):
@@ -1453,12 +1509,20 @@ class TabularMassFracCEM(TabularCEM_ZPowerLaw):
 
     @times.setter
     def times(self, value):
-        value = check_parameter(value, u.Gyr)
+        value = check_parameter(
+            value,
+            u.Gyr,
+            doc="Cosmic times associated with the supplied cumulative mass-fraction constraints",
+        )
         # Add origin and present times
         times = np.insert(value.q, (0, value.size),
                            (0.0 << u.Gyr, self.today.q.to(u.Gyr))
                            )
-        self._times = Parameter(times, fixed=False)
+        self._times = Parameter(
+            times,
+            fixed=False,
+            doc="Extended cosmic-time grid including Big Bang and observing-time anchors",
+        )
 
 
 class ParticleListCEM(ChemicalEvolutionModel):
