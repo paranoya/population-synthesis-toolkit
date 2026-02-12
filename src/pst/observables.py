@@ -136,6 +136,7 @@ class Filter(object):
 
     @property
     def wavelength(self):
+        """Interpolated wavelength grid used by ``response``."""
         return self._wavelength
 
     @wavelength.setter
@@ -147,6 +148,7 @@ class Filter(object):
 
     @property
     def filter_wavelength(self):
+        """Native wavelength grid associated with ``filter_resp``."""
         return self._filter_wavelength
 
     @filter_wavelength.setter
@@ -166,7 +168,8 @@ class Filter(object):
             Path to the text file containing the filter information.
             The first and second columns must correspond to the
             wavelength and passband curve, respectively.
-        wavelength_units : :class:``astropy.units.Quantity``
+        wavelength_unit : :class:``astropy.units.Unit``
+            Unit associated with wavelength values in the input file.
         **kwargs : 
             Arguments to be passed to :func:`numpy.loadtxt`
 
@@ -410,7 +413,7 @@ class Filter(object):
         return mag_ab, mag_ab_err
 
     def get_fnu(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the  specific flux per frequency unit from a spectra.
+        """Compute synthetic flux density per frequency unit from a spectrum.
 
         Parameters
         ----------
@@ -424,10 +427,10 @@ class Filter(object):
 
         Returns
         -------
-        mag_ab : :class:``astropy.units.Quantity``
-            AB magnitude.
-        mag_ab_err : :class:``astropy.units.Quantity``
-            AB magnitude associated error.
+        f_nu : :class:``astropy.units.Quantity``
+            Synthetic flux density in Jy.
+        f_nu_err : :class:``astropy.units.Quantity``
+            Associated uncertainty in Jy.
 
         See also
         --------
@@ -442,7 +445,7 @@ class Filter(object):
         return f_nu, f_nu_err
 
     def get_flambda_vegamag(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the  specific flux per wavelength unit from a spectra.
+        """Compute synthetic flux density per wavelength unit from a spectrum.
 
         Parameters
         ----------
@@ -456,10 +459,10 @@ class Filter(object):
 
         Returns
         -------
-        mag_ab : :class:``astropy.units.Quantity``
-            AB magnitude.
-        mag_ab_err : :class:``astropy.units.Quantity``
-            AB magnitude associated error.
+        f_lambda : :class:``astropy.units.Quantity``
+            Synthetic flux density per wavelength.
+        f_lambda_err : :class:``astropy.units.Quantity``
+            Associated uncertainty estimate.
 
         See also
         --------
@@ -579,10 +582,12 @@ class FilterList:
 
     @property
     def n_bands(self) -> int:
+        """Number of filters contained in the list."""
         return len(self.filters)
 
     @property
     def effective_wavelength(self) -> u.Quantity:
+        """Array of effective wavelengths, one per filter."""
         return u.Quantity([f.effective_wavelength() for f in self.filters], u.AA)
 
     def wavelength_range(self, kappa_bw=2.0) -> [u.Quantity, u.Quantity]:

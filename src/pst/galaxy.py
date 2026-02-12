@@ -42,10 +42,16 @@ class GalaxySED(SedComponent):
 
     @property
     def redshift(self) -> Parameter:
+        """Cosmological redshift parameter used for observation-frame mapping."""
         return self._redshift
 
     @redshift.setter
     def redshift(self, value):
+        """
+        Set redshift and update derived cosmology-dependent quantities.
+
+        This updates ``t_obs``, luminosity distance, and ``distance_factor``.
+        """
         value = check_parameter(value, u.dimensionless_unscaled)
         z = np.asarray(value.to_value(u.dimensionless_unscaled), dtype=float)
         if not np.all(np.isfinite(z)):
@@ -236,9 +242,21 @@ class GalaxySED(SedComponent):
 
         Parameters
         ----------
+        stars_params : dict, optional
+            Parameters forwarded to the stellar component.
+        dust_att_params : dict, optional
+            Parameters forwarded to the attenuation model.
+        dust_em_params : dict, optional
+            Parameters forwarded to the dust emission component.
         to_obs_frame : bool
             If True, returns observed-frame flux density and shifts/resamples the
             spectrum to ``lambda_obs = (1+z) lambda_rest``.
+
+        Returns
+        -------
+        sed : astropy.units.Quantity
+            Composite spectrum in ``rest_unit`` (rest frame) or ``obs_unit``
+            (observed frame when ``to_obs_frame=True``).
         """
         components = self.emission_components(
             stars_params=stars_params,
@@ -266,6 +284,22 @@ class GalaxySED(SedComponent):
                             dust_em_params=None, to_obs_frame=False):
         """
         Compute synthetic photometry from the composite spectrum.
+
+        Parameters
+        ----------
+        stars_params : dict, optional
+            Parameters forwarded to the stellar component.
+        dust_att_params : dict, optional
+            Parameters forwarded to the attenuation model.
+        dust_em_params : dict, optional
+            Parameters forwarded to the dust emission component.
+        to_obs_frame : bool, optional
+            If True, compute photometry from observed-frame fluxes.
+
+        Returns
+        -------
+        photometry : astropy.units.Quantity
+            Band-integrated synthetic flux densities for configured filters.
 
         Notes
         -----

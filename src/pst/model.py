@@ -40,6 +40,7 @@ class Parameter:
 
     @q.setter
     def q(self, value):
+        """Set the underlying quantity, preserving unit compatibility."""
         if not isinstance(value, u.Quantity):
             raise ValueError("Input value must be a quantity")
         if not value.unit.is_equivalent(self._q.unit):
@@ -79,6 +80,16 @@ class Parameter:
     # --- Set and validate -------------------------------------------------------
 
     def set(self, new_value: Union[Number, u.Quantity], *, validate: bool = True) -> None:
+        """
+        Update the parameter value.
+
+        Parameters
+        ----------
+        new_value : number or astropy.units.Quantity
+            New parameter value.
+        validate : bool, optional
+            If True, enforce ``vrange`` constraints when defined.
+        """
         if self.fixed:
             raise RuntimeError("Parameter is fixed and cannot be modified.")
 
@@ -107,6 +118,7 @@ class Parameter:
 
     @property
     def size(self):
+        """Number of scalar elements in the underlying quantity."""
         return self.q.size
     
     def __repr__(self) -> str:
@@ -181,6 +193,14 @@ class ParameterPack:
     units: List[Optional[u.Unit]]
 
     def as_dict(self, *, as_quantity: bool = True) -> Dict[str, Any]:
+        """
+        Export pack values as a mapping from path to value.
+
+        Parameters
+        ----------
+        as_quantity : bool, optional
+            If True, return ``Quantity`` values; otherwise return plain numbers.
+        """
         out: Dict[str, Any] = {}
         for name, p in zip(self.names, self.params):
             out[name] = p.q if as_quantity else p.to_value(p.unit_raw)
@@ -335,6 +355,14 @@ class ModelBase:
         return params
 
     def parameters(self) -> Dict[str, Parameter]:
+        """
+        Return direct Parameter attributes defined on this model.
+
+        Returns
+        -------
+        params : dict
+            Mapping from attribute name to :class:`Parameter`.
+        """
         out: Dict[str, Parameter] = {}
         for name in dir(self):
             if name.startswith("_"):
@@ -525,4 +553,3 @@ class ModelBase:
                 "doc": p.doc,
             }
         return out
-
