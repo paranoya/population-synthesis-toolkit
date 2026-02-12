@@ -75,10 +75,21 @@ class TestObservables(unittest.TestCase):
 
         fig, ax = filter.plot(show=False)
 
+        f_lambda, f_lambda_err = filter.get_flambda_vegamag(
+            self.dummy_flam, spectra_err=0.05 * self.dummy_flam
+        )
+        self.assertTrue(np.isfinite(f_lambda))
+        self.assertTrue(np.isfinite(f_lambda_err))
+
     def test_equivalent_width(self):
         eqwidth = observables.EquivalentWidth.from_name("lick_ha")
         ew, ew_err = eqwidth.compute_ew(self.dummy_wavelength, self.dummy_flam)
         self.assertTrue(np.isfinite(ew), "Unexpected EW value")
+        ew2, ew2_err = eqwidth.compute_ew(
+            self.dummy_wavelength, self.dummy_flam, spectra_err=0.1 * self.dummy_flam
+        )
+        self.assertTrue(np.isfinite(ew2))
+        self.assertTrue(np.isfinite(ew2_err))
 
 # Add these tests to your existing TestObservables class.
 # They assume FilterList is available as observables.FilterList (or adjust import accordingly).
@@ -193,6 +204,25 @@ class TestFilterList(unittest.TestCase):
         self.assertTrue(lo < hi)
         self.assertTrue(lo.unit.is_equivalent(u.angstrom))
         self.assertTrue(hi.unit.is_equivalent(u.angstrom))
+
+    def test_filterlist_interpolate_rejects_non_1d(self):
+        wl2d = np.vstack([self.dummy_wavelength.value, self.dummy_wavelength.value]) * u.angstrom
+        fl = observables.FilterList(self.filters)
+        with self.assertRaises(ValueError):
+            fl.interpolate(wl2d)
+
+    def test_filterlist_interpolate_rejects_non_monotonic(self):
+        wl = self.dummy_wavelength.copy()
+        wl = u.Quantity(wl.value.copy(), wl.unit)
+        wl.value[100] = wl.value[99]
+        fl = observables.FilterList(self.filters)
+        with self.assertRaises(ValueError):
+            fl.interpolate(wl)
+
+    def test_filterlist_interpolate_rejects_too_short_grid(self):
+        fl = observables.FilterList(self.filters)
+        with self.assertRaises(ValueError):
+            fl.interpolate(np.array([5500.0]) * u.angstrom)
         
 if __name__ == '__main__':
     unittest.main()

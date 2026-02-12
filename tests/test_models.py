@@ -179,6 +179,99 @@ class TestModels(unittest.TestCase):
         # plt.xscale("log")
         # plt.show()
 
+    def test_time_at_stellar_mass_frac_requires_today(self):
+        model = models.ExponentialCEM(
+            tau=1.0 * u.Gyr, stellar_mass_inf=1.0 * u.Msun, metallicity=0.02
+        )
+        with self.assertRaises(ValueError):
+            _ = model.time_at_stellar_mass_frac(0.5)
+
+    def test_time_at_stellar_mass_frac_monotonic(self):
+        model = models.ExponentialDelayedCEM(
+            tau=2.0 * u.Gyr,
+            today=13.7 * u.Gyr,
+            mass_today=1.0 * u.Msun,
+            ism_metallicity_today=0.02,
+        )
+        tf = model.time_at_stellar_mass_frac([0.1, 0.5, 0.9], time_res=0.05 * u.Gyr)
+        self.assertTrue(np.all(np.diff(tf.to_value(u.Gyr)) > 0))
+
+    def test_compute_photometry_ndarray_and_age_bins(self):
+        model = models.ExponentialDelayedCEM(
+            tau=3.0 * u.Gyr,
+            today=13.7 * u.Gyr,
+            mass_today=1.0 * u.Msun,
+            ism_metallicity_today=0.02,
+        )
+        n_band = 4
+        n_z = self.ssp_model.metallicities.size
+        n_age = self.ssp_model.ages.size
+        phot_grid = np.ones((n_band, n_z, n_age), dtype=float)
+
+        p = model.compute_photometry(self.ssp_model, 13.7 * u.Gyr, photometry=phot_grid)
+        self.assertEqual(p.shape, (n_band,))
+        self.assertTrue(np.isfinite(p.value).all())
+
+        p_bin = model.compute_photometry(
+            self.ssp_model,
+            13.7 * u.Gyr,
+            photometry=phot_grid,
+            age_bin_edges=[0, 1e9, 1e10] * u.yr,
+        )
+        self.assertEqual(p_bin.shape[0], 2)
+        self.assertEqual(p_bin.shape[1], n_band)
+        self.assertTrue(np.isfinite(p_bin.value).all())
+
+    def test_cc25tabular_rejects_invalid_tau_order(self):
+        tau_bad = np.array([0.1, 1.0]) << u.Gyr
+        ssfr = np.array([1.0, 0.1]) << (1 / u.Gyr)
+        with self.assertRaises(ValueError):
+            _ = models.CC25TabularCEM(
+                tau_ssfr=tau_bad,
+                ssfr=ssfr,
+                mass_today=1.0 * u.Msun,
+                today=13.7 << u.Gyr,
+                ism_metallicity_today=0.02,
+                alpha_powerlaw=1.0,
+            )
+
+    def test_cc25tabular_rejects_nonpositive_tau(self):
+        tau_bad = np.array([1.0, 0.0]) << u.Gyr
+        ssfr = np.array([1.0, 0.1]) << (1 / u.Gyr)
+        with self.assertRaises(ValueError):
+            _ = models.CC25TabularCEM(
+                tau_ssfr=tau_bad,
+                ssfr=ssfr,
+                mass_today=1.0 * u.Msun,
+                today=13.7 << u.Gyr,
+                ism_metallicity_today=0.02,
+                alpha_powerlaw=1.0,
+            )
+
+    def test_tabular_massfrac_rejects_out_of_range(self):
+        times = np.array([0.1, 5, 10]) << u.Gyr
+        with self.assertRaises(ValueError):
+            _ = models.TabularMassFracCEM(
+                mass_frac=np.array([0.0, 1.2, 1.0]),
+                times=times,
+                today=13.7,
+                mass_today=1,
+                ism_metallicity_today=0.02,
+                alpha_powerlaw=1.0,
+            )
+
+    def test_tabular_massfrac_rejects_nonmonotonic(self):
+        times = np.array([0.1, 5, 10]) << u.Gyr
+        with self.assertRaises(ValueError):
+            _ = models.TabularMassFracCEM(
+                mass_frac=np.array([0.0, 0.8, 0.7]),
+                times=times,
+                today=13.7,
+                mass_today=1,
+                ism_metallicity_today=0.02,
+                alpha_powerlaw=1.0,
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

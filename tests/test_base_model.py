@@ -167,7 +167,18 @@ class TestModelBase(unittest.TestCase):
         self.assertIn("a_v", d["parameters"])
         self.assertNotIn("r_v", d["parameters"])
 
+    def test_get_values_numeric_reflects_current_parameter_state(self):
+        m = ExampleModel()
+        m.set_values({"a_v": 1.1}, validate=True)
+        vals = m.get_values(include_fixed=True, as_quantity=False)
+        self.assertAlmostEqual(vals["a_v"].to_value(u.mag), 1.1)
+
+    def test_get_values_as_quantity_returns_quantities(self):
+        m = ExampleModel()
+        vals = m.get_values(include_fixed=True, as_quantity=True)
+        self.assertIsInstance(vals["a_v"], u.Quantity)
+        self.assertTrue(u.isclose(vals["a_v"], m.a_v.q))
+
 
 if __name__ == "__main__":
     unittest.main()
-

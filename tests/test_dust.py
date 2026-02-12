@@ -146,6 +146,14 @@ class TestAttenuationModels(unittest.TestCase):
         self.assertEqual(out.shape, self.spec.shape)
         self.assertTrue(np.isfinite(out.value).all())
 
+    def test_dust_screen_apply_axis_argument(self):
+        model = dust.DustScreenAttenuation()
+        model.a_v.set(0.5 * u.mag)
+        cube = np.ones((2, self.wl.size, 3)) * self.spec.unit
+        out = model.apply(self.wl, cube, axis=1)
+        self.assertEqual(out.shape, cube.shape)
+        self.assertTrue(np.isfinite(out.value).all())
+
     def test_cf00_factor_shape(self):
         model = dust.CharlotFall00Attenuation()
         model.a_v_young.set(1.0 * u.mag)
@@ -159,6 +167,11 @@ class TestAttenuationModels(unittest.TestCase):
 
         # Young should be more attenuated than old at most wavelengths
         self.assertTrue(np.median(f[0].value) <= np.median(f[1].value))
+
+    def test_cf00_apply_raises_for_multicomponent_factor(self):
+        model = dust.CharlotFall00Attenuation()
+        with self.assertRaises(ValueError):
+            _ = model.apply(self.wl, self.spec, axis=-1)
 
 
 class TestDustEmissionModels(unittest.TestCase):
