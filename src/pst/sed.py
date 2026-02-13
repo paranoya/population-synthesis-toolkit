@@ -10,6 +10,8 @@ from astropy import constants as const
 
 from pst.utils import check_unit, flux_conserving_interpolation
 from pst.model import Parameter, ModelBase
+from pst.SSP import SSPBase
+from pst.cem import ChemicalEvolutionModel
 
 class SedComponent(ModelBase, ABC):
     """
@@ -108,8 +110,8 @@ class TabularSedComponent(SedComponent):
 class StellarComponent(SedComponent):
     """Stellar emission component built from an SSP model and an SFH/CEM."""
 
-    ssp: "SSP"
-    sfh: "ChemicalEvolutionModel"
+    ssp: SSPBase
+    sfh: ChemicalEvolutionModel
     name: str = "stellar_emission"
     default_unit = u.Lsun / u.AA
 
