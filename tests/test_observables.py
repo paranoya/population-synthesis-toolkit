@@ -75,6 +75,9 @@ class TestObservables(unittest.TestCase):
 
         fig, ax = filter.plot(show=False)
 
+        self.assertIsNotNone(ax)
+        self.assertIsNotNone(fig)
+
         f_lambda, f_lambda_err = filter.get_flambda_vegamag(
             self.dummy_flam, spectra_err=0.05 * self.dummy_flam
         )

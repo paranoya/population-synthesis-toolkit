@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from astropy import units as u
-from astropy import constants
 from pst import dust, SSP, sed, models, galaxy
 from pst.observables import load_photometric_filters
 

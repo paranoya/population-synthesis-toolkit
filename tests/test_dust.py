@@ -166,7 +166,7 @@ class TestAttenuationModels(unittest.TestCase):
         self.assertTrue(np.isfinite(f.value).all())
 
         # Young should be more attenuated than old at most wavelengths
-        self.assertTrue(np.median(f[0].value) <= np.median(f[1].value))
+        self.assertLessEqual(np.median(f[0].value), np.median(f[1].value))
 
     def test_cf00_apply_raises_for_multicomponent_factor(self):
         model = dust.CharlotFall00Attenuation()
