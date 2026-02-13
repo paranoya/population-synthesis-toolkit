@@ -21,8 +21,6 @@ class SedComponent(ModelBase, ABC):
     sampled on the requested wavelength grid.
     """
 
-    default_unit: u.Unit
-
     @abstractmethod
     def emission_spectrum(self, wavelength: u.Quantity, **params) -> u.Quantity:
         """
