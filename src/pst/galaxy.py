@@ -1,15 +1,12 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, List, Optional, Tuple, Union
-from abc import ABC, abstractmethod
+from typing import Any, Dict, Mapping, List, Union
 
 import numpy as np
 
 from astropy import units as u
-from astropy import constants as const
 from astropy.cosmology import WMAP9
 
-from pst.utils import check_unit, check_parameter, flux_conserving_interpolation
+from pst.utils import check_parameter, flux_conserving_interpolation
 from pst import observables
 
 from pst.sed import SedComponent

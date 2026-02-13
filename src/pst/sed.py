@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -8,8 +7,8 @@ import numpy as np
 from astropy import units as u
 from astropy import constants as const
 
-from pst.utils import check_unit, flux_conserving_interpolation
-from pst.model import Parameter, ModelBase
+from pst.utils import flux_conserving_interpolation
+from pst.model import ModelBase
 from pst.SSP import SSPBase
 from pst.cem import ChemicalEvolutionModel
 
