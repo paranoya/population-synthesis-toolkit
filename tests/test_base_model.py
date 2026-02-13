@@ -83,6 +83,27 @@ class TestParameter(unittest.TestCase):
         self.assertIsInstance(q, u.Quantity)
         self.assertTrue(u.isclose(q, 3.0 * u.mag))
 
+    def test_vrange_setter_accepts_and_normalizes_quantities(self):
+        p = Parameter(1.0, unit=u.mag)
+        p.vrange = (0.0 * u.mag, 2.0 * u.mag)
+        self.assertTrue(u.isclose(p.vrange[0], 0.0 * u.mag))
+        self.assertTrue(u.isclose(p.vrange[1], 2.0 * u.mag))
+
+    def test_vrange_setter_rejects_invalid_shape(self):
+        p = Parameter(1.0, unit=u.mag)
+        with self.assertRaises(ValueError):
+            p.vrange = (0.0 * u.mag,)
+
+    def test_vrange_setter_rejects_incompatible_units(self):
+        p = Parameter(1.0, unit=u.mag)
+        with self.assertRaises(ValueError):
+            p.vrange = (0.0 * u.s, 2.0 * u.s)
+
+    def test_vrange_setter_rejects_inverted_bounds(self):
+        p = Parameter(1.0, unit=u.mag)
+        with self.assertRaises(ValueError):
+            p.vrange = (2.0 * u.mag, 1.0 * u.mag)
+
 
 class ExampleModel(ModelBase):
     def __init__(self):
