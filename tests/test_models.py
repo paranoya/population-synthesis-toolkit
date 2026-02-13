@@ -149,9 +149,11 @@ class TestModels(unittest.TestCase):
         model = models.TabularMassFracCEM(mass_frac=m_frac, times=times, today=13.7,
                                           mass_today=1, ism_metallicity_today=0.02,
                                           alpha_powerlaw=1.0)
+        parameters = model.parameters_recursive(include_fixed=True)
+        self.assertIn("times", parameters.keys())
+        self.assertIn("masses", parameters.keys())
         parameters = model.parameters_recursive(include_fixed=False)
-        self.assertNotIn("times", parameters)
-        self.assertNotIn("masses", parameters)
+        self.assertNotIn("masses", parameters.keys())
 
     def test_particle_grid(self):
         n_particles = 10000
