@@ -1439,9 +1439,14 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
             fixed=True,
             doc="Cosmic-time control points derived from lookback tau_ssfr intervals",
         )
-        
-        #TODO: update sSFR valid ranges
-        # for 
+
+        # update sSFR valid ranges
+        if not hasattr(self, "_ssfr"):
+            return
+        for tau, ssfr in zip(self._tau_ssfr.q, self.ssfr.q):
+            min_ssfr = 1e-14 / u.yr
+            max_ssfr = 1 / tau
+            ssfr.vrange = (min_ssfr, max_ssfr)
 
 
 class TabularMassFracCEM(TabularCEM_ZPowerLaw):
