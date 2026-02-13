@@ -104,7 +104,9 @@ class GalaxySED(SedComponent):
             print(" - Target wavelength range",
                   self.target_wavelength[[0, -1]],
                   "\n - No. pixels:", self.target_wavelength.size)
-        self.stars.ssp.interpolate_sed(self.target_wavelength)
+        # Interpolate components libraries to target wavelength
+        if self.stars is not None:
+            self.stars.ssp.interpolate_sed(self.target_wavelength)
         # Setup component transformers
         self.energy_balance = True if isinstance(
             self.dust, CalorimetricDustComponent) else False
