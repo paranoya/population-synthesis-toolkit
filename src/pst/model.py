@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Set
 import numpy as np
 from astropy import units as u
@@ -8,31 +7,96 @@ from astropy import units as u
 Number = Union[int, float, np.number]
 
 
-@dataclass
 class Parameter:
     """
     A model parameter that behaves like an astropy Quantity.
 
     """
-    value: Union[Number, u.Quantity]
-    unit: Optional[u.Unit] = None
-    vrange: Optional[Tuple[Union[Number, u.Quantity], Union[Number, u.Quantity]]] = None
-    fixed: bool = False
-    doc: str = ""
+    def __init__(
+        self,
+        value: Union[Number, u.Quantity],
+        unit: Optional[u.Unit] = None,
+        vrange: Optional[Tuple[Union[Number, u.Quantity], Union[Number, u.Quantity]]] = None,
+        fixed: bool = False,
+        doc: str = "",
+    ):
+        self.fixed = fixed
+        self.doc = doc
 
-    def __post_init__(self):
-        # Normalize to an internal Quantity
-        if isinstance(self.value, u.Quantity):
-            self._q = self.value
-            if self.unit is None:
-                self.unit = self._q.unit
+        q, unit_norm = self._normalize_value_and_unit(value, unit)
+        self._q = q
+        self.unit = unit_norm
+        self.value = q
+        self._vrange = self._normalize_vrange(vrange, unit_norm)
+
+    @staticmethod
+    def _normalize_value_and_unit(
+        value: Union[Number, u.Quantity], unit: Optional[u.Unit]
+    ) -> Tuple[u.Quantity, u.Unit]:
+        if isinstance(value, u.Quantity):
+            if unit is None:
+                q = value
+            else:
+                target_unit = u.Unit(unit)
+                if not value.unit.is_equivalent(target_unit):
+                    raise ValueError(
+                        f"Input quantity ({value.unit}) must be equivalent to requested unit ({target_unit})."
+                    )
+                q = value.to(target_unit)
         else:
-            self._q = (self.value << (self.unit or u.dimensionless_unscaled))
-            if self.unit is None:
-                self.unit = self._q.unit
-        self.value = self._q
+            target_unit = u.Unit(unit) if unit is not None else u.dimensionless_unscaled
+            q = value << target_unit
+        return q, q.unit
 
-    # --- Quantity-like accessors ------------------------------------------------
+    @classmethod
+    def _normalize_vrange(
+        cls,
+        vrange: Optional[Tuple[Union[Number, u.Quantity], Union[Number, u.Quantity]]],
+        unit_ref: u.Unit,
+    ):
+        if vrange is None:
+            return None
+        if not isinstance(vrange, (tuple, list)) or len(vrange) != 2:
+            raise ValueError("vrange must be a 2-element tuple/list or None.")
+
+        vmin, vmax = vrange
+        if isinstance(vmin, cls):
+            vmin = vmin.q
+        if isinstance(vmax, cls):
+            vmax = vmax.q
+
+        has_quantity = isinstance(vmin, u.Quantity) or isinstance(vmax, u.Quantity)
+        if has_quantity:
+            if not isinstance(vmin, u.Quantity):
+                vmin = vmin << unit_ref
+            if not isinstance(vmax, u.Quantity):
+                vmax = vmax << unit_ref
+            if not vmin.unit.is_equivalent(unit_ref):
+                raise ValueError(
+                    f"vrange minimum unit ({vmin.unit}) is not compatible with parameter unit ({unit_ref})."
+                )
+            if not vmax.unit.is_equivalent(unit_ref):
+                raise ValueError(
+                    f"vrange maximum unit ({vmax.unit}) is not compatible with parameter unit ({unit_ref})."
+                )
+            vmin = vmin.to(unit_ref)
+            vmax = vmax.to(unit_ref)
+            if np.any(vmin > vmax):
+                raise ValueError(f"Invalid vrange: minimum {vmin} exceeds maximum {vmax}.")
+            return (vmin, vmax)
+
+        if np.any(np.asarray(vmin) > np.asarray(vmax)):
+            raise ValueError(f"Invalid vrange: minimum {vmin} exceeds maximum {vmax}.")
+        return (vmin, vmax)
+
+    @property
+    def vrange(self):
+        """Allowed interval as ``(vmin, vmax)``, or None."""
+        return self._vrange
+
+    @vrange.setter
+    def vrange(self, value):
+        self._vrange = self._normalize_vrange(value, self.unit)
 
     @property
     def q(self) -> u.Quantity:
@@ -49,6 +113,7 @@ class Parameter:
         self._q = value
         self.unit = self._q.unit
         self.value = self._q
+        self._vrange = self._normalize_vrange(self._vrange, self.unit)
 
     @property
     def value_raw(self):
@@ -77,6 +142,7 @@ class Parameter:
         self._q = self._q.to(unit, equivalencies=equivalencies)
         self.unit = self._q.unit
         self.value = self._q
+        self._vrange = self._normalize_vrange(self._vrange, self.unit)
         return self
 
     # --- Set and validate -------------------------------------------------------
@@ -116,6 +182,7 @@ class Parameter:
         self._q = q
         self.unit = self._q.unit
         self.value = self._q
+        self._vrange = self._normalize_vrange(self._vrange, self.unit)
 
     def as_quantity(self) -> u.Quantity:
         """Return the current parameter value as an astropy Quantity."""
