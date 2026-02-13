@@ -150,8 +150,8 @@ class TestModels(unittest.TestCase):
                                           mass_today=1, ism_metallicity_today=0.02,
                                           alpha_powerlaw=1.0)
         parameters = model.parameters_recursive(include_fixed=False)
-        self.assertTrue("times" in parameters)
-        self.assertFalse("masses" in parameters)
+        self.assertNotIn("times", parameters)
+        self.assertNotIn("masses", parameters)
 
     def test_particle_grid(self):
         n_particles = 10000
