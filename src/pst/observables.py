@@ -505,8 +505,14 @@ class Filter(object):
 
         Parameters
         ----------
+        add_props: bool
+            If True, add vertical lines indicating the effective wavelength and
+            bandwidth of the filter. Default is False.
+        ax: :class:`matplotlib.axes.Axes`, optional
+            Matplotlib axis to plot on. If None, a new figure and axis are created.
         show: bool
-            If True
+            If True, display the plot by calling ``plt.show()``. This requires
+            an interactive matplotlib session. Default is False.
         """
         if ax is None:
             fig, ax = plt.subplots()
