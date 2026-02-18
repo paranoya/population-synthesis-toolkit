@@ -230,8 +230,12 @@ class SSPBase(object):
         ----------
         - new_wl: bin centers of the new interpolated points.
         """
-        if not isinstance(new_wl, units.Quantity):
-            new_wl = new_wl << self.wavelength.unit
+        new_wl = check_unit(new_wl, self.wavelength.unit)
+
+        if new_wl.size == self.wavelength.size and (
+            self.wavelength.value == new_wl.value).all():
+            print("[SSP] SSP already sampled in target wavelength grid")
+            return
 
         if verbose:
             print('[SSP] Interpolating SSP SEDs')
