@@ -1406,8 +1406,12 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
             1 / u.Gyr,
             doc="Average specific star-formation rates associated with each tau_ssfr bin",
         )
+        # ssfr2 / ssfr1 < tau1 / tau2
+        ssfr_ratio = value.q[1:] / value.q[:-1]
+        if np.any(ssfr_ratio > self._tau_ratio):
+            raise ValueError("Input ``ssfr`` values are inconsistent with the ``tau_ssfr`` values.")
         self._ssfr = value
-        masses = self.mass_today.q * np.cumsum(1 - self.tau_ssfr.q * self._ssfr.q)
+        masses = self.mass_today.q * (1 - self.tau_ssfr.q * self._ssfr.q)
         self.masses = Parameter(
             np.insert(masses, (0, masses.size), (0.0 * u.Msun, self.mass_today.q)),
             fixed=True,
@@ -1432,6 +1436,9 @@ class CC25TabularCEM(TabularCEM_ZPowerLaw):
         if np.any(np.diff(value.q) >= 0):
             raise ValueError("Input ``tau_ssfr`` must be strictly decreasing")
         self._tau_ssfr = value
+
+        # tau1 / tau2
+        self._tau_ratio = self._tau_ssfr.q[:-1] / self._tau_ssfr.q[1:]
 
         times = self.today.to(u.Gyr) - self._tau_ssfr.to(u.Gyr)
         self.times = Parameter(
