@@ -659,7 +659,7 @@ class FilterList:
 
         self.response = resp
 
-        # Cash delta_lambda for integral
+        # Cache delta_lambda for integral
         dl = np.empty_like(wl)
         dl[0] = 0.5 * (wl[1] - wl[0])
         dl[-1] = 0.5 * (wl[-1] - wl[-2])
