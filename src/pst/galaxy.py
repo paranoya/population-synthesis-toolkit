@@ -31,7 +31,8 @@ class GalaxySED(SedComponent):
     -----
     - The internal spectral grid is ``target_wavelength`` in the rest frame.
     - If ``to_obs_frame=True``, spectra are converted to observed-frame fluxes
-      using luminosity distance and redshift and resampled onto ``lambda_obs``.
+      using luminosity distance and redshift and resampled onto ``lambda_obs``
+      and ``target_wavelength`` is treated as the observed frame.
     """
     name: str = "galaxy_sed"
     rest_unit = u.Lsun / u.AA  # Rest-frame default units
