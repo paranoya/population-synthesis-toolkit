@@ -51,7 +51,7 @@ def load_photometric_filters(filters, to_filter_list=False):
         return FilterList(filters_out)
     return filters_out
 
-def download_svo_filter(name: str, dest_dir: str, verbose=True):
+def download_svo_filter(name: str, dest_dir: str, verbose=True, retry=3):
     """Download a filter from the Spanish Virtual Observatory (SVO) Filter Profile Service.
     
     Parameters
@@ -76,7 +76,15 @@ def download_svo_filter(name: str, dest_dir: str, verbose=True):
     file_path = os.path.join(dest_dir, filename)
     if verbose:
         print(f"Querying SVO Filter: {url}")
-    r = requests.get(url, stream=True)
+    try:
+        r = requests.get(url, stream=True, timeout=30.0)
+    except requests.exceptions.ConnectTimeout as e:
+        if retry:
+            print(f"Connection timed out. Retrying... ({retry} attempts left)")
+            download_svo_filter(name, dest_dir, verbose=verbose, retry=retry-1)
+        else:
+            raise e
+
     if len(r.text) > 0:
         if verbose:
             print(f"Saving new filter {name} to ", os.path.abspath(file_path))
