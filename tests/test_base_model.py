@@ -1,9 +1,6 @@
 import unittest
 import numpy as np
 from astropy import units as u
-
-# Adjust this import to match your package layout, e.g.
-# from pst.models.base import Parameter, ModelBase
 from pst.model import Parameter, ModelBase
 
 
