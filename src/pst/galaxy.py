@@ -76,7 +76,7 @@ class GalaxySED(SedComponent):
                  target_wavelength: u.Quantity=None,
                  redshift: Union[Parameter, float]=0.0,
                  cosmology=None,
-                 filters: List[observables.Filter]=None):
+                 filters: observables.FilterList=None):
         print("Initialising Galaxy model")
         self._param_index: Dict[str, Parameter] = {}
         # Setup components
