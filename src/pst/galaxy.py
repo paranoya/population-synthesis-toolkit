@@ -65,7 +65,7 @@ class GalaxySED(SedComponent):
         if self.stars is not None:
             self.stars.sfh.today = self.t_obs
         self.dl = self.cosmology.luminosity_distance(
-            self._redshift).clip(10 << u.pc)
+            self._redshift.q).clip(10 << u.pc)
         self.distance_factor = 4 * np.pi * self.dl.to("cm")**2 * (
             1 + self._redshift.q)
 
