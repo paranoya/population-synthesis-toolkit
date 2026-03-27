@@ -597,8 +597,7 @@ class DustScreenAttenuation(AttenuationModel):
             self.curve = ExtinctionLibCurve(name=self.curve)
 
     def attenuation_factor(
-        self, wavelength: u.Quantity, *, a_v: float = None, **params
-    ) -> u.Quantity:
+        self, wavelength: u.Quantity, **params) -> u.Quantity:
         """
         Compute the attenuation factor for a foreground screen.
 
@@ -706,14 +705,7 @@ class CharlotFall00Attenuation(AttenuationModel):
             doc="V-band attenuation A_V applied to the old stellar component",
         )
 
-    def attenuation_factor(
-        self,
-        wavelength: u.Quantity,
-        *,
-        a_v_young: float = 1.0,
-        a_v_old: float = 0.3,
-        **params,
-    ) -> u.Quantity:
+    def attenuation_factor(self, wavelength: u.Quantity, **params) -> u.Quantity:
         """
         Compute attenuation factors for young and old components.
 
