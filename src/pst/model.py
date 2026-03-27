@@ -213,6 +213,7 @@ class Parameter:
             return arr.astype(dtype, copy=False)
         return arr
 
+    @property
     def __array_priority__(self):
         # Encourage numpy to use our __array_ufunc__
         return 1000
