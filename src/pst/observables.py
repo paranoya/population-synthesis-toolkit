@@ -115,6 +115,9 @@ class Filter(object):
     -------
     >>> from pst.observables import Filter
     >>> ps_r_filter = Filter("PANSTARRS_PS1.r")
+    >>> wl = np.linspace(5000, 7000, 1000) * u.angstrom
+    >>> ps_r_filter.interpolate(wl)
+    >>> ps_r_filter.plot(add_props=True, show=True)
     """
 
     default_dir = os.path.join(PST_DATA_DIR, "filters")
@@ -131,7 +134,17 @@ class Filter(object):
             self.filter_resp = self.response
         elif filter_wavelength is None and wavelength is None:
             raise NameError("wavelength or filter_wavelength must be provided")
-        self.norm_photons = None
+
+        if self.wavelength is not None:
+            if self.response is None:
+                self.interpolate(self.wavelength)
+            else:
+                self.norm_photons = self.get_photons(
+                    3631 * u.Jy * np.ones(self.wavelength.shape) * constants.c / self.wavelength**2,
+                    mask_nan=False)[0]
+        else:
+            self.norm_photons = None
+
         self.name = name
 
     @property
@@ -566,6 +579,8 @@ class TopHatFilter(Filter):
         if self.wavelength is None:
             self.response = self.filter_resp.copy()
 
+        self.interpolate(self.wavelength)
+
 
 @dataclass
 class FilterList:
@@ -623,7 +638,7 @@ class FilterList:
         -------
         self
         """
-        wl = check_unit(wavelength)
+        wl = check_unit(wavelength, u.AA)
 
         if wl.ndim != 1:
             raise ValueError("wavelength must be 1D")
