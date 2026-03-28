@@ -1,285 +1,405 @@
 .. _user_guide:
 
-=====================
+==========
 User Guide
-=====================
+==========
 
-This guide covers the detailed usage of PST for varius tasks. For practical cases, see the :ref:`tutorials <tutorials>` section.
+This guide describes the main PST workflows beyond the quickstart examples.
+It focuses on the current package structure and on the parts of the library
+that are most useful when building composite stellar population models,
+synthetic observables, and parameterized galaxy SEDs.
 
-Simple Stellar Population (SSP) Models
-======================================
+For runnable notebooks, see :ref:`tutorials`. For the full class and method
+reference, see :ref:`api`.
 
-**Simple Stellar Population (SSP)** models are an essential tool in understanding the evolution and properties of stellar systems. An SSP represents a group of stars formed at the same time with the same initial chemical composition. By assuming a single age and metallicity, SSPs provide a framework for modeling how these populations evolve over time and allow the synthesis of observables, such as spectra and photometry.
+Getting Oriented
+================
 
-In this section, we'll dive into the SSP models implemented in PST, explore their attributes, and highlight the features that this module provides for astrophysical modeling.
+PST is organized around a few core building blocks:
 
-The class :class:`pst.SSP.SSPBase` is the backbone of the SSP models in PST. It provides a flexible and efficient way to represent the spectral energy distributions (SEDs) of stellar populations across a grid of ages and metallicities.
+- :mod:`pst.SSP` provides simple stellar population libraries and interpolation
+    tools on age, metallicity, and wavelength grids.
+- :mod:`pst.cem` provides chemical evolution models that map a star-formation
+    and enrichment history onto an SSP grid.
+- :mod:`pst.sed` provides reusable SED components, including a stellar
+    component built from an SSP plus a CEM.
+- :mod:`pst.galaxy` combines stellar emission, attenuation, and dust emission
+    into a single galaxy SED model.
+- :mod:`pst.observables` provides filters and equivalent-width measurements.
+- :mod:`pst.model` provides the :class:`pst.model.Parameter` and
+    :class:`pst.model.ModelBase` infrastructure used by the parameterized models.
 
-Key Attributes
-^^^^^^^^^^^^^^
+Throughout PST, time arguments in chemical evolution models refer to
+**cosmic time since the Big Bang**, not lookback time. This is important when
+mixing analytic histories, tabulated histories, and redshift-dependent galaxy
+models.
 
-- **ages** (:class:`astropy.units.Quantity`): An array of SSP ages, representing different stages of stellar evolution.
-- **metallicities** (:class:`astropy.units.Quantity`): The metallicity values (fraction of elements heavier than helium) for the SSPs.
-- **L_lambda** (:class:`astropy.units.Quantity`): The spectral energy distributions (SEDs) of the SSPs. This 3D array holds data for each combination of metallicity, age, and wavelength.
-- **wavelength** (:class:`astropy.units.Quantity`): The wavelength array associated with the SEDs of the SSPs, allowing the user to model the flux over a range of wavelengths.
+Working with SSP Libraries
+==========================
 
-Features
-^^^^^^^^
+The backbone of the library is :class:`pst.SSP.SSPBase`, which stores a grid of
+stellar population spectra sampled in metallicity, age, and wavelength.
 
-PST provides a number of features to work with SSP models, allowing users to manipulate and extract various physical and observational quantities:
+Loading an SSP Library
+----------------------
 
-.. code-block:: python
-
-            from pst.SSP import PopStar
-            from astropy import units as u
-            ssp_model = PopStar(IMF='cha')
-
-- **SSP Interpolation**
-   The `get_weights` method provides a 2D interpolation tool that allows you to compute weights for a given set of ages and metallicities. This method is useful for handling multiple stellar populations simultaneously, especially in galaxy synthesis models where stars form over a range of ages and metallicities.
-
-    Example:
-
-    .. code-block:: python
-
-            weights = ssp_model.get_weights(ages=[1e9, 5e9], metallicities=[0.02, 0.03])
-
-
-- **Grid Binning and Re-interpolation**
-    The `regrid` method allows you to rebin the SSP model to new grids of ages and metallicities. This is useful if you need to match the SSP model grid to other datasets or models.
-
-    Example:
-
-    .. code-block:: python
-
-            import numpy as np
-            new_age_bins = np.logspace(6, 10, 50) * u.Gyr
-            new_metal_bins = np.logspace(-2, 0, 20)
-            ssp_model.regrid(new_age_bins, new_metal_bins)
-
-- **Wavelength Handling**
-    The `cut_wavelength` method allows users to cut the SED to specific wavelength ranges, which is useful when focusing on particular bands or wavelengths.
-
-    Example:
-
-    .. code-block:: python
-
-            ssp_model.cut_wavelength(wl_min=3000 * u.angstrom, wl_max=7000 * u.angstrom)
-
-    Additionally, `interpolate_sed` provides a way to interpolate the SEDs over new wavelength bins using a flux-conserving interpolation scheme.
-
-- **Mass-to-Light Ratios**
-    The get_mass_lum_ratio and get_specific_mass_lum_ratio methods calculate the mass-to-light ratio over a specified wavelength range, providing critical information for stellar population synthesis models.
-
-    Example:
-
-    .. code-block:: python
-
-            mass_lum_ratio = ssp_model.get_mass_lum_ratio(wl_range=np.array([4000, 7000]) * u.angstrom)
-
-
-- **Synthetic Photometry**
-    One of the most powerful features is the ability to compute synthetic photometry using the `compute_photometry` method. This function calculates the flux observed through a set of photometric filters at a given cosmic time.
-
-    Example:
-
-    .. code-block:: python
-
-            filters = load_photometric_filters(["SLOAN_SDSS.g", "SLOAN_SDSS.r"])
-            photometry = ssp_model.compute_photometry(filters, z_obs=0.0)
-
-For more options, refer to the API :ref:`SSP`.
-
-Chemical Evolution Models (CEM)
-===============================
-
-The :class:`pst.models.ChemicalEvolutionModel` class defines the framework for modeling the chemical and stellar evolution of a galaxy over time.
-This framework includes methods for computing the Spectral Energy Distribution (SED), stellar mass, and synthetic photometry using a given SSP model.
+PST includes interfaces to several commonly used libraries, such as PopStar,
+BC03, XSL, and EMILES.
 
 .. code-block:: python
 
-    from pst.models import ExponentialDelayedCEM
-    # Create a model based on a delayed-tau exponential SFH model
-    # with constant metallicity
-    cem_model = ExponentialDelayedCEM(mass_today=1.0, today=13.7, tau=3.0,
-    ism_metallicity_today=0.02)
+     from astropy import units as u
+     from pst.SSP import PopStar
 
+     ssp = PopStar(IMF="cha")
 
-Features
-^^^^^^^^
-  
-- **Mass/Metallicity Interpolation**
-    Interpolates the star formation history of the galaxy over time to compute the stellar masses at any given time.
+Once loaded, an SSP object exposes its main grids and metadata:
 
-    - ``stellar_mass_formed(time)``: Method to compute the total stellar mass formed at a given cosmic time.
-    - ``ism_metallicity(time)``: Method to compute the ISM metallicity at a given cosmic time.
+- ``ssp.ages``: age grid.
+- ``ssp.metallicities``: metallicity grid.
+- ``ssp.wavelength``: wavelength grid.
+- ``ssp.L_lambda``: tabulated SSP spectra.
+- ``ssp.name``, ``ssp.imf``, ``ssp.isochrone``, ``ssp.stellar_library``.
 
-    Example:
+Interpolating SSP Weights and Spectra
+-------------------------------------
 
-    .. code-block:: python
+PST uses interpolation in age and metallicity space to map arbitrary stellar
+populations onto a discrete SSP library.
 
-            import numpy as np
-            from astropy import units as u 
-            from matplotlib import pyplot as plt
+.. code-block:: python
 
-            cosmic_time = np.arange(0, 13.7) * u.Gyr
-            mass_formation_history = cem_model.stellar_mass_formed(cosmic_time)
+     weights = ssp.get_weights(
+             ages=[1e8, 5e8, 2e9] * u.yr,
+             metallicities=[0.004, 0.008, 0.02],
+             masses=[1e7, 2e7, 5e7] * u.Msun,
+     )
 
-            plt.figure()
-            plt.plot(cosmic_time, mass_formation_history)
-            plt.xlabel('Cosmic Time (Gyr)')
-            plt.ylabel('Stellar Mass Formed (M$_\odot$)')
-            plt.show()
+This is the basic operation used internally by the chemical evolution models,
+but it is also useful for custom population mixtures or particle-based inputs.
 
-.. figure:: _static/images/delayed_tau_exponential_sfh.png
-    :align: center
-    :width: 600px
+For wavelength-domain operations, you can trim or reinterpolate the spectral
+grid before further analysis:
 
-    The above figure shows the stellar mass formed as a function of cosmic time for a galaxy modelled with a delayed-tau exponential SFH.
+.. code-block:: python
 
-- **SED Synthesis**
+     ssp.cut_wavelength(wl_min=3000 * u.angstrom, wl_max=9000 * u.angstrom)
+     ssp.interpolate_sed(new_wavelength_grid)
 
-    - ``interpolate_ssp_masses(ssp, t_obs, oversample_factor=10)``: Interpolates the star formation history to compute the stellar masses associated to each SSP at the time of observation.
-    - ``compute_SED(ssp, t_obs, allow_negative=False)``: Computes the SED resulting from the chemical evolution model, observed at a given time using the provided SSP model.
+Regridding in Age and Metallicity
+---------------------------------
 
-    Example:
+If you need to align an SSP library with another model grid, you can regrid the
+library in age and metallicity.
 
-    .. code-block:: python
+.. code-block:: python
 
-            # Use the SSP model initialised earlier
-            sed = cem_model.compute_SED(ssp_model, t_obs=13.7 * u.Gyr)
+     import numpy as np
 
-            plt.figure()
-            plt.loglog(ssp_model.wavelength, sed)
-            plt.xlabel('Wavelength (Angstrom)')
-            plt.ylabel('SED (Lsun/Angstrom)')
-            plt.show()
+     new_ages = np.geomspace(1e6, 1.3e10, 60) * u.yr
+     new_metallicities = np.array([0.0004, 0.004, 0.008, 0.02, 0.05])
+     ssp.regrid(new_ages, new_metallicities)
 
-.. figure:: _static/images/delayed_tau_exponential_sfh_sed.png
-    :align: center
-    :width: 600px
+Derived SSP Quantities
+----------------------
 
-    The above figure shows the SED of a galaxy modelled with a delayed-tau exponential SFH, using the PopStar SSP model.
+PST SSP objects can store more than spectra. Depending on the library,
+you may also have access to derived quantities such as:
 
+- ``ssp.current_mass`` for surviving stellar mass fractions.
+- ``ssp.remnant_mass_frac`` and ``ssp.returned_mass_frac``.
+- ``ssp.supernova_rate``.
+- ``ssp.log_ionising_HI_photons``, ``ssp.log_ionising_HeI_photons``, ``ssp.log_ionising_HeII_photons``.
 
-- **Synthetic Photometry**
+These tabulated quantities are used by CEM methods such as
+``surviving_stellar_mass``, ``supernova_rate``, and ionising-photon rate
+estimators.
 
-    - ``compute_photometry(ssp, t_obs, photometry=None)``: Computes the synthetic photometry using an SSP at a given time.
+Precomputing Synthetic Photometry
+---------------------------------
 
-    .. code-block:: python
+Broadband photometry can be tabulated directly on the SSP grid and reused later
+by a CEM.
 
-            # Precompute the photometry of each SSP using a list of filters (see below).
-            _ = ssp_model.compute_photometry(list_of_filters, z_obs=0.0)
-            photometric_fluxes = cem_model.compute_photometry(ssp_model, t_obs=13.7 * u.Gyr)
+.. code-block:: python
 
-            # Convert to AB magnitudes
-            ab_mag = -2.5 * np.log10(photometric_fluxes.to_value("3631 Jy"))
+     from pst.observables import Filter
 
-For more details, refer to the API :ref:`models`.
+     g_band = Filter.from_svo("SLOAN_SDSS.g")
+     r_band = Filter.from_svo("SLOAN_SDSS.r")
+     ssp.compute_photometry([g_band, r_band], z_obs=0.0)
 
-Observables
-===========
+The resulting ``ssp.photometry`` grid can then be combined with any compatible
+chemical evolution model through :meth:`pst.cem.ChemicalEvolutionModel.compute_photometry`.
 
-Currently, PST is able to produce three different types of observable quantities:
+Building Chemical Evolution Models
+==================================
 
-- Spectra
+The base interface is :class:`pst.cem.ChemicalEvolutionModel`. Subclasses define
+two histories as functions of cosmic time:
 
-    These can be used for a wide range of purposes, including the production of the
-    two other observable quantities. PST works by default in luminosity (or flux) density
-    per wavelength unit (e.g. Lsun / AA), although the use of :class:`astropy.units` allows
-    to easily convert to specific flux per frequency.
+- cumulative formed stellar mass, ``stellar_mass_formed(t)``
+- gas-phase metallicity, ``ism_metallicity(t)``
 
-- Photometry
+Analytic CEMs
+-------------
 
-    Synthetic photometry is produced by means of the :class:`pst.observables.Filter` class, that
-    represents the passband of a given photometric band.
+Analytic histories are useful for quick experiments, forward modeling, and
+parameter studies.
 
-    PST uses the `Spanish Virtual Observatory (SVO) Filter Service <http://svo2.cab.inta-csic.es/theory/fps/>`_ to have access to a wide range of photometric filters. If a filter is not found locally, it is downloaded automatically and placed in the default filter directory.
+.. code-block:: python
 
-    Example:
+     from astropy import units as u
+     from pst.cem import ExponentialDelayedCEM
 
-    .. code-block:: python
+     cem = ExponentialDelayedCEM(
+             mass_today=1e10 * u.Msun,
+             today=13.7 * u.Gyr,
+             tau=3.0 * u.Gyr,
+             ism_metallicity_today=0.02,
+     )
 
-        from pst.observables import Filter
+Once defined, a CEM can be queried directly:
 
-        # Load a JWST filter from the SVO Filter Service
-        jwst_miri_filter = Filter.from_svo("JWST_MIRI.F2550W")
+.. code-block:: python
 
-        # Compute then absolute magnitude from the galaxy SED created above
-        jwst_miri_filter.interpolate(ssp_model.wavelength)
-        ab_mag, ab_mag_err = jwst_miri_filter.get_ab(sed / 4 / np.pi / (10 * u.pc)**2)
-        # print(ab_mag) --> 9.3671
+     cosmic_time = [1.0, 3.0, 10.0] * u.Gyr
+     formed_mass = cem.stellar_mass_formed(cosmic_time)
+     metallicity = cem.ism_metallicity(cosmic_time)
 
-    The filter naming convention follows the rule ``TELESC_INSTRUMENT.BAND``.
+Synthesizing Composite Stellar Populations
+------------------------------------------
 
-- Equivalent Widths
+The main bridge between a CEM and an SSP library is
+:meth:`pst.cem.ChemicalEvolutionModel.interpolate_ssp_masses`, which computes
+the mass weights assigned to each SSP age-metallicity bin at a given observing
+time.
 
-    Similarly, PST can also measure equivalent widths from spectra by means of the :class:`pst.observables.EquivalentWidth` class, which is essentially defined by three spectral regions:
+.. code-block:: python
 
-    - Left pseudo-continuum window.
-    - Right pseudo-continuum window.
-    - Central wavelength window.
+     weights = cem.interpolate_ssp_masses(ssp, t_obs=13.7 * u.Gyr)
+     sed = cem.compute_SED(ssp, t_obs=13.7 * u.Gyr)
 
-    The first two regions are used to define a linear pseudo-continuum, while the latter is the region of interest where the equivalent width is measured.
-    For example, the H-beta equivalent width defined in `Tragger et al. 1998 <https://ui.adsabs.harvard.edu/abs/1998ApJS..116....1T/abstract>`_ is given by the following wavelength ranges:
+From the same combination, PST can derive additional integrated quantities:
 
-    .. code-block:: python
+- :meth:`pst.cem.ChemicalEvolutionModel.surviving_stellar_mass`
+- :meth:`pst.cem.ChemicalEvolutionModel.mean_stellar_age`
+- :meth:`pst.cem.ChemicalEvolutionModel.supernova_rate`
+- :meth:`pst.cem.ChemicalEvolutionModel.ionising_photon_rate_hi`
+- :meth:`pst.cem.ChemicalEvolutionModel.compute_photometry`
 
-        from pst.observables import EquivalentWidth
+.. code-block:: python
 
-        custom_ew = EquivalentWidth(left_wl_range=[4827.875, 4847.875],
-                                    central_wl_range=[4847.875, 4876.625],
-                                    right_wl_range=[4876.625, 4891.625])
+     surviving_mass = cem.surviving_stellar_mass(ssp, 13.7 * u.Gyr)
+     mean_age = cem.mean_stellar_age(ssp, 13.7 * u.Gyr, log=True)
+     photometry = cem.compute_photometry(ssp, 13.7 * u.Gyr)
 
-    It is also possible to load pre-defined equivalent widths by providing a JSON
-    file such as:
+Caching and Repeated Evaluations
+--------------------------------
 
-    .. code-block::
+The CEM layer can cache the output of ``interpolate_ssp_masses`` to accelerate
+repeated evaluations at the same observing time.
 
-        {"left_wl_range": [4827.875, 4847.875], "central_wl_range": [4847.875, 4876.625], "right_wl_range": [4876.625, 4891.625]}
-    
-    Then, you can initialise the class by:
+.. code-block:: python
 
-    .. code-block:: python
-        
-        halpha_ew = EquivalentWidth.from_json(path_to_json_file)
+     cem = ExponentialDelayedCEM(
+             mass_today=1e10 * u.Msun,
+             today=13.7 * u.Gyr,
+             tau=3.0 * u.Gyr,
+             ism_metallicity_today=0.02,
+             cache_interp_ssp_mass=True,
+     )
 
-    To compute the equivalent width, you can use the `measure_ew` method, which takes a wavelength and SED arrays as input,
-    and returns the equivalent width in the same units as the wavelength. Based on the example above, you can compute the H-beta equivalent width as follows:
+.. warning::
 
-    .. code-block:: python
+     The cache key currently depends only on ``ssp.name`` and ``t_obs``. It does
+     not track other arguments that affect the interpolation, such as
+     ``oversample_factor``. If caching is enabled, keep those inputs fixed across
+     repeated calls.
 
-        np.random.seed(42)  # For reproducibility
-        noisy_sed = np.random.normal(sed, 0.01 * sed, size=sed.shape) << sed.unit # Simulate some noise in the SED
-        ew, ew_err = custom_ew.compute_ew(wavelength=ssp_model.wavelength,
-                                        spectra=noisy_sed, spectra_err=sed * 0.01)
-        print(f"Equivalent Width (H-beta): {ew.value:.2f} +/- {ew_err:.2f} Angstrom")
-        plt.figure()
-        plt.title(r"EW(H$\beta$)=" + f'{ew.value:.2f} +/- {ew_err:.2f}')
-        plt.errorbar(ssp_model.wavelength.value, noisy_sed.value, yerr=sed.value * 0.01, label='SED')
-        plt.axvspan(*custom_ew.central_wl_range.value, color='green', label='Central window', alpha=0.3)
-        plt.axvspan(*custom_ew.right_wl_range.value, color='red', alpha=0.3, label='Left Range')
-        plt.axvspan(*custom_ew.left_wl_range.value, color='blue', alpha=0.3, label='Right Range')
-        plt.xlim(custom_ew.left_wl_range[0].value - 100, custom_ew.right_wl_range[-1].value + 100)
-        plt.ylim(np.interp(4861 << u.angstrom, ssp_model.wavelength, sed).value * np.array([0.8, 1.2]))
-        plt.xlabel('Wavelength (Angstrom)')
-        plt.ylabel('Flux (Lsun/Angstrom)')
-        plt.legend()
-        plt.show()
+Tabular and Particle-Based Histories
+------------------------------------
 
-.. figure:: _static/images/ew_calculation.png
-    :align: center
-    :width: 600px
+PST also supports more complex inputs than closed-form SFHs.
 
-For more details, refer to the API :ref:`observables`.
+- :class:`pst.cem.TabularCEM` interpolates a cumulative mass history and a
+    metallicity history from a tabulated control grid.
+- :class:`pst.cem.TabularMassFracCEM` reconstructs a history from cumulative
+    mass fractions and associated times.
+- :class:`pst.cem.CC25TabularCEM` parameterizes the SFH in terms of average
+    specific-SFR constraints in lookback-time bins.
+- :class:`pst.cem.ParticleListCEM` builds a composite population directly from
+    particle ages, metallicities, and masses.
 
-Dust extinction effects
+These models are useful when connecting PST to simulations, non-parametric SFH
+inference, or external reconstruction pipelines.
+
+.. code-block:: python
+
+     import numpy as np
+     from pst.cem import TabularCEM
+
+     tabular = TabularCEM(
+             times=np.array([0.1, 1.0, 3.0, 6.0, 13.7]) * u.Gyr,
+             masses=np.array([0.0, 1e8, 5e9, 8e9, 1e10]) * u.Msun,
+             metallicities=np.array([1e-4, 5e-4, 3e-3, 1e-2, 2e-2]),
+             today=13.7 * u.Gyr,
+     )
+
+SED Components and Galaxy Models
+================================
+
+The :mod:`pst.sed` and :mod:`pst.galaxy` modules make it possible to build more
+structured spectral models than a bare SSP+CEM combination.
+
+Stellar SED Components
+----------------------
+
+:class:`pst.sed.StellarComponent` wraps an SSP and a CEM into a reusable SED
+component.
+
+.. code-block:: python
+
+     from pst.sed import StellarComponent
+
+     stars = StellarComponent(ssp=ssp, sfh=cem)
+     stellar_sed = stars.emission_spectrum(ssp.wavelength, t_obs=13.7 * u.Gyr)
+
+This is useful when a stellar population model is one component in a larger SED
+assembly that also includes attenuation and dust emission.
+
+Dust Attenuation and Dust Emission
+----------------------------------
+
+The dust module provides both attenuation laws and emission components.
+
+- :class:`pst.dust.DustScreenAttenuation` applies a single foreground screen.
+- :class:`pst.dust.CharlotFall00Attenuation` returns separate attenuation
+    factors for young and old stellar populations.
+- :class:`pst.dust.Casey2012DustComponent` generates IR dust-emission spectra.
+- :class:`pst.dust.CalorimetricDustComponent` enforces energy balance by using
+    the absorbed stellar luminosity to normalize the dust emission.
+
+When building galaxy models, attenuation and dust emission can be combined with
+the stellar component instead of being applied manually to a single spectrum.
+
+Composite Galaxy SEDs
+---------------------
+
+:class:`pst.galaxy.GalaxySED` combines stellar emission, attenuation, and dust
+emission on a common wavelength grid.
+
+.. code-block:: python
+
+     from pst.dust import DustScreenAttenuation
+     from pst.galaxy import GalaxySED
+
+     galaxy = GalaxySED(
+             stellar_model=stars,
+             dust_attenuation_model=DustScreenAttenuation(),
+             target_wavelength=ssp.wavelength,
+             redshift=0.05,
+     )
+
+     rest_sed = galaxy.emission_spectrum()
+     obs_sed = galaxy.emission_spectrum(to_obs_frame=True)
+
+This interface is the preferred entry point when you need a higher-level model
+that can later be connected to samplers, fitters, or observational pipelines.
+
+Parameterized Workflows
 =======================
 
-The dust model module uses the extinction laws provided by the `extinction <https://extinction.readthedocs.io/en/latest/>`_ library.
+PST model classes use :class:`pst.model.Parameter` objects rather than
+bare scalars. This provides:
 
-Currently, there are two available models for dust extinction:
+- explicit units,
+- optional valid ranges,
+- support for fixed versus free parameters,
+- recursive parameter discovery across nested models.
 
-- Single Dust screen
-- Double dust screen (akin to `Charlot & Fall 2000 <https://ui.adsabs.harvard.edu/abs/2000ApJ...539..718C/abstract>`_)
+You can inspect a model directly:
 
-For more details, refer to the API :ref:`dust` and the `jupyter-notebook tutorial <https://github.com/paranoya/population-synthesis-toolkit/blob/main/tutorials/observables/create_a_photometric_grid.ipynb>`_.
+.. code-block:: python
+
+     params = galaxy.parameters_recursive(include_fixed=False)
+     for name, par in params.items():
+             print(name, par.q, par.fixed)
+
+For nested galaxy models, :class:`pst.galaxy.GalaxySED` also provides a cached
+parameter index and dotted-path updates.
+
+.. code-block:: python
+
+     galaxy.build_param_index(include_fixed=False)
+     galaxy.update_parameters(
+             {
+                     "redshift": 0.1,
+                     "dust_attenuation.a_v": 0.4 * u.mag,
+             },
+             validate=True,
+     )
+
+This pattern is particularly useful when PST is embedded in fitting frameworks
+or MCMC pipelines.
+
+Observables and Measurements
+============================
+
+Filters and Synthetic Photometry
+--------------------------------
+
+Photometric filters are represented by :class:`pst.observables.Filter`.
+Filters can be loaded from local files or fetched from the SVO service.
+
+.. code-block:: python
+
+     import numpy as np
+     from pst.observables import Filter
+
+     jwst_filter = Filter.from_svo("JWST_MIRI.F2550W")
+     jwst_filter.interpolate(ssp.wavelength)
+
+     sed_10pc = sed / (4 * np.pi * (10 * u.pc) ** 2)
+     ab_mag, ab_mag_err = jwst_filter.get_ab(sed_10pc)
+
+Equivalent Width Measurements
+-----------------------------
+
+:class:`pst.observables.EquivalentWidth` measures line indices from a spectrum
+using a left pseudo-continuum window, a central feature window, and a right
+pseudo-continuum window.
+
+.. code-block:: python
+
+     from pst.observables import EquivalentWidth
+
+     hbeta = EquivalentWidth(
+             left_wl_range=[4827.875, 4847.875],
+             central_wl_range=[4847.875, 4876.625],
+             right_wl_range=[4876.625, 4891.625],
+     )
+
+     ew, ew_err = hbeta.compute_ew(
+             wavelength=ssp.wavelength,
+             spectra=sed,
+             spectra_err=0.01 * sed,
+     )
+
+Equivalent-width measurements can be applied to both SSP spectra and composite
+galaxy spectra, which makes them convenient for model-data comparisons in mixed
+spectroscopic and photometric analyses.
+
+Choosing a Workflow
+===================
+
+The modules are designed to compose cleanly:
+
+1. Use :mod:`pst.SSP` when you only need stellar population libraries and SSP-level observables.
+2. Use :mod:`pst.cem` when you need to turn an SFH plus metallicity history into a composite population.
+3. Use :mod:`pst.sed` and :mod:`pst.galaxy` when you need structured SED models with attenuation, dust emission, redshift, and parameter management.
+4. Use :mod:`pst.observables` to derive photometric or spectroscopic measurements from any spectrum produced upstream.
+
+For individual class signatures and full method documentation, refer to
+:ref:`ssp_api`, :ref:`model_api`, :ref:`cem_api`, :ref:`sed_api`,
+:ref:`galaxy_api`, :ref:`dust_api`, and :ref:`observables_api`.
