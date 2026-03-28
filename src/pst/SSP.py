@@ -8,7 +8,7 @@ from astropy.wcs import WCS
 from astropy.table import Table
 from astropy import units as u
 from astropy import units
-
+from astropy import constants
 from pst.utils import check_unit, flux_conserving_interpolation
 
 class SSPBase(object):
@@ -35,49 +35,202 @@ class SSPBase(object):
     default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
 
     @property
+    def name(self):
+        """Name of the SSP model."""
+        if hasattr(self, '_name'):
+            return self._name
+        else:
+            return None
+    
+    @name.setter
+    def name(self, value):
+        self._name = value
+
+    @property
+    def isochrone(self):
+        """Isochrone model associated to the SSP model."""
+        if hasattr(self, '_isochrone'):
+            return self._isochrone
+        else:
+            return None
+    
+    @isochrone.setter
+    def isochrone(self, value):
+        self._isochrone = value
+    
+    @property
+    def stellar_library(self):
+        """Stellar atmospheres model associated to the SSP model."""
+        if hasattr(self, '_stellar_library'):
+            return self._stellar_library
+        else:
+            return None
+    
+    @stellar_library.setter
+    def stellar_library(self, value):
+        self._stellar_library = value
+
+    @property
+    def imf(self):
+        """Return the IMF associated to the SSP model."""
+        if hasattr(self, '_imf'):
+            return self._imf
+        else:
+            return None
+    
+    @imf.setter
+    def imf(self, value):
+        """Set the IMF associated to the SSP model."""
+        self._imf = value
+
+    @property
     def ages(self):
+        """Ages of the SSPs."""
         return self._ages
 
     @ages.setter
     def ages(self, ages_array):
-        if not isinstance(ages_array, units.Quantity):
-            raise NameError("Ages must be an astropy.Quantity")
-        else:
-            self._ages = ages_array
+        check_unit(ages_array, u.Gyr)
+        self._ages = ages_array
 
     @property
     def metallicities(self):
+        """Metallicities of the SSPs."""
         return self._metallicities
 
     @metallicities.setter
     def metallicities(self, metallicities_array):
-        if not isinstance(metallicities_array, units.Quantity):
-            raise NameError("metallicities must be an astropy.Quantity")
-        else:
-            self._metallicities = metallicities_array
+        check_unit(metallicities_array, u.dimensionless_unscaled)
+        self._metallicities = metallicities_array
 
     @property
+    def n_ages(self):
+        """Number of ages in the SSP model."""
+        return self.ages.size
+    
+    @property
+    def n_metallicities(self):
+        """Number of metallicities in the SSP model."""
+        return self.metallicities.size
+
+    @property
+    def n_ssps(self):
+        """Number of SSPs in the model."""
+        return self.n_ages * self.n_metallicities
+
+    @property
+    def n_wavelengths(self):
+        """Number of wavelength points in the SSP model."""
+        return self.wavelength.size
+    
+    @property
     def L_lambda(self):
+        """Spectral energy distribution of each SSP. Each dimension correspond to (metallicity, ages, wavelength).
+        Units must be luminosity per wavelength unit per *initial* mass unit (e.g. Lsun / Angstrom / Msun)."""
         return self._L_lambda
 
     @L_lambda.setter
     def L_lambda(self, l_lamdba):
-        if not isinstance(l_lamdba, units.Quantity):
-            raise NameError("L_lambda must be an astropy.Quantity")
-        else:
-            self._L_lambda = l_lamdba
+        check_unit(l_lamdba, u.Lsun / u.Angstrom / u.Msun)
+        self._L_lambda = l_lamdba
 
     @property
     def wavelength(self):
+        """Wavelength array associated to the SED of the SSPs."""
         return self._wavelength
     
     @wavelength.setter
     def wavelength(self, wave):
-        if not isinstance(wave, units.Quantity):
-            raise NameError("wavelength must be an astropy.Quantity")
+        check_unit(wave, u.Angstrom)
+        self._wavelength = wave
+    
+    @property
+    def remnant_mass_frac(self):
+        """Return the remnant mass of the SSP model."""
+        if hasattr(self, '_remnant_mass_frac'):
+            return self._remnant_mass_frac
         else:
-            self._wavelength = wave
-       
+            return np.zeros((self.metallicities.size, self.ages.size))
+    
+    @remnant_mass_frac.setter
+    def remnant_mass_frac(self, value):
+        """Set the remnant mass of the SSP model."""
+        self._remnant_mass_frac = value
+
+    @property
+    def returned_mass_frac(self):
+        """Return the returned mass of the SSP model."""
+        if hasattr(self, '_returned_mass_frac'):
+            return self._returned_mass_frac
+        else:
+            return np.zeros((self.metallicities.size, self.ages.size))
+
+    @returned_mass_frac.setter
+    def returned_mass_frac(self, value):
+        """Set the returned mass of the SSP model."""
+        self._returned_mass_frac = value
+
+    @property
+    def current_mass(self):
+        """Return the current mass of the SSP model."""
+        return 1.0 - self.returned_mass_frac
+
+    @property
+    def log_ionising_HI_photons(self):
+        """Number of ionising photons of the SSP model in dex(s^-1)."""
+        if hasattr(self, '_ionising_HI_photons'):
+            return self._ionising_HI_photons
+        else:
+            return None
+
+    @log_ionising_HI_photons.setter
+    def log_ionising_HI_photons(self, value):
+        """Set the number of ionising photons of the SSP model."""
+        value = check_unit(value, u.dex(u.s**-1 / u.Msun))
+        self._ionising_HI_photons = value
+
+    @property
+    def log_ionising_HeI_photons(self):
+        """Number of ionising photons of the SSP model in dex(s^-1)."""
+        if hasattr(self, '_ionising_HeI_photons'):
+            return self._ionising_HeI_photons
+        else:
+            return None
+
+    @log_ionising_HeI_photons.setter
+    def log_ionising_HeI_photons(self, value):
+        """Set the number of ionising photons of the SSP model."""
+        value = check_unit(value, u.dex(u.s**-1 / u.Msun))
+        self._ionising_HeI_photons = value
+    
+    @property
+    def log_ionising_HeII_photons(self):
+        """Number of ionising photons of the SSP model in dex(s^-1)."""
+        if hasattr(self, '_ionising_HeII_photons'):
+            return self._ionising_HeII_photons
+        else:
+            return None
+
+    @log_ionising_HeII_photons.setter
+    def log_ionising_HeII_photons(self, value):
+        """Set the number of ionising photons of the SSP model."""
+        value = check_unit(value, u.dex(u.s**-1 / u.Msun))
+        self._ionising_HeII_photons = value
+
+    @property
+    def supernova_rate(self):
+        """Return the supernova rate of the SSP model."""
+        if hasattr(self, '_supernova_rate'):
+            return self._supernova_rate
+        else:
+            return None
+    
+    @supernova_rate.setter
+    def supernova_rate(self, value):
+        """Set the supernova rate of the SSP model."""
+        value = check_unit(value, u.s**-1 * u.Msun**-1)
+        self._supernova_rate = value
+
     def get_weights(self, ages, metallicities, masses=None):
         """2D interpolation of a list of ages and metallicities.
         
@@ -146,7 +299,7 @@ class SSPBase(object):
         sed = self.L_lambda[z_idx, age_idx] *  weights_age * weights_z
         sed += self.L_lambda[z_idx-1, age_idx] * weights_age * (1-weights_z)
         sed += self.L_lambda[z_idx-1, age_idx-1] * (1-weights_age) * (1-weights_z)
-        sed += self.L_lambda[z_idx-1, age_idx] * (1-weights_age) * weights_z
+        sed += self.L_lambda[z_idx, age_idx-1] * (1-weights_age) * weights_z
         return sed
 
     def get_ssp_logedges(self):
@@ -205,7 +358,7 @@ class SSPBase(object):
         else:
             wl_min = check_unit(wl_min, self.wavelength.unit)
         if wl_max is None:
-            wl_max = self.wavelength[0]
+            wl_max = self.wavelength[-1]
         else:
             wl_max = check_unit(wl_max, self.wavelength.unit)
 
@@ -292,6 +445,52 @@ class SSPBase(object):
                 mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
         return mass_to_lum
     
+    def get_ionising_photon_rate(self, species='HI'):
+        """Compute the ionising photon rate of the SSP model for a given species.
+        
+        Parameters
+        ----------
+        species : str, optional
+            Species for which to compute the ionising photon rate. Must be one of 'HI', 'HeI' or 'HeII'. Default is 'HI'.
+        
+        Returns
+        -------
+        photon_rate : astropy.units.Quantity
+            Ionising photon rate of the SSP model for the given species in units of s^-1 / Msun.
+        """
+        
+        # Integrate the SED up to 912 AA
+        if species == 'HI':
+            wl_limit = 912 * u.Angstrom
+        elif species == 'HeI':
+            wl_limit = 504 * u.Angstrom
+        elif species == 'HeII':
+            wl_limit = 228 * u.Angstrom
+        else:
+            raise ValueError("Species must be one of 'HI', 'HeI' or 'HeII'")
+        
+        pts = np.where(self.wavelength <= wl_limit)[0]
+        photon_rate = np.empty((self.metallicities.size, self.ages.size)) * u.s**-1 / u.Msun
+
+        # q = int(L_lambda / (h c / lambda) dlamda)
+        # Divide by 1e40 to avoid overflow
+        q_lambda = (
+            self.L_lambda[:, :, pts].to("erg / (s * Angstrom * Msun)") / 1e40 * self.wavelength.to("Angstrom")[pts]
+        ) / (constants.h.to("erg s") * constants.c.to("Angstrom/s"))
+
+        for i in range(self.metallicities.size):
+            for j in range(self.ages.size):
+                photon_rate[i, j] = np.trapz(q_lambda[i, j], self.wavelength[pts])
+
+        if species == 'HI':
+            self.log_ionising_HI_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+        elif species == 'HeI':
+            self.log_ionising_HeI_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+        elif species == 'HeII':
+            self.log_ionising_HeII_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+
+        return photon_rate.to_value(u.s**-1 / u.Msun) << 1e40 * u.s**-1 / u.Msun
+
     def compute_photometry(self, filter_list, z_obs=0.0, verbose=True):
         """Compute the SSP synthetic photometry of a set of filters.
         
