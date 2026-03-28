@@ -59,9 +59,9 @@ class SedComponent(ModelBase, ABC):
         return np.trapz(sed[mask].value, wavelength[mask].value) << (sed.unit * wavelength.unit)
 
     @classmethod
-    def q_ionizing_photons(cls, wavelength, sed):
+    def q_ionising_photons(cls, wavelength, sed):
         """
-        Compute ionizing photon production integrated below 912 Angstrom.
+        Compute ionising photon production integrated below 912 Angstrom.
 
         Parameters
         ----------
@@ -73,7 +73,7 @@ class SedComponent(ModelBase, ABC):
         Returns
         -------
         q_ion : astropy.units.Quantity
-            Integrated ionizing photon rate-like quantity.
+            Integrated ionising photon rate-like quantity.
         """
         return cls.integrate_sed(wavelength=wavelength,
                                  sed=sed / (const.h * const.c / wavelength),
