@@ -146,6 +146,42 @@ def sfh_quenching_decorator(stellar_mass_formed):
         return np.where(tq < qtq, m, m_q)
     return wrapper
 
+def weights_cache_decorator(func):
+    """
+    Decorator that caches SSP weights computed by a CEM instance.
+
+    The decorated method is expected to compute SSP weights for a given SSP model
+    and observing time. The cache is stored in the instance attribute
+    ``_ssp_weights_cache`` as a dictionary mapping ``(ssp_name, t_obs)`` tuples to weight
+    arrays.
+
+    Notes
+    -----
+    - This decorator assumes the wrapped method has signature
+      ``func(self, ssp, t_obs, *args, **kwargs)`` where ``ssp`` is an instance of
+      :class:`pst.SSP.SSPBase` and ``t_obs`` is an :class:`astropy.units.Quantity`.
+        - The cache keys are based only on the SSP name and the observing time value in Gyr.
+            Any other argument that changes the interpolation result, such as
+            ``oversample_factor``, is ignored by the cache key.
+    - The cache values are the computed weights arrays. The decorator does not
+      attempt to verify the consistency of the cached weights with the input
+            arguments beyond the SSP name and observing time.
+        - Different SSP objects sharing the same ``ssp.name`` will collide in the
+            cache.
+    """
+    @wraps(func)
+    def wrapper(self, ssp, t_obs, *args, **kwargs):
+        if self._cache_interp_ssp_mass:
+            key = (ssp.name, np.round(t_obs.to_value("Gyr"), decimals=6))
+            if key in self._ssp_weights_cache:
+                return self._ssp_weights_cache[key]
+            
+            weights = func(self, ssp, t_obs, *args, **kwargs)
+            self._ssp_weights_cache[key] = weights
+        else:
+            weights = func(self, ssp, t_obs, *args, **kwargs)
+        return weights
+    return wrapper
 
 class ChemicalEvolutionModel(ModelBase, ABC):
     """
@@ -166,11 +202,33 @@ class ChemicalEvolutionModel(ModelBase, ABC):
     at the observing epoch and is used by helper methods that require a
     normalization point (e.g. formation-time percentiles).
 
+    Caching
+    -------
+    The method :meth:`interpolate_ssp_masses` can be decorated with the
+    :func:`weights_cache_decorator` to enable caching of computed SSP weights for
+    given SSP models and observing times. This can speed up repeated SED synthesis
+    at the cost of increased memory usage. The cache is stored in the instance
+    attribute ``_ssp_weights_cache`` as a dictionary mapping (ssp_name, t_obs) tuples
+    to weight arrays.
+
+    .. warning::
+    The cache keys are based only on the SSP name and the observing time value in
+    Gyr, so cached weights can be reused even when other inputs that affect the
+    interpolation change. In particular, changing ``oversample_factor`` while
+    caching is enabled can silently return weights computed with a different
+    oversampling setup.
+
+
     Parameters
     ----------
     today : float, :class:`astropy.units.Quantity`, or :class:`pst.model.Parameter`, optional
         Cosmic time of observation. If a bare number is provided it is assumed
         to be in Gyr.
+    cache_interp_ssp_mass : bool, optional
+        If ``True``, cache the results of :meth:`interpolate_ssp_masses` by SSP
+        name and observing time. This can accelerate repeated evaluations with
+        identical inputs, but it is only safe when all other inputs affecting the
+        interpolation, such as ``oversample_factor``, remain unchanged.
 
     Notes
     -----
@@ -183,8 +241,12 @@ class ChemicalEvolutionModel(ModelBase, ABC):
     """
     name = "base_cem"
 
-    def __init__(self, today: Parameter | u.Quantity | float=None):
+    def __init__(self, today: Parameter | u.Quantity | float=None,
+                 cache_interp_ssp_mass: bool=False):
+
         self.today = today
+        self._cache_interp_ssp_mass = cache_interp_ssp_mass
+        self._ssp_weights_cache = {}
 
     @property
     def today(self):
@@ -233,6 +295,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         """
         return
 
+    @weights_cache_decorator
     def interpolate_ssp_masses(self, ssp: SSPBase, t_obs: u.Quantity,
                                oversample_factor=10) -> u.Quantity:
         """
@@ -241,6 +304,8 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         This routine discretizes the interval ``[0, t_obs]`` into SSP age bins and
         computes the stellar mass formed in each bin via differences of the cumulative
         SFH, then maps each bin to the SSP grid using :meth:`pst.SSP.SSPBase.get_weights`.
+        When ``cache_interp_ssp_mass`` is enabled, the cached result depends only on
+        ``ssp.name`` and ``t_obs``.
 
         Parameters
         ----------
@@ -264,6 +329,11 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         The method uses midpoints of SSP age bins and evaluates
         :meth:`stellar_mass_formed` and :meth:`ism_metallicity` at corresponding
         cosmic times (``t_obs - age``).
+
+        If caching is enabled, callers should keep ``oversample_factor`` fixed for
+        repeated evaluations at the same ``ssp`` and ``t_obs``. Changing
+        ``oversample_factor`` does change the interpolation, but it is not part of
+        the cache key.
         """
         # define age bins from 0 to t_obs
         age_bins = np.hstack(
@@ -285,6 +355,93 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         return ssp.get_weights(ages=bin_age,
                                metallicities=bin_metallicity,
                                masses=bin_mass)
+
+    def surviving_stellar_mass(self, ssp: SSPBase, t_obs: u.Quantity):
+        """
+        Compute the surviving stellar mass at an observing time.
+
+        This method integrates the SFH over SSP age bins as in
+        :meth:`interpolate_ssp_masses` but applies SSP mass loss to compute the
+        surviving mass rather than the formed mass.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+
+        Returns
+        -------
+        m_surviving : :class:`astropy.units.Quantity`
+            Total surviving stellar mass at ``t_obs``. Units are mass (typically Msun).
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        return np.sum(ssp.current_mass * weights)
+
+    def supernova_rate(self, ssp: SSPBase, t_obs: u.Quantity, cc=True, ia=True):
+        """
+        Compute the supernova rate at an observing time.
+
+        This method integrates the SFH over SSP age bins as in
+        :meth:`interpolate_ssp_masses` but applies the SSP supernova rate to
+        compute the total SN rate rather than the formed mass.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        cc : bool, optional
+            If True (default), include core-collapse supernovae in the rate.
+        ia : bool, optional
+            If True (default), include Type Ia supernovae in the rate.
+
+        Returns
+        -------
+        sn_rate : :class:`astropy.units.Quantity`
+            Total supernova rate at ``t_obs``. Units are typically SN/yr.
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        #TODO: handle cc/ia flags.
+        sn_rate = np.sum(ssp.supernova_rate * weights)
+        return sn_rate
+
+    def ionising_photon_rate_hi(self, ssp: SSPBase, t_obs: u.Quantity, species='HI'):
+        """
+        Compute the ionising photon production rate at an observing time.
+
+        This method integrates the SFH over SSP age bins as in
+        :meth:`interpolate_ssp_masses` but applies the SSP ionising photon rate
+        to compute the total production rate rather than the formed mass.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        species : {'HI', 'HeI', 'HeII'}, optional
+            Ion species for which to compute the photon rate. Default is 'HI'.
+        Returns
+        -------
+        q_ion : :class:`astropy.units.Quantity`
+            Total ionising photon production rate at ``t_obs`` in dex(photons/s).
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        if species == 'HI':
+            q_ion = np.sum(ssp.log_ionising_HI_photons.to(1e40 *u.s**-1 / u.Msun) * weights)
+        elif species == 'HeI':
+            q_ion = np.sum(ssp.log_ionising_HeI_photons.to(1e40 *u.s**-1 / u.Msun) * weights)
+        elif species == 'HeII':
+            q_ion = np.sum(ssp.log_ionising_HeII_photons.to(1e40 *u.s**-1 / u.Msun) * weights)
+        else:
+            raise ValueError(f"Invalid species '{species}'; expected 'HI', 'HeI', or 'HeII'.")
+        return q_ion.to(u.dex(u.s**-1))
 
     def time_at_stellar_mass_frac(self, frac, today=None, time_res=30 << u.Myr):
         """
@@ -335,6 +492,40 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         w = (frac - frac_history[idx - 1]) / (frac_history[idx] - frac_history[idx - 1])
         t_frac = (dummy_time[idx - 1] * (1 - w) + dummy_time[idx] * w)
         return t_frac
+
+    def mean_stellar_age(self, ssp: SSPBase, t_obs: u.Quantity,
+                         log: bool=False, surviving_mass: bool=False):
+        """
+        Compute the mean stellar age at an observing time.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        log : bool, optional
+            If True, compute the logarithmic mean age (base 10) rather than the linear mean. Default is False.
+        surviving_mass : bool, optional
+            If True, weight SSP ages by the surviving stellar mass rather than the formed mass. Default is False.
+
+        Returns
+        -------
+        mean_age : :class:`astropy.units.Quantity`
+            Mean stellar age at ``t_obs``. Units are time (typically Gyr).
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        if surviving_mass:
+            weights *= ssp.current_mass
+
+        weights = weights.value
+        age = ssp.ages.to_value("Gyr")
+        if log:
+            age = np.log10(age)
+            return 10 ** (np.sum(weights * age) / np.sum(weights)) << u.Gyr
+        else:
+            return np.sum(weights * age) / np.sum(weights) << u.Gyr
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
         b = np.arange(nbin)[None, :]
