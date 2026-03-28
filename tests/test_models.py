@@ -1,10 +1,38 @@
 import unittest
+from unittest import mock
 import numpy as np
 from astropy import units as u
 from astropy import constants
-from pst import models, SSP
+from pst import cem, models, SSP
 
 np.random.seed(50)
+
+
+def make_toy_ssp_for_cem():
+    ssp = SSP.SSPBase()
+    ssp.name = "toy_cem_ssp"
+    ssp.ages = np.array([1.0, 10.0]) * u.Gyr
+    ssp.metallicities = np.array([0.01, 0.02]) << u.dimensionless_unscaled
+    ssp.wavelength = np.array([1000, 2000, 3000]) << u.AA
+    ssp.L_lambda = np.ones((2, 2, 3)) << (u.Lsun / u.AA / u.Msun)
+    ssp.returned_mass_frac = np.array([[0.5, 0.75], [0.8, 0.9]])
+    ssp.supernova_rate = np.array([[1.0, 2.0], [3.0, 4.0]]) << (u.yr**-1 / u.Msun)
+    ssp.log_ionising_HI_photons = np.array([[40.0, 41.0], [39.0, 38.0]]) << u.dex(u.s**-1 / u.Msun)
+    ssp.log_ionising_HeI_photons = np.array([[39.5, 40.5], [38.5, 37.5]]) << u.dex(u.s**-1 / u.Msun)
+    ssp.log_ionising_HeII_photons = np.array([[39.0, 40.0], [38.0, 37.0]]) << u.dex(u.s**-1 / u.Msun)
+    return ssp
+
+
+class LinearCEM(cem.ChemicalEvolutionModel):
+    name = "linear_cem"
+
+    def stellar_mass_formed(self, time: u.Quantity) -> u.Quantity:
+        time = u.Quantity(time).to(u.Gyr)
+        return np.atleast_1d(time.value) << u.Msun
+
+    def ism_metallicity(self, time: u.Quantity) -> u.Quantity:
+        time = u.Quantity(time).to(u.Gyr)
+        return np.full(np.atleast_1d(time.value).shape, 0.01) << u.dimensionless_unscaled
 
 class TestModels(unittest.TestCase):
 
@@ -273,6 +301,103 @@ class TestModels(unittest.TestCase):
                 ism_metallicity_today=0.02,
                 alpha_powerlaw=1.0,
             )
+
+    def test_interpolate_ssp_masses_cache_disabled_returns_fresh_arrays(self):
+        model = LinearCEM(today=13.7 * u.Gyr, cache_interp_ssp_mass=False)
+        ssp = make_toy_ssp_for_cem()
+
+        weights_1 = model.interpolate_ssp_masses(ssp, 12.0 * u.Gyr)
+        weights_2 = model.interpolate_ssp_masses(ssp, 12.0 * u.Gyr)
+
+        self.assertIsNot(weights_1, weights_2)
+        self.assertEqual(model._ssp_weights_cache, {})
+
+    def test_interpolate_ssp_masses_cache_enabled_is_instance_local(self):
+        ssp = make_toy_ssp_for_cem()
+        model_1 = LinearCEM(today=13.7 * u.Gyr, cache_interp_ssp_mass=True)
+        model_2 = LinearCEM(today=13.7 * u.Gyr, cache_interp_ssp_mass=True)
+
+        weights_1a = model_1.interpolate_ssp_masses(ssp, 12.0 * u.Gyr)
+        weights_1b = model_1.interpolate_ssp_masses(ssp, 12.0 * u.Gyr)
+        weights_2 = model_2.interpolate_ssp_masses(ssp, 12.0 * u.Gyr)
+
+        self.assertIs(weights_1a, weights_1b)
+        self.assertIsNot(model_1._ssp_weights_cache, model_2._ssp_weights_cache)
+        self.assertEqual(len(model_1._ssp_weights_cache), 1)
+        self.assertEqual(len(model_2._ssp_weights_cache), 1)
+        self.assertIsNot(weights_1a, weights_2)
+
+    def test_surviving_stellar_mass_uses_ssp_current_mass(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+        ssp = make_toy_ssp_for_cem()
+        weights = np.array([[1.0, 2.0], [3.0, 4.0]]) << u.Msun
+
+        with mock.patch.object(model, 'interpolate_ssp_masses', return_value=weights):
+            surviving_mass = model.surviving_stellar_mass(ssp, 13.0 * u.Gyr)
+
+        expected = np.sum(ssp.current_mass * weights)
+        self.assertTrue(u.isclose(surviving_mass, expected))
+
+    def test_supernova_rate_uses_ssp_supernova_grid(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+        ssp = make_toy_ssp_for_cem()
+        weights = np.array([[1.0, 0.5], [0.25, 0.125]]) << u.Msun
+
+        with mock.patch.object(model, 'interpolate_ssp_masses', return_value=weights):
+            sn_rate = model.supernova_rate(ssp, 13.0 * u.Gyr)
+
+        expected = np.sum(ssp.supernova_rate * weights)
+        self.assertTrue(u.isclose(sn_rate, expected))
+
+    def test_mean_stellar_age_linear_log_and_surviving_mass(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+        ssp = make_toy_ssp_for_cem()
+        weights = np.array([[1.0, 3.0], [0.0, 0.0]]) << u.Msun
+        surviving_weights = weights.copy() * ssp.current_mass
+
+        with mock.patch.object(model, 'interpolate_ssp_masses', return_value=weights):
+            mean_age = model.mean_stellar_age(ssp, 13.0 * u.Gyr)
+            mean_log_age = model.mean_stellar_age(ssp, 13.0 * u.Gyr, log=True)
+            surviving_mean_age = model.mean_stellar_age(
+                ssp, 13.0 * u.Gyr, surviving_mass=True)
+
+        expected_mean = ((1.0 * 1.0) + (3.0 * 10.0)) / 4.0 * u.Gyr
+        expected_log = 10 ** ((1.0 * np.log10(1.0) + 3.0 * np.log10(10.0)) / 4.0) * u.Gyr
+        expected_surviving = (
+            np.sum(surviving_weights.value * ssp.ages.to_value(u.Gyr)) /
+            np.sum(surviving_weights.value)
+        ) * u.Gyr
+
+        self.assertTrue(u.isclose(mean_age, expected_mean))
+        self.assertTrue(u.isclose(mean_log_age, expected_log))
+        self.assertTrue(u.isclose(surviving_mean_age, expected_surviving))
+
+    def test_ionising_photon_rate_supports_species_selection(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+        ssp = make_toy_ssp_for_cem()
+        weights = np.array([[2.0, 0.0], [0.0, 0.0]]) << u.Msun
+
+        with mock.patch.object(model, 'interpolate_ssp_masses', return_value=weights):
+            q_hi = model.ionising_photon_rate_hi(ssp, 13.0 * u.Gyr, species='HI')
+            q_hei = model.ionising_photon_rate_hi(ssp, 13.0 * u.Gyr, species='HeI')
+            q_heii = model.ionising_photon_rate_hi(ssp, 13.0 * u.Gyr, species='HeII')
+
+        expected_hi = np.sum(
+            ssp.log_ionising_HI_photons.to(1e40 * u.s**-1 / u.Msun) * weights
+        ).to(u.dex(u.s**-1))
+        expected_hei = np.sum(
+            ssp.log_ionising_HeI_photons.to(1e40 * u.s**-1 / u.Msun) * weights
+        ).to(u.dex(u.s**-1))
+        expected_heii = np.sum(
+            ssp.log_ionising_HeII_photons.to(1e40 * u.s**-1 / u.Msun) * weights
+        ).to(u.dex(u.s**-1))
+
+        self.assertTrue(u.isclose(q_hi, expected_hi))
+        self.assertTrue(u.isclose(q_hei, expected_hei))
+        self.assertTrue(u.isclose(q_heii, expected_heii))
+
+        with self.assertRaises(ValueError):
+            model.ionising_photon_rate_hi(ssp, 13.0 * u.Gyr, species='CIV')
 
 
 if __name__ == '__main__':
