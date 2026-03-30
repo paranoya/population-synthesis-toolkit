@@ -1050,7 +1050,8 @@ class BC03_2016(SSPBase):
 
     This class implements the 2016 version of the Bruzual & Charlot (BC03)
     simple stellar population (SSP) models. It includes higher metallicity
-    coverage and new spectral libraries, including MILES, STELIB, and BaSeL.
+    coverage and new stellar libraries, including MILES, STELIB, and BaSeL.
+    Stellar tracks and isochrones are based on the PARSEC code (Bressan et al. 2012).
     This version uses updated file naming conventions and directory structure.
 
     Parameters
@@ -1074,6 +1075,8 @@ class BC03_2016(SSPBase):
     path : str or None, optional
         Filesystem path to the BC03 model data. If None (default), the package
         default path is used.
+    load_properties : bool, optional
+        If True (default), load the model properties during initialization.
     verbose : bool, optional
         If True (default), print informational messages during initialization.
 
@@ -1132,40 +1135,100 @@ class BC03_2016(SSPBase):
     'm62': 0.02,
     'm72': 0.05,
     'm82': 0.1}
-    _resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
     
-    def __init__(self, model='BaSeL', imf='Kroupa', path=None, verbose=True) -> None:
-        self.model, model_key = self._parse_model(model)
+    # Wavelength resolution corresponding to each atmospheric library
+    _resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
+    isochrone = "PARSEC2012"
+
+    def __init__(self, model='BaSeL', imf='Kroupa', path=None, load_properties=True,
+                 verbose=True) -> None:
+        
+        self.stellar_library, model_key = self._parse_model(model)
         self.imf, imf_key = self._parse_imf(imf)
 
         if path is None:
             self.path = os.path.join(self.default_path, 'BC03', 'bc03_2016ver',
-                                     self.model, self.imf)
+                                     self.stellar_library, self.imf)
         else:
             self.path = path
 
+        ages_file = os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')
+        if not os.path.isfile(ages_file):
+            raise FileNotFoundError(f"Required ages file not found: {ages_file}")
+
         if verbose:
-            print(f"> Initialising BC03 model {self.model} (IMF={self.imf})")
-        self.metallicities = np.array(list(self._metallicity_map.values())) * units.dimensionless_unscaled
-        self.ages = np.loadtxt(
-            os.path.join(self.default_path, 'BC03', 'TIME_SCALE.DAT')) * units.yr
-        
+            print(f"> Initialising BC03 model {self.stellar_library} (IMF={self.imf})")
+
+        # Grid of metallicities and ages
+        self.metallicities = np.array(list(self._metallicity_map.values())
+                                      ) * units.dimensionless_unscaled
+        self.ages = np.loadtxt(ages_file, skiprows=1) << units.yr
+
+        # TODO: deprecate
         self.log_ages_yr = np.log10(self.ages / units.yr)
 
+        # Load SEDs from files
         load_wavelength = False
+        remnant_mass_frac = np.zeros((self.metallicities.size, self.ages.size))
+        returned_mass_frac = np.zeros((self.metallicities.size, self.ages.size))
+        snr = np.zeros((self.metallicities.size, self.ages.size)) / (units.yr * units.Msun)
+        log_q_hi = np.zeros((self.metallicities.size, self.ages.size))
+        log_q_hei = np.zeros((self.metallicities.size, self.ages.size))
+        log_q_heii = np.zeros((self.metallicities.size, self.ages.size))
+
         for i, metallicity_key in enumerate(self._metallicity_map.keys()):
             fits_path = os.path.join(
                 self.path, f"bc2003_{self._resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.fits")
+
+            if not os.path.isfile(fits_path):
+                raise FileNotFoundError(f"Required FITS file not found: {fits_path}")
+
             table = Table.read(fits_path)
             if not load_wavelength:
-                self.wavelength = table['wavelength'].value * u.angstrom
+                self.wavelength = table['wavelength'].value << u.angstrom
                 self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
-                                          self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
+                                          self.wavelength.size))  << u.Lsun / u.Angstrom / u.Msun
                 load_wavelength = True
             table.remove_column("wavelength")
             for j, column in enumerate(table.itercols()):
-                self.L_lambda[i, j] = column.value * self.L_lambda.unit
+                self.L_lambda[i, j] = column.value << self.L_lambda.unit
+            
+            if load_properties:
+                # Load the mass return fractions and SNR from the properties file
+                props_path = os.path.join(
+                self.path, f"bc2003_{self._resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.4color")
+                if not os.path.isfile(props_path):
+                    raise FileNotFoundError(f"Required properties file not found: {props_path}")
+                
+                props_table = Table.read(props_path, format='ascii',
+                                         header_start=29)
+                remnant_mass_frac[i] = props_table['M_remnants'].value
+                returned_mass_frac[i] = props_table['M_ret_gas'].value
 
+                # Load the SN rates
+                props_path = os.path.join(
+                self.path, f"bc2003_{self._resolution[model_key]}_{model_key}_{metallicity_key}_{imf_key}_ssp.3color")
+
+                if not os.path.isfile(props_path):
+                    raise FileNotFoundError(f"Required properties file not found: {props_path}")
+
+                props_table = Table.read(props_path, format='ascii',
+                                         header_start=29)
+                
+                log_q_hi[i] = props_table['NLy'].value
+                log_q_hei[i] = props_table['NHeI'].value
+                log_q_heii[i] = props_table['NHeII'].value
+
+                bol_lum_lsun = props_table['Bol_Flux'].value
+                bol_snr = props_table['SNR/yr/Lo'].value
+                snr[i] = bol_snr * bol_lum_lsun << (1 / units.yr / units.Msun)
+
+        self.remnant_mass_frac = remnant_mass_frac
+        self.returned_mass_frac = returned_mass_frac
+        self.log_ionising_HI_photons = log_q_hi
+        self.log_ionising_HeI_photons = log_q_hei
+        self.log_ionising_HeII_photons = log_q_heii
+        self.supernova_rate = snr
 
     def _parse_model(self, model):
         if 'basel' in model.lower():
