@@ -1076,7 +1076,10 @@ class BC03_2016(SSPBase):
         Filesystem path to the BC03 model data. If None (default), the package
         default path is used.
     load_properties : bool, optional
-        If True (default), load the model properties during initialization.
+        If True (default), load the model properties during initialization. The
+        properties include remnant mass fraction, returned mass fraction,
+        supernova rate, and ionizing photon rates (Q_HI, Q_HeI, Q_HeII) as a function
+        of age and metallicity (see :class:`SSPBase`).
     verbose : bool, optional
         If True (default), print informational messages during initialization.
 
@@ -1117,13 +1120,13 @@ class BC03_2016(SSPBase):
     ----------
     Bruzual, G., & Charlot, S. (2003).
     Stellar population synthesis at the resolution of 2003.
-    `MNRAS, 344(4), 1000–1028 <https://ui.adsabs.harvard.edu/abs/2003MNRAS.344.1000B/abstract>`_.
+    `MNRAS, 344(4), 1000-1028 <https://ui.adsabs.harvard.edu/abs/2003MNRAS.344.1000B/abstract>`_.
 
     `Gustavo Bruzual page <https://www.bruzual.org/>`_
 
     Gutkin, J., Charlot, S., & Bruzual, G. (2016).
     Modelling the nebular emission from primeval to present-day star-forming galaxies
-    `MNRAS, 462(2), 1757–1774 <https://ui.adsabs.harvard.edu/abs/2016MNRAS.462.1757G>`_.
+    `MNRAS, 462(2), 1757-1774 <https://ui.adsabs.harvard.edu/abs/2016MNRAS.462.1757G>`_.
     """
 
     _metallicity_map = {
