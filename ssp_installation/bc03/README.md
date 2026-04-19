@@ -14,3 +14,12 @@ bash all_ised2fits.sh /SSP_TEMPLATES/BC03/bc03_2013ver/bc03/Padova1994/chabrier
 
 In the same directory you should find the new `.fits` files containing the SED of each SSP.
 
+## Decompress additional information
+
+If users are interested in additional information such as the surviving stellar mass, or tabulater ionising photon rates, not only the SED files
+are required but the `*?color` files.
+
+In some cases the files are compressed so it is convenient to decompress them, e.g.:
+```
+find . -type f -name "*color.gz" -exec gzip -d {} +
+```

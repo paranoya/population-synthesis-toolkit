@@ -2,16 +2,23 @@
 This module contains some tools for computing observable quantities
 (e.g. photometry, equivalent widths) from spectra.
 """
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import os
 from astropy import units as u
+from astropy import constants as const
 from astropy import constants
 import requests
 import json
 from matplotlib import pyplot as plt
-from . import utils
 
+from pst.utils import check_unit, flux_conserving_interpolation
+
+ArrayLike = Union[np.ndarray, u.Quantity]
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 def list_of_available_filters():
@@ -19,7 +26,7 @@ def list_of_available_filters():
     filter_dir = os.path.join(PST_DATA_DIR, "filters")
     return os.listdir(filter_dir)
 
-def load_photometric_filters(filters):
+def load_photometric_filters(filters, to_filter_list=False):
     """Convenience function for constructing a list of photometric filters.
     
     Parameters
@@ -40,9 +47,11 @@ def load_photometric_filters(filters):
             filters_out.append(Filter.from_text_file(f))
         else:
             filters_out.append(Filter.from_svo(f))
+    if to_filter_list:
+        return FilterList(filters_out)
     return filters_out
 
-def download_svo_filter(name: str, dest_dir: str, verbose=True):
+def download_svo_filter(name: str, dest_dir: str, verbose=True, retry=3):
     """Download a filter from the Spanish Virtual Observatory (SVO) Filter Profile Service.
     
     Parameters
@@ -67,7 +76,15 @@ def download_svo_filter(name: str, dest_dir: str, verbose=True):
     file_path = os.path.join(dest_dir, filename)
     if verbose:
         print(f"Querying SVO Filter: {url}")
-    r = requests.get(url, stream=True)
+    try:
+        r = requests.get(url, stream=True, timeout=30.0)
+    except requests.exceptions.ConnectTimeout as e:
+        if retry:
+            print(f"Connection timed out. Retrying... ({retry} attempts left)")
+            download_svo_filter(name, dest_dir, verbose=verbose, retry=retry-1)
+        else:
+            raise e
+
     if len(r.text) > 0:
         if verbose:
             print(f"Saving new filter {name} to ", os.path.abspath(file_path))
@@ -106,12 +123,15 @@ class Filter(object):
     -------
     >>> from pst.observables import Filter
     >>> ps_r_filter = Filter("PANSTARRS_PS1.r")
+    >>> wl = np.linspace(5000, 7000, 1000) * u.angstrom
+    >>> ps_r_filter.interpolate(wl)
+    >>> ps_r_filter.plot(add_props=True, show=True)
     """
 
     default_dir = os.path.join(PST_DATA_DIR, "filters")
 
     def __init__(self, wavelength=None, response=None,
-                 filter_wavelength=None, filter_response=None):
+                 filter_wavelength=None, filter_response=None, name=None):
 
         self.wavelength = wavelength
         self.response = response
@@ -123,8 +143,21 @@ class Filter(object):
         elif filter_wavelength is None and wavelength is None:
             raise NameError("wavelength or filter_wavelength must be provided")
 
+        if self.wavelength is not None:
+            if self.response is None:
+                self.interpolate(self.wavelength)
+            else:
+                self.norm_photons = self.get_photons(
+                    3631 * u.Jy * np.ones(self.wavelength.shape) * constants.c / self.wavelength**2,
+                    mask_nan=False)[0]
+        else:
+            self.norm_photons = None
+
+        self.name = name
+
     @property
     def wavelength(self):
+        """Interpolated wavelength grid used by ``response``."""
         return self._wavelength
 
     @wavelength.setter
@@ -136,6 +169,7 @@ class Filter(object):
 
     @property
     def filter_wavelength(self):
+        """Native wavelength grid associated with ``filter_resp``."""
         return self._filter_wavelength
 
     @filter_wavelength.setter
@@ -155,7 +189,8 @@ class Filter(object):
             Path to the text file containing the filter information.
             The first and second columns must correspond to the
             wavelength and passband curve, respectively.
-        wavelength_units : :class:``astropy.units.Quantity``
+        wavelength_unit : :class:``astropy.units.Unit``
+            Unit associated with wavelength values in the input file.
         **kwargs : 
             Arguments to be passed to :func:`numpy.loadtxt`
 
@@ -166,8 +201,9 @@ class Filter(object):
         """
         wavelength, response = np.loadtxt(path, usecols=(0, 1), unpack=True,
                                           **kwargs)
+        name = os.path.basename(path).replace(".dat", "")
         return cls(filter_wavelength=wavelength * wavelength_unit,
-                   filter_response=response)
+                   filter_response=response, name=name)
 
     @classmethod
     def from_svo(cls, name, destination_dir=None):
@@ -286,9 +322,14 @@ class Filter(object):
         if not hasattr(wavelength, "unit"):
             wavelength = wavelength << u.angstrom
 
-        self.response = utils.flux_conserving_interpolation(
+        self.response = flux_conserving_interpolation(
             wavelength, self.filter_wavelength, self.filter_resp)
         self.wavelength= wavelength
+
+        self.norm_photons, _ = self.get_photons(
+            3631 * u.Jy * np.ones(self.wavelength.shape) * constants.c / self.wavelength**2,
+            mask_nan=False)
+
         return self.response
 
     def get_photons(self, spectra, spectra_err=None, mask_nan=True):
@@ -319,7 +360,7 @@ class Filter(object):
         photon_flux_err : :class:``astropy.units.Quantity``
             Filter photon flux associated error.
         """
-        spectra = utils.check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
+        spectra = check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
                                    equivalence=u.spectral_density, wav=self.wavelength)
 
         if mask_nan:
@@ -336,7 +377,7 @@ class Filter(object):
 
         if spectra_err is not None:
 
-            spectra_err = utils.check_unit(spectra_err,
+            spectra_err = check_unit(spectra_err,
                                            default_unit=u.Lsun / u.angstrom / u.cm**2,
                                            equivalence=u.spectral_density, wav=self.wavelength)
             if mask_nan:
@@ -385,10 +426,7 @@ class Filter(object):
         :func:`get_photons`
         """
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err, mask_nan=mask_nan)
-        norm_photons, _ = self.get_photons(
-            3630.781 * u.Jy * np.ones(spectra.shape) * constants.c / self.wavelength**2,
-            mask_nan=False)
-        mag_ab = - 2.5 * np.log10(n_photons / norm_photons)
+        mag_ab = - 2.5 * np.log10(n_photons / self.norm_photons)
         if n_photons_err is None:
             mag_ab_err = None
         else:
@@ -396,7 +434,7 @@ class Filter(object):
         return mag_ab, mag_ab_err
 
     def get_fnu(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the  specific flux per frequency unit from a spectra.
+        """Compute synthetic flux density per frequency unit from a spectrum.
 
         Parameters
         ----------
@@ -410,28 +448,25 @@ class Filter(object):
 
         Returns
         -------
-        mag_ab : :class:``astropy.units.Quantity``
-            AB magnitude.
-        mag_ab_err : :class:``astropy.units.Quantity``
-            AB magnitude associated error.
+        f_nu : :class:``astropy.units.Quantity``
+            Synthetic flux density in Jy.
+        f_nu_err : :class:``astropy.units.Quantity``
+            Associated uncertainty in Jy.
 
         See also
         --------
         :func:`get_photons`
         """
         n_photons, n_photons_err = self.get_photons(spectra, spectra_err, mask_nan=mask_nan)
-        norm_photons, _ = self.get_photons(
-            3630.781 * u.Jy * np.ones(spectra.shape) * constants.c / self.wavelength**2,
-            mask_nan=False)
-        f_nu = n_photons / norm_photons * 3630.781 * u.Jy
+        f_nu = n_photons / self.norm_photons * 3631 * u.Jy
         if spectra_err is None:
             f_nu_err = None
         else:
-            f_nu_err = n_photons_err / norm_photons * 3630.781 * u.Jy
+            f_nu_err = n_photons_err / self.norm_photons * 3631 * u.Jy
         return f_nu, f_nu_err
 
     def get_flambda_vegamag(self, spectra, spectra_err=None, mask_nan=True):
-        """Compute the  specific flux per wavelength unit from a spectra.
+        """Compute synthetic flux density per wavelength unit from a spectrum.
 
         Parameters
         ----------
@@ -445,16 +480,16 @@ class Filter(object):
 
         Returns
         -------
-        mag_ab : :class:``astropy.units.Quantity``
-            AB magnitude.
-        mag_ab_err : :class:``astropy.units.Quantity``
-            AB magnitude associated error.
+        f_lambda : :class:``astropy.units.Quantity``
+            Synthetic flux density per wavelength.
+        f_lambda_err : :class:``astropy.units.Quantity``
+            Associated uncertainty estimate.
 
         See also
         --------
         :func:`get_photons`
         """
-        spectra = spectra = utils.check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
+        spectra = spectra = check_unit(spectra, default_unit=u.Lsun / u.angstrom / u.cm**2,
                                    equivalence=u.spectral_density, wav=self.wavelength)
 
         if mask_nan:
@@ -467,7 +502,7 @@ class Filter(object):
 
         if spectra_err is not None:
 
-            spectra_err = utils.check_unit(spectra_err, default_unit=u.Lsun / u.angstrom / u.cm**2,
+            spectra_err = check_unit(spectra_err, default_unit=u.Lsun / u.angstrom / u.cm**2,
                                            equivalence=u.spectral_density, wav=self.wavelength)
             if mask_nan:
                 mask = mask & np.isfinite(spectra_err)
@@ -483,14 +518,28 @@ class Filter(object):
 
         return f_lambda, f_lambda_err
 
-    def plot(self, show=False):
+    def plot(self, add_props=False, ax=None, show=False):
         """Plot the filter response curve.
         
         Plot the original filter response curve together with the interpolated
         version computed using a new grid of wavelengths.
+
+        Parameters
+        ----------
+        add_props: bool
+            If True, add vertical lines indicating the effective wavelength and
+            bandwidth of the filter. Default is False.
+        ax: :class:`matplotlib.axes.Axes`, optional
+            Matplotlib axis to plot on. If None, a new figure and axis are created.
+        show: bool
+            If True, display the plot by calling ``plt.show()``. This requires
+            an interactive matplotlib session. Default is False.
         """
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+
         ax.step(self.filter_wavelength, self.filter_resp, label='Original',
                 color='k', where="mid")
         ax.plot(self.filter_wavelength, self.filter_resp, '.', color='k')
@@ -500,11 +549,16 @@ class Filter(object):
             ax.step(self.wavelength, self.response, label='Interpolated',
                       color='r', where="mid")
         ax.legend()
+        if add_props:
+            eff_wl = self.effective_wavelength()
+            eff_bw = self.effective_bandwidth()
+            ax.axvline(eff_wl.value - eff_bw.value / 2, c="k", ls=":")
+            ax.axvline(eff_wl.value + eff_bw.value / 2, c="k", ls=":")
         if show:
             plt.show()
         else:
             plt.close()
-        return fig
+        return fig, ax
 
 
 class TopHatFilter(Filter):
@@ -515,8 +569,8 @@ class TopHatFilter(Filter):
     :class:`Filter`
     """
     def __init__(self, central_wave, width, **kwargs):
-        central_wave = utils.check_unit(central_wave, u.Angstrom)
-        width = utils.check_unit(width, u.Angstrom)
+        central_wave = check_unit(central_wave, u.Angstrom)
+        width = check_unit(width, u.Angstrom)
 
         self.wavelength = kwargs.get('wavelength', None)
         if self.wavelength is None:
@@ -524,7 +578,7 @@ class TopHatFilter(Filter):
                                     central_wave + width,
                                     50)
         else:
-            self.wavelength = utils.check_unit(self.wavelength, u.Angstrom)
+            self.wavelength = check_unit(self.wavelength, u.Angstrom)
             self.filter_wavelength = self.wavelength.copy()
 
         self.filter_resp = np.ones(self.filter_wavelength.size)
@@ -533,6 +587,248 @@ class TopHatFilter(Filter):
         if self.wavelength is None:
             self.response = self.filter_resp.copy()
 
+        self.interpolate(self.wavelength)
+
+
+@dataclass
+class FilterList:
+    """A list of :class:`Filter` instances for faster computations.
+    
+    #TODO
+    """
+
+    filters: List["Filter"]
+    wavelength: Optional[u.Quantity] = None
+    response: Optional[np.ndarray] = None
+    kernel_phot: Optional[u.Quantity] = None
+    dlambda: Optional[u.Quantity] = None
+    norm_phot: Optional[u.Quantity] = None
+    names: Optional[List[str]] = None
+
+    def __post_init__(self):
+        self.filters = list(self.filters)
+        self.names = [getattr(f, "name", f"band{ib}") for ib, f in enumerate(self.filters)]
+
+    @property
+    def n_bands(self) -> int:
+        """Number of filters contained in the list."""
+        return len(self.filters)
+
+    @property
+    def effective_wavelength(self) -> u.Quantity:
+        """Array of effective wavelengths, one per filter."""
+        return u.Quantity([f.effective_wavelength() for f in self.filters], u.AA)
+
+    def wavelength_range(self, kappa_bw=2.0) -> [u.Quantity, u.Quantity]:
+        """Get the net wavelength coverage by the filters."""
+        min_wl = 1e6 << u.AA
+        max_wl = 1 << u.AA
+
+        for f in self.filters:
+            eff_wl, eff_bw = f.effective_wavelength(), f.effective_bandwidth()
+            low, up = eff_wl - eff_bw * kappa_bw, eff_wl + eff_bw * kappa_bw
+            if low < min_wl:
+                min_wl = low
+            if up > max_wl:
+                max_wl = up
+        return [min_wl, max_wl]
+
+    def interpolate(self, wavelength: ArrayLike) -> "FilterList":
+        """
+        Interpolate all filter responses to a common wavelength grid.
+
+        Parameters
+        ----------
+        wavelength : array or Quantity
+            Target wavelength grid. Must be 1D and monotonic increasing.
+
+        Returns
+        -------
+        self
+        """
+        wl = check_unit(wavelength, u.AA)
+
+        if wl.ndim != 1:
+            raise ValueError("wavelength must be 1D")
+        if wl.size < 2:
+            raise ValueError("wavelength grid must contain at least two points")
+
+        # Enforce monotonic increasing for stable integration
+        if np.any(np.diff(wl.to_value(wl.unit)) <= 0):
+            raise ValueError("wavelength grid must be strictly increasing")
+
+        self.wavelength = wl
+
+        # Build (B, W) response matrix
+        resp = np.empty((self.n_bands, wl.size), dtype=float)
+        for i, f in enumerate(self.filters):
+            # Use your flux-conserving interpolation (same behavior as Filter.interpolate)
+            resp[i] = flux_conserving_interpolation(wl, f.filter_wavelength, f.filter_resp)
+
+        self.response = resp
+
+        # Cache delta_lambda for integral
+        dl = np.empty_like(wl)
+        dl[0] = 0.5 * (wl[1] - wl[0])
+        dl[-1] = 0.5 * (wl[-1] - wl[-2])
+        if wl.size > 2:
+            dl[1:-1] = 0.5 * (wl[2:] - wl[:-2])
+        self.dlambda = dl
+
+        # Photon kernel: (lambda / (h c)) * R(lambda)
+        self.kernel_phot = (wl / (const.h * const.c)) * resp
+
+        # AB normalization per band
+        fnu0 = 3631 * u.Jy
+        f_lambda_ref = (fnu0 * const.c / wl**2).to(
+            u.erg / (u.s * u.cm**2 * wl.unit),
+            equivalencies=u.spectral_density(wl),
+        )
+        self.norm_phot = u.Quantity(
+            np.einsum("i,bi,i->b", f_lambda_ref, self.kernel_phot, self.dlambda),
+            copy=False,
+        )
+
+        return self
+
+    def _require_interpolated(self):
+        if self.wavelength is None or self.response is None or self.kernel_phot is None or self.dlambda is None:
+            raise RuntimeError("Call interpolate(wavelength) before computing photometry.")
+
+    def get_photons(self, spectra: ArrayLike, spectra_err: Optional[ArrayLike] = None,
+                mask_nan: bool = True) -> Tuple[u.Quantity, Optional[u.Quantity]]:
+        """
+        Vectorized photon flux through all bandpasses.
+
+        Parameters
+        ----------
+        spectra : array or Quantity
+            Shape (..., n_wave). Flux density per wavelength.
+        spectra_err : array or Quantity, optional
+            Same shape as spectra.
+        mask_nan : bool
+            If True, NaNs in spectra are treated as zero contribution.
+
+        Returns
+        -------
+        n_phot : Quantity
+            Shape (..., n_bands)
+        n_phot_err : Quantity or None
+            Shape (..., n_bands)
+        """
+        self._require_interpolated()
+        wl = self.wavelength
+
+        F = check_unit(
+            spectra,
+            default_unit=u.Lsun / u.angstrom / u.cm**2,
+            equivalence=u.spectral_density,
+            wav=wl,
+        )
+
+        if F.shape[-1] != wl.size:
+            raise ValueError(f"spectra last axis must be n_wave={wl.size}, got {F.shape[-1]}")
+
+        # Mask NaNs
+        if mask_nan:
+            finite = np.isfinite(F)
+            F = u.Quantity(np.where(finite, F.value, 0.0), unit=F.unit, copy=False)
+
+        # Integrate along the last axis for each band
+        n_phot = u.Quantity(
+            np.einsum("...i,bi,i->...b", F, self.kernel_phot, self.dlambda),
+            copy=False,
+        )
+
+        if spectra_err is None:
+            return n_phot, None
+
+        Ferr = check_unit(
+            spectra_err,
+            default_unit=u.Lsun / u.angstrom / u.cm**2,
+            equivalence=u.spectral_density,
+            wav=wl,
+        )
+        if Ferr.shape != F.shape:
+            raise ValueError("spectra_err must have the same shape as spectra")
+
+        if mask_nan:
+            finite_e = np.isfinite(Ferr)
+            Ferr = u.Quantity(np.where(finite_e, Ferr.value, 0.0),
+            unit=Ferr.unit, copy=False)
+
+        n_phot_err = u.Quantity(
+            np.einsum("...i,bi,i->...b", Ferr, self.kernel_phot, self.dlambda),
+            copy=False,
+        )
+        return n_phot, n_phot_err
+
+    def get_fnu(self, spectra: ArrayLike, spectra_err: Optional[ArrayLike] = None,
+            mask_nan: bool = True) -> Tuple[u.Quantity, Optional[u.Quantity]]:
+        """
+        Compute synthetic f_nu in AB system for all bands.
+
+        Returns
+        -------
+        fnu : Quantity
+            Shape (..., n_bands) in Jy
+        fnu_err : Quantity or None
+            Shape (..., n_bands) in Jy
+        """
+        self._require_interpolated()
+
+        n_phot, n_phot_err = self.get_photons(spectra,
+                spectra_err=spectra_err, mask_nan=mask_nan)
+
+        fnu0 = 3631 * u.Jy
+        # Per band
+        fnu = (n_phot / self.norm_phot) * fnu0
+
+        if n_phot_err is None:
+            return fnu, None
+        fnu_err = (n_phot_err / self.norm_phot) * fnu0
+        return fnu, fnu_err
+
+    def abmag(self, spectra: ArrayLike, spectra_err: Optional[ArrayLike] = None,
+              mask_nan: bool = True) -> Tuple[u.Quantity, Optional[u.Quantity]]:
+        """
+        Compute AB magnitudes for all bands.
+        """
+        self._require_interpolated()
+        n_phot, n_phot_err = self.get_photons(spectra, spectra_err=spectra_err,
+                                              mask_nan=mask_nan)
+        ratio = n_phot / self.norm_phot
+        mag = -2.5 * np.log10(ratio)
+
+        if n_phot_err is None:
+            return mag, None
+
+        mag_err = (2.5 / np.log(10)) * (n_phot_err / n_phot)
+        return mag, mag_err
+
+    def plot(self, add_props=False, ax=None, show=False):
+        """Plot the filters response curve.
+
+        Parameters
+        ----------
+        show: bool
+            If True
+        """
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+
+        for f in self.filters:
+            f.plot(ax=ax, add_props=add_props, show=False)
+
+        limits = self.wavelength_range()
+        ax.set_xlim(limits[0].value, limits[1].value)
+        if show:
+            plt.show()
+        else:
+            plt.close()
+        return fig, ax
 
 class EquivalentWidth(object):
     r"""Equivalent width of an spectral region.
