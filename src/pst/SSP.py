@@ -523,6 +523,382 @@ class SSPBase(object):
         """Return a copy of the SSP model."""
         return deepcopy(self)
 
+    def to_pickle(self, filename):
+        """Save the SSP model to a pickle file."""
+        import pickle
+        with open(filename, 'wb') as f:
+            pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    @classmethod
+    def from_pickle(cls, filename):
+        """Load an SSP model from a pickle file."""
+        import pickle
+        with open(filename, 'rb') as f:
+            ssp = pickle.load(f)
+        
+        if not isinstance(ssp, cls):
+            raise ValueError("Loaded object is not an instance of {}".format(cls.__name__))
+        return ssp
+
+
+class SSPwithCloudyGasModel(SSPBase):
+    """Mixin class for SSP models that include gas emission computed with Cloudy.
+    
+    The gas emission SED is expected to be in the same units as the stellar SED
+        (e.g. Lsun / Angstrom / Msun) and sampled in the same wavelength grid as the stellar SED.
+        
+    The model dimensions are `(log_u, metallicities, ages, wavelength)`.
+    """
+
+    def _expected_ssp_cube_shape(self):
+        return (self.metallicities.size, self.ages.size, self.wavelength.size)
+
+    def _validate_selected_cube_shape(self, value, name):
+        expected_shape = self._expected_ssp_cube_shape()
+        if value.shape != expected_shape:
+            raise ValueError(
+                f"{name} must have shape {expected_shape}; got {value.shape}")
+
+    def _validate_grid_shape(self, value, name):
+        expected_tail = self._expected_ssp_cube_shape()
+        if value.ndim != 4:
+            raise ValueError(
+                f"{name} must have 4 dimensions (log_u, metallicity, age, wavelength); got {value.ndim}")
+        if value.shape[1:] != expected_tail:
+            raise ValueError(
+                f"{name} must have shape (n_log_u, {expected_tail[0]}, {expected_tail[1]}, {expected_tail[2]}); got {value.shape}")
+        if self.log_u_array is not None and value.shape[0] != self.log_u_array.size:
+            raise ValueError(
+                f"{name} first dimension ({value.shape[0]}) must match log_u_array size ({self.log_u_array.size})")
+
+    def disable_gas_sed(self):
+        """Disable the gas emission SED of the Cloudy model."""
+        self._gas_L_lambda = None
+        self._transmission = None
+        # update _L_lambda to reflect the change
+        self._update_total_sed()
+
+    def enable_gas_sed(self):
+        """Enable the gas emission SED of the Cloudy model."""
+        if not self._has_gas_model():
+            raise ValueError(
+                "Gas model cannot be enabled because gas_L_lambda_grid, gas_transmission_grid and log_u_array are not all defined")
+        self._select_log_u_model(self.log_u)
+
+    def _has_gas_model(self):
+        return (self.gas_L_lambda_grid is not None
+                and self.gas_transmission_grid is not None
+                and self.log_u_array is not None)
+
+    def _update_total_sed(self):
+        if not hasattr(self, '_stellar_L_lambda'):
+            return
+
+        if self.gas_L_lambda is None or self.transmission is None:
+            self._L_lambda = self._stellar_L_lambda
+            return
+
+        self._validate_selected_cube_shape(self.gas_L_lambda, "gas_L_lambda")
+        self._validate_selected_cube_shape(self.transmission, "transmission")
+
+        self._L_lambda = self._stellar_L_lambda * self.transmission + self.gas_L_lambda
+
+    def _select_log_u_model(self, value):
+        if self.log_u_array is None or self.log_u_array.size == 0:
+            raise ValueError("log_u_array must be defined before selecting a gas model")
+
+        log_u_array = self.log_u_array
+        if value <= log_u_array[0]:
+            lower_idx = upper_idx = 0
+            weight = 0.0
+        elif value >= log_u_array[-1]:
+            lower_idx = upper_idx = log_u_array.size - 1
+            weight = 0.0
+        else:
+            upper_idx = np.searchsorted(log_u_array, value, side='right')
+            lower_idx = upper_idx - 1
+            delta = log_u_array[upper_idx] - log_u_array[lower_idx]
+            weight = ((value - log_u_array[lower_idx]) / delta).value
+
+        self._gas_L_lambda = (
+            self.gas_L_lambda_grid[lower_idx] * (1 - weight)
+            + self.gas_L_lambda_grid[upper_idx] * weight
+        )
+        self._transmission = (
+            self.gas_transmission_grid[lower_idx] * (1 - weight)
+            + self.gas_transmission_grid[upper_idx] * weight
+        )
+        self._update_total_sed()
+
+    def _regrid_cube(self, cube, age_bins, metallicity_bins):
+        new_cube = np.zeros((cube.shape[0], metallicity_bins.size, age_bins.size,
+                             cube.shape[-1])) * cube.unit
+        for k in range(cube.shape[0]):
+            for j, m_bin in enumerate(metallicity_bins):
+                for i, a_bin in enumerate(age_bins):
+                    weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
+                    new_cube[k, j, i] = np.sum(
+                        cube[k] * weights[:, :, np.newaxis] / u.Msun,
+                        axis=(0, 1))
+        return new_cube
+
+    def _interpolate_cube_wavelength(self, cube, new_wl, log=False,
+                                     conserve_flux=True, **interp_kwargs):
+        if log:
+            target_wl = np.log(new_wl.to_value(self.wavelength.unit))
+            ref_wl = np.log(self.wavelength.value)
+        else:
+            target_wl = new_wl
+            ref_wl = self.wavelength
+
+        new_cube = np.empty((*cube.shape[:-1], new_wl.size), dtype=np.float32) * cube.unit
+        for index in np.ndindex(cube.shape[:-1]):
+            if conserve_flux:
+                new_cube[index] = flux_conserving_interpolation(
+                    target_wl, ref_wl, cube[index], **interp_kwargs)
+            else:
+                new_cube[index] = np.interp(
+                    np.asarray(target_wl), np.asarray(ref_wl), cube[index].value,
+                    left=cube[index].value[0], right=cube[index].value[-1]) * cube.unit
+        return new_cube
+
+    @property
+    def include_lines(self):
+        """Return whether the SSP model includes emission lines."""
+        if hasattr(self, '_include_lines'):
+            return self._include_lines
+        else:
+            return None
+    
+    @include_lines.setter
+    def include_lines(self, value):
+        """Set whether the SSP model includes emission lines."""
+        if not isinstance(value, bool):
+            raise ValueError("include_lines must be a boolean value")
+        self._include_lines = value
+
+    @property
+    def log_u(self):
+        """Return the ionisation parameter of the SSP model."""
+        if hasattr(self, '_log_u'):
+            return self._log_u
+        else:
+            return None
+    
+    @log_u.setter
+    def log_u(self, value):
+        """Set the ionisation parameter of the SSP model."""
+        value = check_unit(value, u.dex(u.dimensionless_unscaled))
+        self._log_u = value
+        self._select_log_u_model(value)
+
+    @property
+    def log_u_array(self):
+        """Return the ionisation parameter array of the Cloudy model."""
+        if hasattr(self, '_log_u_array'):
+            return self._log_u_array
+        else:
+            return None
+
+    @log_u_array.setter
+    def log_u_array(self, value):
+        """Set the ionisation parameter array of the Cloudy model."""
+        value = check_unit(value, u.dex(u.dimensionless_unscaled))
+        if value.ndim != 1:
+            raise ValueError("log_u_array must be one-dimensional")
+        if value.size == 0:
+            raise ValueError("log_u_array cannot be empty")
+        if np.any(np.diff(value.value) <= 0):
+            raise ValueError("log_u_array must be strictly increasing")
+        if self.gas_L_lambda_grid is not None and self.gas_L_lambda_grid.shape[0] != value.size:
+            raise ValueError(
+                f"log_u_array size ({value.size}) must match gas_L_lambda_grid first dimension ({self.gas_L_lambda_grid.shape[0]})")
+        if self.gas_transmission_grid is not None and self.gas_transmission_grid.shape[0] != value.size:
+            raise ValueError(
+                f"log_u_array size ({value.size}) must match gas_transmission_grid first dimension ({self.gas_transmission_grid.shape[0]})")
+        self._log_u_array = value
+
+    @property
+    def gas_L_lambda_grid(self):
+        """Return the gas emission SED grid of the Cloudy model."""
+        if hasattr(self, '_gas_L_lambda_grid'):
+            return self._gas_L_lambda_grid
+        else:
+            return None
+    
+    @gas_L_lambda_grid.setter
+    def gas_L_lambda_grid(self, value):
+        """Set the gas emission SED grid of the Cloudy model."""
+        value = check_unit(value, self.stellar_L_lambda.unit)
+        self._validate_grid_shape(value, "gas_L_lambda_grid")
+
+        self._gas_L_lambda_grid = value
+
+    @property
+    def gas_transmission_grid(self):
+        """Return the gas transmission grid of the Cloudy model."""
+        if hasattr(self, '_gas_transmission_grid'):
+            return self._gas_transmission_grid
+        else:
+            return None
+
+    @gas_transmission_grid.setter
+    def gas_transmission_grid(self, value):
+        """Set the gas transmission grid of the Cloudy model."""
+        value = check_unit(value, u.dimensionless_unscaled)
+        self._validate_grid_shape(value, "gas_transmission_grid")
+
+        self._gas_transmission_grid = value
+
+    @property
+    def gas_L_lambda(self):
+        """Return the gas emission SED of the Cloudy model."""
+        if hasattr(self, '_gas_L_lambda'):
+            return self._gas_L_lambda
+        else:
+            return None
+
+    @property
+    def stellar_L_lambda(self):
+        """Return the stellar SED of the SSP model."""
+        if hasattr(self, '_stellar_L_lambda'):
+            return self._stellar_L_lambda
+        return None
+    
+    @stellar_L_lambda.setter
+    def stellar_L_lambda(self, value):
+        """Set the stellar SED of the SSP model."""
+        value = check_unit(value, u.Lsun / u.Angstrom / u.Msun)
+        self._stellar_L_lambda = value
+        self._update_total_sed()
+
+    @property
+    def transmission(self):
+        """Return the gas transmission of the Cloudy model."""
+        if hasattr(self, '_transmission'):
+            return self._transmission
+        else:
+            return None
+    
+    @transmission.setter
+    def transmission(self, value):
+        """Set the gas transmission of the Cloudy model."""
+        value = check_unit(value, u.dimensionless_unscaled)
+        self._validate_selected_cube_shape(value, "transmission")
+
+        self._transmission = value
+
+    @property
+    def L_lambda(self):
+        """Return the total SED of the SSP model, including both stellar and gas emission."""
+        if hasattr(self, '_L_lambda'):
+            return self._L_lambda
+        return self.stellar_L_lambda
+
+    @L_lambda.setter
+    def L_lambda(self, value):
+        """Set the stellar SED of the SSP model."""
+        self.stellar_L_lambda = value
+
+    def regrid(self, age_bins, metallicity_bins, verbose=True):
+        if verbose:
+            print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
+        age_bins = check_unit(age_bins, u.Gyr)
+        metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
+
+        new_stellar_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
+                                         self.wavelength.size)) * self.stellar_L_lambda.unit
+        if verbose:
+            print("New SSP SED shape: ", new_stellar_l_lambda.shape)
+        for j, m_bin in enumerate(metallicity_bins):
+            for i, a_bin in enumerate(age_bins):
+                weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
+                new_stellar_l_lambda[j, i] = np.sum(
+                    self.stellar_L_lambda * weights[:, :, np.newaxis] / u.Msun,
+                    axis=(0, 1))
+
+        if self._has_gas_model():
+            new_gas_l_lambda_grid = self._regrid_cube(
+                self.gas_L_lambda_grid, age_bins, metallicity_bins)
+            new_gas_transmission_grid = self._regrid_cube(
+                self.gas_transmission_grid, age_bins, metallicity_bins)
+
+        if verbose:
+            print("Updating SSP model metallicities, ages and SED")
+        self.metallicities = metallicity_bins
+        self.ages = age_bins
+        self._stellar_L_lambda = new_stellar_l_lambda
+
+        if self._has_gas_model():
+            self._gas_L_lambda_grid = new_gas_l_lambda_grid
+            self._gas_transmission_grid = new_gas_transmission_grid
+            self._select_log_u_model(self.log_u)
+        else:
+            self._update_total_sed()
+
+    def cut_wavelength(self, wl_min=None, wl_max=None, verbose=True):
+        if wl_min is None:
+            wl_min = self.wavelength[0]
+        else:
+            wl_min = check_unit(wl_min, self.wavelength.unit)
+        if wl_max is None:
+            wl_max = self.wavelength[-1]
+        else:
+            wl_max = check_unit(wl_max, self.wavelength.unit)
+
+        cut_pts = np.where((self.wavelength >= wl_min) &
+                           (self.wavelength <= wl_max))[0]
+        if len(cut_pts) == 0:
+            raise NameError(
+                'Wavelength cuts {}, {} out of range for array with lims {} {}'.format(
+                    wl_min, wl_max, self.wavelength.min(), self.wavelength.max()))
+
+        new_stellar_l_lambda = self.stellar_L_lambda[:, :, cut_pts]
+        if self._has_gas_model():
+            new_gas_l_lambda_grid = self.gas_L_lambda_grid[:, :, :, cut_pts]
+            new_gas_transmission_grid = self.gas_transmission_grid[:, :, :, cut_pts]
+        self.wavelength = self.wavelength[cut_pts]
+        self._stellar_L_lambda = new_stellar_l_lambda
+
+        if self._has_gas_model():
+            self._gas_L_lambda_grid = new_gas_l_lambda_grid
+            self._gas_transmission_grid = new_gas_transmission_grid
+            self._select_log_u_model(self.log_u)
+        else:
+            self._update_total_sed()
+
+        if verbose:
+            print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
+
+    def interpolate_sed(self, new_wl, verbose=True, log=False, **interp_kwargs):
+        new_wl = check_unit(new_wl, self.wavelength.unit)
+
+        if new_wl.size == self.wavelength.size and (
+            self.wavelength.value == new_wl.value).all():
+            print("[SSP] SSP already sampled in target wavelength grid")
+            return
+
+        if verbose:
+            print('[SSP] Interpolating SSP SEDs')
+
+        new_stellar_l_lambda = self._interpolate_cube_wavelength(
+            self.stellar_L_lambda, new_wl, log=log, **interp_kwargs)
+        if self._has_gas_model():
+            new_gas_l_lambda_grid = self._interpolate_cube_wavelength(
+                self.gas_L_lambda_grid, new_wl, log=log, **interp_kwargs)
+            new_gas_transmission_grid = self._interpolate_cube_wavelength(
+                self.gas_transmission_grid, new_wl, log=log,
+                conserve_flux=False, **interp_kwargs)
+        self.wavelength = new_wl
+        self._stellar_L_lambda = new_stellar_l_lambda
+
+        if self._has_gas_model():
+            self._gas_L_lambda_grid = new_gas_l_lambda_grid
+            self._gas_transmission_grid = new_gas_transmission_grid
+            self._select_log_u_model(self.log_u)
+        else:
+            self._update_total_sed()
+
 
 class PopStar(SSPBase):
     """
@@ -1044,7 +1420,7 @@ class BC03_2013(SSPBase):
         return imf, key
 
 
-class BC03_2016(SSPBase):
+class BC03_2016(SSPwithCloudyGasModel):
     """
     BC03 SSP models (Bruzual & Charlot 2003, 2016 updated version).
 
@@ -1138,13 +1514,13 @@ class BC03_2016(SSPBase):
     'm62': 0.02,
     'm72': 0.05,
     'm82': 0.1}
-    
+
     # Wavelength resolution corresponding to each atmospheric library
     _resolution = {'BaSeL': 'lr', 'stelib': 'hr', 'xmiless': 'hr'}
     isochrone = "PARSEC2012"
 
     def __init__(self, model='BaSeL', imf='Kroupa', path=None, load_properties=True,
-                 verbose=True) -> None:
+                 gas_emission=False, log_u=-2.0, verbose=True) -> None:
         
         self.stellar_library, model_key = self._parse_model(model)
         self.imf, imf_key = self._parse_imf(imf)
@@ -1189,12 +1565,12 @@ class BC03_2016(SSPBase):
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value << u.angstrom
-                self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
+                self.stellar_L_lambda = np.zeros((self.metallicities.size, self.ages.size,
                                           self.wavelength.size))  << u.Lsun / u.Angstrom / u.Msun
                 load_wavelength = True
             table.remove_column("wavelength")
             for j, column in enumerate(table.itercols()):
-                self.L_lambda[i, j] = column.value << self.L_lambda.unit
+                self.stellar_L_lambda[i, j] = column.value << self.stellar_L_lambda.unit
             
             if load_properties:
                 # Load the mass return fractions and SNR from the properties file
@@ -1232,6 +1608,27 @@ class BC03_2016(SSPBase):
         self.log_ionising_HeI_photons = log_q_hei
         self.log_ionising_HeII_photons = log_q_heii
         self.supernova_rate = snr
+
+        # Setup gas emission
+        if gas_emission:
+            if verbose:
+                print("Setting up gas emission for BC03_2016...")
+            self._setup_gas_emission(model_key, log_u=log_u)
+
+    def _setup_gas_emission(self, model_key, log_u=-2.0):
+        path = os.path.join(
+            self.path,
+            f"cloudy_{model_key.lower()}_{self.imf.lower()}.fits")
+        
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Required Cloudy gas emission file not found: {path}")
+
+        with fits.open(path) as hdul:
+            transmission = hdul["TRANS"].data
+            self.gas_transmission_grid = transmission
+            self.gas_L_lambda_grid = hdul["TOTAL"].data
+            self.log_u_array = hdul["LOGU"].data
+        self.log_u = log_u
 
     def _parse_model(self, model):
         if 'basel' in model.lower():
