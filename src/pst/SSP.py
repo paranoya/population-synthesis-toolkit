@@ -583,6 +583,9 @@ class SSPwithCloudyGasModel(SSPBase):
         if not self._has_gas_model():
             raise ValueError(
                 "Gas model cannot be enabled because gas_L_lambda_grid, gas_transmission_grid and log_u_array are not all defined")
+        if self.log_u is None:
+            raise ValueError(
+                "Gas model cannot be enabled because log_u is not defined")
         self._select_log_u_model(self.log_u)
 
     def _has_gas_model(self):
