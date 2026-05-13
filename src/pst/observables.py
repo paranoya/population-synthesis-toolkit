@@ -71,7 +71,7 @@ def download_svo_filter(name: str, dest_dir: str, verbose=True, retry=3):
         os.makedirs(dest_dir)  # create folder if it does not exist
     name = name.strip(".dat")
     base_url="http://svo2.cab.inta-csic.es/theory/fps/getdata.php?format=ascii&id="
-    url = base_url + name.replace("_", "/")
+    url = base_url + name.replace("_", "/", 1) # replace first underscore with slash to match SVO URL structure
     filename = name + ".dat"
     file_path = os.path.join(dest_dir, filename)
     if verbose:

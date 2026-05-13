@@ -1488,6 +1488,32 @@ class TabularCEM(ChemicalEvolutionModel):
         return integral
 
     @_check_time_dec
+    def sfr(self, times: u.Quantity):
+        r"""Evaluate the SFR at a given set of times.
+        
+        Description
+        -----------
+        This method evaluates the SFR at each input time by taking the derivative
+        of the cumulative mass history.
+
+        Parameters
+        ----------
+        times : :class:`astropy.units.Quantity`
+            Array of cosmic times at which the SFR will be evaluated.
+
+        Returns
+        -------
+        sfr : :class:`astropy.units.Quantity`
+            The star formation rate at each input time.
+        """
+        interpolator = interpolate.PchipInterpolator(
+           self.table_t.value, self.table_mass.value)
+        sfr = interpolator(times.to_value(self.table_t.unit), nu=1) << (self.table_mass.unit / self.table_t.unit)
+        sfr[times > self.table_t[-1]] = 0
+        sfr[times < self.table_t[0]] = 0
+        return sfr
+
+    @_check_time_dec
     def ism_metallicity(self, times: u.Quantity):
         """Evaluate the integral of the SFR over a given set of times.
         
