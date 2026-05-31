@@ -16,10 +16,11 @@ import requests
 import json
 from matplotlib import pyplot as plt
 
-from pst.utils import check_unit, flux_conserving_interpolation
+from pst.utils import check_unit, flux_conserving_interpolation, trapz
 
 ArrayLike = Union[np.ndarray, u.Quantity]
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
 
 def list_of_available_filters():
     """List the currently available filters in the default directory."""
@@ -365,12 +366,12 @@ class Filter(object):
 
         if mask_nan:
             mask = np.isfinite(spectra)
-            photon_flux = np.trapz(
+            photon_flux = trapz(
                 spectra[mask] / (constants.h * constants.c / self.wavelength[mask]
                                    ) * self.response[mask],
                 x=self.wavelength[mask])
         else:
-            photon_flux = np.trapz(
+            photon_flux = trapz(
                 spectra / (constants.h * constants.c / self.wavelength
                                    ) * self.response,
                 x=self.wavelength)
@@ -385,7 +386,7 @@ class Filter(object):
             else:
                 mask = np.ones_like(spectra_err, dtype=bool)
 
-            photon_flux_err = np.trapz(
+            photon_flux_err = trapz(
                 spectra_err[mask] / (constants.h * constants.c / self.wavelength[mask]
                                        ) * self.response[mask],
                 x=self.wavelength[mask])
@@ -497,8 +498,8 @@ class Filter(object):
         else:
             mask = np.ones_like(spectra, dtype=bool)
 
-        f_lambda = np.trapz(spectra[mask] * self.wavelength[mask] * self.response[mask], x=self.wavelength[mask]
-                               ) / np.trapz(self.response[mask] * self.wavelength[mask], x=self.wavelength[mask])
+        f_lambda = trapz(spectra[mask] * self.wavelength[mask] * self.response[mask], x=self.wavelength[mask]
+                               ) / trapz(self.response[mask] * self.wavelength[mask], x=self.wavelength[mask])
 
         if spectra_err is not None:
 
@@ -509,7 +510,7 @@ class Filter(object):
             else:
                 mask = np.ones_like(spectra_err, dtype=bool)
 
-            f_lambda_err = np.trapz(
+            f_lambda_err = trapz(
             spectra_err[mask] / (constants.h * constants.c / self.wavelength[mask]
                                    ) * self.response[mask],
             x=self.wavelength[mask])

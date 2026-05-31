@@ -7,7 +7,7 @@ import numpy as np
 from astropy import units as u
 from astropy import constants as const
 
-from pst.utils import flux_conserving_interpolation
+from pst.utils import flux_conserving_interpolation, trapz
 from pst.model import ModelBase
 from pst.SSP import SSPBase
 from pst.cem import ChemicalEvolutionModel
@@ -56,7 +56,7 @@ class SedComponent(ModelBase, ABC):
             mask &= (wavelength >= wl_min)
         if wl_max is not None:
             mask &= (wavelength <= wl_max)
-        return np.trapz(sed[mask].value, wavelength[mask].value) << (sed.unit * wavelength.unit)
+        return trapz(sed[mask].value, wavelength[mask].value) << (sed.unit * wavelength.unit)
 
     @classmethod
     def q_ionising_photons(cls, wavelength, sed):

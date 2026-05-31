@@ -9,7 +9,7 @@ from astropy.table import Table
 from astropy import units as u
 from astropy import units
 from astropy import constants
-from pst.utils import check_unit, flux_conserving_interpolation
+from pst.utils import check_unit, flux_conserving_interpolation, trapz
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
@@ -480,7 +480,7 @@ class SSPBase(object):
 
         for i in range(self.metallicities.size):
             for j in range(self.ages.size):
-                photon_rate[i, j] = np.trapz(q_lambda[i, j], self.wavelength[pts])
+                photon_rate[i, j] = trapz(q_lambda[i, j], self.wavelength[pts])
 
         if species == 'HI':
             self.log_ionising_HI_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
