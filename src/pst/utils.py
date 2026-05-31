@@ -11,6 +11,12 @@ from pst.model import Parameter
 
 SQRT_2 = np.sqrt(2)
 
+if int(np.__version__.split(".")[0]) > 1:
+    trapz = np.trapezoid
+else:
+    trapz = np.trapz
+
+
 def _const_interp_cumflux(edges_out, edges_in, f_centers_seg):
     """
     Interpolate the cumulative integrated flux assuming constant
