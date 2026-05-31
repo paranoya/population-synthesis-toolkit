@@ -44,6 +44,7 @@ def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, keep_emission=False, **kwargs_atlas):
         atlas = atlas[atlas["catalog"] != "Emission"]
     return atlas
 
+
 def list_of_available_filters():
     """List the currently available filters in the default directory."""
     filter_dir = os.path.join(PST_DATA_DIR, "filters")
