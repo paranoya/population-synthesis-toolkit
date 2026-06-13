@@ -32,7 +32,7 @@ class SSPBase(object):
     wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
     """
-    default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
+    default_path = os.getenv("PST_SSP_DIR", os.path.join(os.path.dirname(__file__), "data", "ssp"))
 
     @property
     def name(self):
