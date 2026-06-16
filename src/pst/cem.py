@@ -114,7 +114,10 @@ class MassPropMetallicityMixin:
         return np.clip(
 		self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),                1e-6 << u.dimensionless_unscaled, None)
 
-    
+    def mean_stellar_metallicity(self, ssp, t_obs):
+        """TODO"""
+        return self.ism_metallicity(t_obs) / (1 + self.alpha_powerlaw)
+
 def sfh_quenching_decorator(stellar_mass_formed):
     """
     Decorator that enforces a hard quenching event in a cumulative SFH.
@@ -527,6 +530,12 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             return 10 ** (np.sum(weights * age) / np.sum(weights)) << u.Gyr
         else:
             return np.sum(weights * age) / np.sum(weights) << u.Gyr
+
+    def mean_stellar_metallicity(self, ssp: SSPBase, t_obs: u.Quantity):
+        """TODO"""
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        mean_metals = np.nansum(ssp.metallicity[:, None] * weights) / np.nansum(weights)
+        return mean_metals
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
         b = np.arange(nbin)[None, :]
