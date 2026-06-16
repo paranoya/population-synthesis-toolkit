@@ -111,7 +111,8 @@ class MassPropMetallicityMixin:
             time. Shape matches ``times``.
         """
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose()
+        return np.clip(
+		self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),                1e-6 << u.dimensionless_unscaled, None)
 
     
 def sfh_quenching_decorator(stellar_mass_formed):
