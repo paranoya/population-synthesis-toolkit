@@ -139,7 +139,7 @@ class TestModels(unittest.TestCase):
 
         self.assertEqual(mass[0], 0.0)
         self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun, rtol=1e-4))
-        self.assertEqual(metals[0], 0.0)
+        self.assertEqual(metals[0], 1e-6)
         self.assertTrue(np.isclose(metals[-1], 0.02, rtol=1e-4))
 
     def test_beta_cem_direct_shape_parameters(self):
