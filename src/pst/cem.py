@@ -1304,9 +1304,6 @@ class BetaCEM(ChemicalEvolutionModel):
         x = (t - t0) / (t1 - t0)
         return np.clip(x, 0.0, 1.0)
 
-    # -----------------------------------------------------------------
-    # CEM API
-    # -----------------------------------------------------------------
     @_check_time_dec
     def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
         """
@@ -1362,6 +1359,33 @@ class BetaCEM(ChemicalEvolutionModel):
             x_peak = (self._alpha - 1.0) / (self._alpha + self._beta - 2.0)
             return t0 + x_peak * dt
         return None
+
+
+class BetaZPowerLawCEM(MassPropMetallicityMixin, BetaCEM):
+    """A :class:`BetaCEM` with a Mass-dependent Metallicity chemical model.
+    
+    See also
+    --------
+    :class:`MassPropMetallicityMixin`
+    """
+    name = "beta_zpowlaw_cem"
+
+    def __init__(
+        self,
+        *,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        alpha_powerlaw: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled,
+        **kwargs,
+    ):
+        super().__init__(ism_metallicity_today=ism_metallicity_today, **kwargs)
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled,
+            doc="Metallicity of stars born at present",
+        )
+        self.alpha_powerlaw = check_parameter(
+            alpha_powerlaw, u.dimensionless_unscaled,
+            doc="Metallicity evolution power-law exponent",
+        )
 
 
 class TabularCEM(ChemicalEvolutionModel):
