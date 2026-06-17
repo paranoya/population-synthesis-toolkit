@@ -306,6 +306,20 @@ class TestModels(unittest.TestCase):
         tf = model.time_at_stellar_mass_frac([0.1, 0.5, 0.9], time_res=0.05 * u.Gyr)
         self.assertTrue(np.all(np.diff(tf.to_value(u.Gyr)) > 0))
 
+    def test_average_ssfr_over_tau_uses_lookback_interval(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+
+        ssfr = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=2.0 * u.Gyr)
+        expected = ((10.0 - 8.0) / 10.0 / (2.0 * u.Gyr)).to(1 / u.yr)
+
+        self.assertTrue(u.isclose(ssfr, expected))
+
+        with self.assertRaises(ValueError):
+            _ = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=0.0 * u.Gyr)
+
+        with self.assertRaises(ValueError):
+            _ = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=11.0 * u.Gyr)
+
     def test_compute_photometry_ndarray_and_age_bins(self):
         model = models.ExponentialDelayedCEM(
             tau=3.0 * u.Gyr,

@@ -497,6 +497,36 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         t_frac = (dummy_time[idx - 1] * (1 - w) + dummy_time[idx] * w)
         return t_frac
 
+    def average_ssfr_over_tau(self, t_obs: u.Quantity, tau: u.Quantity):
+        """
+        Average specific star formation rate (sSFR) over a timescale tau at an observing time.
+
+        This method computes the average sSFR over the interval [t_obs - tau, t_obs] as:
+        .. math::
+
+            \\langle \\mathrm{sSFR} \\rangle_\\tau = \\frac{M_\\star(t_{\\mathrm{obs}}) - M_\\star(t_{\\mathrm{obs}} - \\tau)}{M_\\star(t_{\\mathrm{obs}}) \\cdot \\tau}
+        
+        Parameters
+        ----------
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation.
+        tau : :class:`astropy.units.Quantity`
+            Timescale over which to average the sSFR. Must be positive and less than or equal to ``t_obs``.
+
+        Returns
+        -------
+        avg_ssfr : :class:`astropy.units.Quantity`
+            Average specific star formation rate over the past tau at t_obs. Units are 1/yr.
+        """
+        if tau <= 0:
+            raise ValueError("tau must be positive.")
+        if tau > t_obs:
+            raise ValueError("tau cannot be greater than t_obs.")
+
+        mass = self.stellar_mass_formed([t_obs - tau, t_obs])
+        avg_ssfr = (mass[1] - mass[0]) / mass[1] / tau.to(u.yr)
+        return avg_ssfr
+
     def mean_stellar_age(self, ssp: SSPBase, t_obs: u.Quantity,
                          log: bool=False, surviving_mass: bool=False):
         """
