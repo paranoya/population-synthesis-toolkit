@@ -21,7 +21,23 @@ from pst.utils import check_unit, flux_conserving_interpolation, trapz
 
 ArrayLike = Union[np.ndarray, u.Quantity]
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-DEFAULT_ATLAS = os.path.join(PST_DATA_DIR, "lick", "atlas_spectral_indices.csv")
+DEFAULT_EW_ATLAS = os.path.join(PST_DATA_DIR, "lick", "atlas_spectral_indices.csv")
+
+def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
+    """Load the built-in equivalent-width atlas.
+
+    Parameters
+    ----------
+    atlas : str
+        Path to the atlas file.
+
+    Returns
+    -------
+    table : astropy.table.Table
+        Table containing the equivalent-width indices.
+    """
+    return ascii.read(atlas, **kwargs_atlas)
+
 
 def list_of_available_filters():
     """List the currently available filters in the default directory."""
@@ -1156,7 +1172,7 @@ class EquivalentWidth(object):
                                     f"associated to input name {name}")
 
     @classmethod
-    def from_atlas(cls, name, atlas=DEFAULT_ATLAS, **kwargs_atlas):
+    def from_atlas(cls, name, atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
         """Load a :class:`EquivalentWidth` from an atlas file.
         
         Parameters
@@ -1169,7 +1185,7 @@ class EquivalentWidth(object):
         ew : :class:`EquivalentWidth`
         """
         # Load the atlas file
-        atlas = ascii.read(atlas, **kwargs_atlas)
+        atlas = _load_ew_atlas(atlas, **kwargs_atlas)
         position = name == np.asarray(atlas["name"]).astype(str)
         if not np.any(position):
             raise ValueError(f"Index {name} not found in atlas {atlas}")
@@ -1201,7 +1217,7 @@ class EquivalentWidthList(object):
         return cls([EquivalentWidth.from_name(name) for name in names])
 
     @classmethod
-    def from_atlas(cls, names, atlas=DEFAULT_ATLAS, **kwargs_atlas):
+    def from_atlas(cls, names, atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
         """Build a list from index names in an atlas table."""
         return cls(
             [EquivalentWidth.from_atlas(name, atlas=atlas, **kwargs_atlas) for name in names],
@@ -1262,9 +1278,10 @@ class EquivalentWidthList(object):
 
         return ew, ew_err
 
+
 def show_available_equivalent_widths():
     """Print the list of available equivalent-width indices in the built-in atlas."""
-    atlas = ascii.read(DEFAULT_ATLAS)
+    atlas = _load_ew_atlas()
     print("Available equivalent-width indices:")
     for row in atlas:
         print(f" - name: {row['name']}, left_wl_range: ({row['left_wl_begin']}, {row['left_wl_end']}), right_wl_range: ({row['right_wl_begin']}, {row['right_wl_end']}), central_wl_range: ({row['central_wl_begin']}, {row['central_wl_end']})")
