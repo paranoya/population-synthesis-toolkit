@@ -10,3 +10,5 @@ In this directory you can find some pratical use cases to get you up to speed!
     - A set of individual simple stellar populations (referred to as "[particles](./models/particles.ipynb)") can be combined using `ParticleListCEM`.
 
 - There is also a tutorial showing how to generate a [grid of photometric fluxes](./observables/create_a_photometric_grid.ipynb) from a given model, including the effects of redshift, and dust attenuation.
+
+- A dedicated tutorial on computing [equivalent widths from PopStar SSP spectra](./observables/equivalent_width_popstar.ipynb) is available in the observables directory.
