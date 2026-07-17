@@ -408,8 +408,15 @@ Equivalent Width Measurements
 -----------------------------
 
 :class:`pst.observables.EquivalentWidth` measures line indices from a spectrum
-using a left pseudo-continuum window, a central feature window, and a right
-pseudo-continuum window.
+using a pseudo-continuum defined by two spectral windows, and a central feature window.
+The equivalent width is defined as:
+
+.. math::
+
+     EW = \int_{\lambda_1}^{\lambda_2} \left(1 - \frac{F_\lambda(\lambda)}{F_{\rm cont}(\lambda)}\right) d\lambda~~[\mathring{\text{A}}^{-1}]
+
+where :math:`F_{\rm cont}` is the pseudo-continuum interpolated between the
+blue and red side bands.
 
 .. code-block:: python
 
@@ -427,9 +434,48 @@ pseudo-continuum window.
              spectra_err=0.01 * sed,
      )
 
-Equivalent-width measurements can be applied to both SSP spectra and composite
-galaxy spectra, which makes them convenient for model-data comparisons in mixed
-spectroscopic and photometric analyses.
+For repeated measurements, you can group several indices with
+:class:`pst.observables.EquivalentWidthList` and evaluate them in one call:
+
+.. code-block:: python
+
+     from pst.observables import EquivalentWidthList
+
+     indices = EquivalentWidthList.from_atlas(["Mg1", "TiO2"])
+     ew_values, ew_errors = indices.compute_ew(
+             wavelength=ssp.wavelength,
+             spectra=sed,
+             spectra_err=0.01 * sed,
+     )
+
+Flux Ratios and the D4000 Break
+-------------------------------
+
+:class:`pst.observables.FluxRatio` measures the ratio between the mean flux in a
+red window and the mean flux in a blue window,
+
+.. math::
+
+     R = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+The :class:`pst.observables.D4000Index` class implements the Balmer 4000-Angstrom break using:
+
+- blue window: 3750-3950 Angstrom
+- red window: 4050-4250 Angstrom
+
+.. code-block:: python
+
+     from pst.observables import D4000Index
+
+     d4000 = D4000Index()
+     d4000_value, d4000_err = d4000.compute_flux_ratio(
+             wavelength=ssp.wavelength,
+             spectra=sed,
+             spectra_err=0.01 * sed,
+     )
+
+Like equivalent widths, flux-ratio diagnostics can be measured on individual
+SSP spectra or on composite stellar-population and galaxy spectra.
 
 Choosing a Workflow
 ===================
