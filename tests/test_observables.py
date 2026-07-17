@@ -1,5 +1,6 @@
 import unittest
 import os
+import tempfile
 import numpy as np
 from astropy import units as u
 from astropy import constants
@@ -193,6 +194,56 @@ class TestObservables(unittest.TestCase):
         self.assertTrue(np.allclose(hb.left_wl_range.value, [4828.875, 4848.875]))
         self.assertTrue(np.allclose(hb.central_wl_range.value, [4848.875, 4877.625]))
         self.assertTrue(np.allclose(hb.right_wl_range.value, [4877.625, 4892.625]))
+
+    def test_flux_ratio_basic_and_uncertainty(self):
+        wavelength = np.linspace(3900.0, 4300.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * 5.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0), name="flat_ratio")
+
+        ratio, ratio_err = fr.compute_flux_ratio(
+            wavelength,
+            spectra,
+            spectra_err=0.1 * spectra,
+        )
+
+        self.assertTrue(np.isclose(ratio, 1.0))
+        self.assertTrue(np.isfinite(ratio_err))
+        self.assertTrue(ratio_err > 0)
+
+    def test_flux_ratio_shape_consistency(self):
+        wavelength = np.linspace(3900.0, 4300.0, 2000) * u.angstrom
+        base = np.ones(wavelength.size) * 2.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0))
+
+        ratio_1d, _ = fr.compute_flux_ratio(wavelength, base)
+        ratio_2d, _ = fr.compute_flux_ratio(wavelength, base[:, np.newaxis])
+
+        self.assertTrue(np.isclose(ratio_1d, ratio_2d[0]))
+
+    def test_flux_ratio_json_roundtrip(self):
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0), name="test_fr")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "flux_ratio.json")
+            fr.to_json(path)
+            fr2 = observables.FluxRatio.from_json(path)
+
+        self.assertEqual(fr2.name, fr.name)
+        self.assertTrue(np.allclose(fr2.red_wl_range.value, fr.red_wl_range.value))
+        self.assertTrue(np.allclose(fr2.blue_wl_range.value, fr.blue_wl_range.value))
+
+    def test_d4000_index(self):
+        wavelength = np.linspace(3600.0, 4400.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * u.erg / (u.s * u.cm**2 * u.angstrom)
+        d4000 = observables.D4000Index()
+        value, _ = d4000.compute_flux_ratio(wavelength, spectra)
+        self.assertTrue(np.isclose(value, 1.0))
+
+    def test_hk_index(self):
+        wavelength = np.linspace(3600.0, 4400.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * u.erg / (u.s * u.cm**2 * u.angstrom)
+        hk = observables.HKIndex()
+        value, _ = hk.compute_flux_ratio(wavelength, spectra)
+        self.assertTrue(np.isclose(value, 1.0))
 
 
 class TestEquivalentWidthList(unittest.TestCase):
