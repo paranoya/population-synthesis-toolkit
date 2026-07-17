@@ -873,7 +873,7 @@ class EquivalentWidth(object):
     >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
     >>> ew_value, ew_err = ew.compute_ew(wavelength, spectra)
     """
-    def __init__(self, left_wl_range, central_wl_range, right_wl_range, name=None):
+    def __init__(self, left_wl_range, central_wl_range, right_wl_range, name=""):
         self.left_wl_range = np.array(left_wl_range)
         self.central_wl_range = np.array(central_wl_range)
         self.right_wl_range = np.array(right_wl_range)
@@ -1088,6 +1088,9 @@ class EquivalentWidth(object):
                     label="Central band")
         ax.axvspan(self.right_wl_range[0].value, self.right_wl_range[1].value, color='red', alpha=0.3,
                     label="Right continuum")
+        ax.annotate(f"{self.name} EW = {ew:.2f} ± {ew_err:.2f}", xy=(0.05, 0.95), xycoords='axes fraction',
+                    fontsize=12, ha='left', va='top',
+                    bbox=dict(boxstyle="round", fc="w", ec="0.5", alpha=0.9))
         ax.set_xlabel(f"Wavelength ({wavelength.unit})")
         ax.set_ylabel(f"Spectra ({spectra.unit})")
         ax.set_xlim(self.left_wl_range[0].value - 10, self.right_wl_range[1].value + 10)
@@ -1265,3 +1268,237 @@ def show_available_equivalent_widths():
     print("Available equivalent-width indices:")
     for row in atlas:
         print(f" - name: {row['name']}, left_wl_range: ({row['left_wl_begin']}, {row['left_wl_end']}), right_wl_range: ({row['right_wl_begin']}, {row['right_wl_end']}), central_wl_range: ({row['central_wl_begin']}, {row['central_wl_end']})")
+
+class FluxRatio(object):
+    r"""Flux ratio between two spectral regions.
+
+    Description
+    -----------
+    Given a stellar spectra :math:`F_\lambda`, the flux ratio is defined as the
+    ratio of the average flux in two spectral regions, defined by their wavelength
+    ranges. It is computed as:
+
+    .. math::
+        R = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where :math:`\langle F_\lambda \rangle` is the average flux in the
+    specified spectral region.
+
+    Example
+    -------
+    >>> from pst.observables import FluxRatio
+    >>> fr = FluxRatio(red_wl_range=(4000, 4100),
+    ...                blue_wl_range=(4200, 4300))
+    >>> wavelength = np.linspace(3900, 4400, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> fr_value, fr_err = fr.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self, blue_wl_range=None, red_wl_range=None, name=None,
+                 region1_wl_range=None, region2_wl_range=None):
+        # Backward compatibility with previous argument names.
+        if red_wl_range is None and region1_wl_range is not None:
+            red_wl_range = region1_wl_range
+        if blue_wl_range is None and region2_wl_range is not None:
+            blue_wl_range = region2_wl_range
+
+        if red_wl_range is None or blue_wl_range is None:
+            raise ValueError("Both red_wl_range and blue_wl_range must be provided")
+
+        self.red_wl_range = np.array(red_wl_range)
+        self.blue_wl_range = np.array(blue_wl_range)
+        self.name = name
+
+    @property
+    def red_wl_range(self) -> u.Quantity:
+        """Spectral window used for the numerator average flux."""
+        return self._red_wl_range
+
+    @red_wl_range.setter
+    def red_wl_range(self, value):
+        if not isinstance(value, u.Quantity):
+            self._red_wl_range = value * u.angstrom
+        else:
+            self._red_wl_range = value
+
+    @property
+    def blue_wl_range(self) -> u.Quantity:
+        """Spectral window used for the denominator average flux."""
+        return self._blue_wl_range
+
+    @blue_wl_range.setter
+    def blue_wl_range(self, value):
+        if not isinstance(value, u.Quantity):
+            self._blue_wl_range = value * u.angstrom
+        else:
+            self._blue_wl_range = value
+
+    @property
+    def region1_wl_range(self) -> u.Quantity:
+        """Backward compatible alias for ``red_wl_range``."""
+        return self.red_wl_range
+
+    @region1_wl_range.setter
+    def region1_wl_range(self, value):
+        self.red_wl_range = value
+
+    @property
+    def region2_wl_range(self) -> u.Quantity:
+        """Backward compatible alias for ``blue_wl_range``."""
+        return self.blue_wl_range
+
+    @region2_wl_range.setter
+    def region2_wl_range(self, value):
+        self.blue_wl_range = value
+
+    def compute_flux_ratio(self, wavelength, spectra, spectra_err=None):
+        """Compute the flux ratio between two spectral windows.
+
+        Parameters
+        ----------
+        wavelength : array or Quantity
+            Wavelength grid associated with ``spectra``.
+        spectra : array or Quantity
+            Input spectra with shape ``(n_wave, ...)``.
+        spectra_err : array or Quantity, optional
+            Uncertainty array with same shape as ``spectra``.
+
+        Returns
+        -------
+        ratio : Quantity or ndarray
+            Flux ratio with shape ``...``.
+        ratio_err : Quantity or ndarray or float
+            Flux-ratio uncertainty with shape ``...`` if ``spectra_err`` is
+            provided, otherwise ``np.nan``.
+        """
+        wl = check_unit(wavelength, u.angstrom)
+        if wl.ndim != 1:
+            raise ValueError("wavelength must be 1D")
+        if spectra.shape[0] != wl.size:
+            raise ValueError("spectra first axis must match wavelength size")
+
+        red_mask = ((wl >= self.red_wl_range[0])
+                    & (wl <= self.red_wl_range[1]))
+        blue_mask = ((wl >= self.blue_wl_range[0])
+                     & (wl <= self.blue_wl_range[1]))
+
+        if not np.any(red_mask):
+            raise ValueError("red_wl_range does not overlap wavelength grid")
+        if not np.any(blue_mask):
+            raise ValueError("blue_wl_range does not overlap wavelength grid")
+
+        original_shape = spectra.shape[1:] if spectra.ndim > 1 else ()
+        spectra_2d = spectra.reshape(wl.size, -1)
+
+        flux_red = np.nanmean(spectra_2d[red_mask, :], axis=0)
+        flux_blue = np.nanmean(spectra_2d[blue_mask, :], axis=0)
+        ratio = flux_red / flux_blue
+
+        if spectra_err is None:
+            ratio_err = np.nan
+        else:
+            if spectra_err.shape != spectra.shape:
+                raise ValueError("spectra_err must have the same shape as spectra")
+
+            spectra_err_2d = spectra_err.reshape(wl.size, -1)
+            red_var_samples = spectra_err_2d[red_mask, :] ** 2
+            blue_var_samples = spectra_err_2d[blue_mask, :] ** 2
+
+            n_red = np.sum(np.isfinite(red_var_samples), axis=0)
+            n_blue = np.sum(np.isfinite(blue_var_samples), axis=0)
+
+            flux_red_var = np.where(
+                n_red > 0,
+                np.nansum(red_var_samples, axis=0) / n_red**2,
+                np.nan,
+            )
+            flux_blue_var = np.where(
+                n_blue > 0,
+                np.nansum(blue_var_samples, axis=0) / n_blue**2,
+                np.nan,
+            )
+
+            ratio_var = ratio**2 * (flux_red_var / flux_red**2 + flux_blue_var / flux_blue**2)
+            ratio_err = np.sqrt(ratio_var)
+
+        if original_shape == ():
+            ratio = ratio[0]
+            if spectra_err is not None:
+                ratio_err = ratio_err[0]
+        else:
+            ratio = ratio.reshape(original_shape)
+            if spectra_err is not None:
+                ratio_err = ratio_err.reshape(original_shape)
+
+        return ratio, ratio_err
+
+    def to_json(self, path):
+        """Save the :class:`FluxRatio` definition to a JSON file."""
+        data = {
+            "red_wl_range": self.red_wl_range.value.tolist(),
+            "blue_wl_range": self.blue_wl_range.value.tolist(),
+            "name": self.name,
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=4)
+
+    @classmethod
+    def from_json(cls, path):
+        """Load a :class:`FluxRatio` from a JSON file."""
+        with open(path, "r") as f:
+            data = json.load(f)
+        # Backward compatibility with old JSON keys.
+        if "region1_wl_range" in data and "red_wl_range" not in data:
+            data["red_wl_range"] = data.pop("region1_wl_range")
+        if "region2_wl_range" in data and "blue_wl_range" not in data:
+            data["blue_wl_range"] = data.pop("region2_wl_range")
+        return cls(**data)
+
+class D4000Index(FluxRatio):
+    r"""D4000 index, a specific flux ratio between two spectral regions.
+
+    Description
+    -----------
+    The D4000 index is defined as the ratio of the average flux in the red and blue
+    spectral regions around 4000 Angstroms. It is computed as:
+
+    .. math::
+        D4000 = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where the blue region is defined by :math:`3750-3950` Angstroms and the red
+    region by :math:`4050-4250` Angstroms.
+
+    Example
+    -------
+    >>> from pst.observables import D4000Index
+    >>> d4000 = D4000Index()
+    >>> wavelength = np.linspace(3800, 4200, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> d4000_value, d4000_err = d4000.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self):
+        super().__init__(red_wl_range=(4050, 4250), blue_wl_range=(3750, 3950), name="D4000")
+
+class HKIndex(FluxRatio):
+    r"""HK index, a specific flux ratio between two spectral regions.
+
+    Description
+    -----------
+    The HK index is defined as the ratio of the average flux in the red and blue
+    spectral regions around 4000 Angstroms. It is computed as:
+
+    .. math::
+        HK = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where the blue region is defined by :math:`3920-3945` Angstroms and the red
+    region by :math:`3955-3980` Angstroms.
+
+    Example
+    -------
+    >>> from pst.observables import HKIndex
+    >>> hk = HKIndex()
+    >>> wavelength = np.linspace(3800, 4200, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> hk_value, hk_err = hk.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self):
+        super().__init__(red_wl_range=(3955., 3980.), blue_wl_range=(3920, 3945.), name="HK")
