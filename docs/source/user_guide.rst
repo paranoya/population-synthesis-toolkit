@@ -53,6 +53,46 @@ BC03, XSL, and EMILES.
 
      ssp = PopStar(IMF="cha")
 
+Where to store SSP data
+^^^^^^^^^^^^^^^^^^^^^^^
+
+PST resolves SSP data paths in this order:
+
+1. Explicit path at instantiation (highest priority).
+2. The environment variable ``PST_SSP_DIR``.
+3. The package fallback directory ``src/pst/data/ssp`` (via ``SSPBase.default_path``).
+
+You can inspect the effective base directory with:
+
+.. code-block:: python
+
+     from pst.SSP import SSPBase
+     print(SSPBase.default_path)
+
+Use an explicit path when you want full control for a specific model instance:
+
+.. code-block:: python
+
+     from pst.SSP import PopStar
+
+     ssp = PopStar(IMF="cha", path="/data/ssp/PopStar")
+
+To configure a global SSP base directory, set ``PST_SSP_DIR`` before importing
+PST modules:
+
+.. code-block:: bash
+
+     export PST_SSP_DIR=/data/ssp
+
+.. code-block:: python
+
+     from pst.SSP import PopStar
+     ssp = PopStar(IMF="cha")
+
+For models that build their own subdirectory from the base path (for example,
+PopStar uses ``<base>/PopStar`` when ``path`` is not provided), make sure your
+directory structure matches each model's expected layout.
+
 Once loaded, an SSP object exposes its main grids and metadata:
 
 - ``ssp.ages``: age grid.
@@ -60,6 +100,7 @@ Once loaded, an SSP object exposes its main grids and metadata:
 - ``ssp.wavelength``: wavelength grid.
 - ``ssp.L_lambda``: tabulated SSP spectra.
 - ``ssp.name``, ``ssp.imf``, ``ssp.isochrone``, ``ssp.stellar_library``.
+
 
 Interpolating SSP Weights and Spectra
 -------------------------------------
