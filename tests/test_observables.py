@@ -190,10 +190,14 @@ class TestObservables(unittest.TestCase):
         self.assertTrue(np.isclose(ew, expected_ew, rtol=1e-12))
 
     def test_equivalent_width_from_atlas(self):
-        hb = observables.EquivalentWidth.from_atlas("Hb")
-        self.assertTrue(np.allclose(hb.left_wl_range.value, [4828.875, 4848.875]))
-        self.assertTrue(np.allclose(hb.central_wl_range.value, [4848.875, 4877.625]))
-        self.assertTrue(np.allclose(hb.right_wl_range.value, [4877.625, 4892.625]))
+        hb = observables.EquivalentWidth.from_atlas("Lick_Hbeta")
+        self.assertTrue(np.allclose(hb.left_wl_range.value, [4827.875,4847.875]))
+        self.assertTrue(np.allclose(hb.central_wl_range.value, [4847.875,4876.625]))
+        self.assertTrue(np.allclose(hb.right_wl_range.value, [4876.625,4891.625]))
+        cnb = observables.EquivalentWidth.from_atlas("BH_CNB")
+        self.assertTrue(np.allclose(cnb.left_wl_range.value, [3785.0, 3810.0]))
+        self.assertTrue(np.allclose(cnb.central_wl_range.value, [3810.0, 3910.0]))
+        self.assertTrue(np.allclose(cnb.right_wl_range.value, [3910.0, 3925.0]))
 
     def test_flux_ratio_basic_and_uncertainty(self):
         wavelength = np.linspace(3900.0, 4300.0, 2000) * u.angstrom
