@@ -36,8 +36,11 @@ def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
     table : astropy.table.Table
         Table containing the equivalent-width indices.
     """
-    return ascii.read(atlas, **kwargs_atlas)
-
+    atlas = ascii.read(atlas, **kwargs_atlas)
+    if not kwargs_atlas.get("keep_emission", False):
+        # Filter out emission lines
+        atlas = atlas[atlas["catalog"] != "Emission"]
+    return atlas
 
 def list_of_available_filters():
     """List the currently available filters in the default directory."""
@@ -1186,10 +1189,16 @@ class EquivalentWidth(object):
         """
         # Load the atlas file
         atlas = _load_ew_atlas(atlas, **kwargs_atlas)
-        position = name == np.asarray(atlas["name"]).astype(str)
+        if "id" in atlas.colnames:
+            position = name == np.asarray(atlas["id"]).astype(str)
+        else:
+            position = name == np.asarray(atlas["name"]).astype(str)
+        if not np.any(position) and "catalog" in atlas.colnames:
+            joined_name = np.asarray(atlas["catalog"]).astype(str) + "_" + np.asarray(atlas["name"]).astype(str)
+            position = name == joined_name
         if not np.any(position):
             raise ValueError(f"Index {name} not found in atlas {atlas}")
-        row = atlas[position][0]
+        row = atlas[position][-1]
         return cls(
             left_wl_range=(row["left_wl_begin"], row["left_wl_end"]),
             central_wl_range=(row["central_wl_begin"], row["central_wl_end"]),
@@ -1284,7 +1293,8 @@ def show_available_equivalent_widths():
     atlas = _load_ew_atlas()
     print("Available equivalent-width indices:")
     for row in atlas:
-        print(f" - name: {row['name']}, left_wl_range: ({row['left_wl_begin']}, {row['left_wl_end']}), right_wl_range: ({row['right_wl_begin']}, {row['right_wl_end']}), central_wl_range: ({row['central_wl_begin']}, {row['central_wl_end']})")
+        index_name = row["id"] if "id" in atlas.colnames else f"{row['catalog']}_{row['name']}"
+        print(f" - name: {index_name}, left_wl_range: ({row['left_wl_begin']}, {row['left_wl_end']}), right_wl_range: ({row['right_wl_begin']}, {row['right_wl_end']}), central_wl_range: ({row['central_wl_begin']}, {row['central_wl_end']})")
 
 class FluxRatio(object):
     r"""Flux ratio between two spectral regions.
