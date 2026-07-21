@@ -1059,7 +1059,7 @@ class EquivalentWidth(object):
             if spectra_err is not None:
                 ew_err = ew_err.reshape(original_shape)
 
-        return ew, ew_err
+        return ew << wavelength.unit, ew_err << wavelength.unit
 
     def plot_ew(self, wavelength, spectra, spectra_err=None, ax=None, show=False):
         """Plot the equivalent width computation.
@@ -1268,11 +1268,18 @@ class EquivalentWidthList(object):
             ew_all.append(ew_idx)
             ew_err_all.append(ew_err_idx)
 
-        ew = u.Quantity(ew_all, copy=False)
+        unit = ew_all[0].unit
+        ew = u.Quantity(
+            np.asarray([value.to_value(unit) for value in ew_all]),
+            unit=unit,
+        )
         if spectra_err is None:
             ew_err = np.nan
         else:
-            ew_err = u.Quantity(ew_err_all, copy=False)
+            ew_err = u.Quantity(
+                np.asarray([value.to_value(unit) for value in ew_err_all]),
+                unit=unit,
+            )
 
         original_shape = spectra.shape[1:] if spectra.ndim > 1 else ()
 
