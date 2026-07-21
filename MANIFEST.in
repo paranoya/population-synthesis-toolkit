@@ -9,6 +9,7 @@ exclude src/pst/data/lick/*
 exclude src/pst/data/filters/*
 include src/pst/data/ssp/PopStar/popstar_cha_0.15_100.fits.gz
 include src/pst/data/lick/lick_ha.json
+include src/pst/data/lick/lick_hb.json
 include src/pst/data/lick/atlas_spectral_indices.csv
 
 recursive-include docs *.bat
