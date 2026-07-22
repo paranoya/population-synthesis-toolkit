@@ -562,7 +562,21 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             return np.sum(weights * age) / np.sum(weights) << u.Gyr
 
     def mean_stellar_metallicity(self, ssp: SSPBase, t_obs: u.Quantity):
-        """TODO"""
+        """Compute the mean stellar metallicity at an observing time.
+        
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        
+        Returns
+        -------
+        mean_metals : :class:`astropy.units.Quantity`
+            Mean stellar metallicity (mass fraction) at ``t_obs``.
+        """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
         mean_metals = np.nansum(ssp.metallicity[:, None] * weights) / np.nansum(weights)
         return mean_metals
