@@ -578,7 +578,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             Mean stellar metallicity (mass fraction) at ``t_obs``.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
-        mean_metals = np.nansum(ssp.metallicity[:, None] * weights) / np.nansum(weights)
+        mean_metals = np.nansum(ssp.metallicities[:, None] * weights) / np.nansum(weights)
         return mean_metals
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
