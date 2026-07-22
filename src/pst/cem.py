@@ -111,9 +111,35 @@ class MassPropMetallicityMixin:
             time. Shape matches ``times``.
         """
         m = self.stellar_mass_formed(times)
-        return self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose()
+        return np.clip(
+		self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),                1e-6 << u.dimensionless_unscaled, None)
 
-    
+    def mean_stellar_metallicity(self, ssp, t_obs):
+        """Compute the mean stellar metallicity at an observing time.
+        
+        The mean stellar metallicity of this model has the following analytic form:
+
+        .. math::
+            \langle Z_\star \rangle = \frac{Z(t_{\rm obs})}{1 + \alpha}
+        
+        where :math:`Z(t_{\rm obs})` is the ISM metallicity at the observing time and
+        :math:`\alpha` is the power-law exponent controlling the enrichment rate.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        
+        Returns
+        -------
+        mean_metals : :class:`astropy.units.Quantity`
+            Mean stellar metallicity (mass fraction) at ``t_obs``.
+        """
+        return self.ism_metallicity(t_obs) / (1 + self.alpha_powerlaw)
+
 def sfh_quenching_decorator(stellar_mass_formed):
     """
     Decorator that enforces a hard quenching event in a cumulative SFH.
@@ -493,6 +519,35 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         t_frac = (dummy_time[idx - 1] * (1 - w) + dummy_time[idx] * w)
         return t_frac
 
+    def average_ssfr_over_tau(self, t_obs: u.Quantity, tau: u.Quantity):
+        """
+        Average specific star formation rate (sSFR) over a timescale tau at an observing time.
+
+        This method computes the average sSFR over the interval [t_obs - tau, t_obs] as:
+        .. math::
+            \\langle \\mathrm{sSFR} \\rangle_\\tau = \\frac{M_\\star(t_{\\mathrm{obs}}) - M_\\star(t_{\\mathrm{obs}} - \\tau)}{M_\\star(t_{\\mathrm{obs}}) \\cdot \\tau}
+        
+        Parameters
+        ----------
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation.
+        tau : :class:`astropy.units.Quantity`
+            Timescale over which to average the sSFR. Must be positive and less than or equal to ``t_obs``.
+
+        Returns
+        -------
+        avg_ssfr : :class:`astropy.units.Quantity`
+            Average specific star formation rate over the past tau at t_obs. Units are 1/yr.
+        """
+        if tau <= 0:
+            raise ValueError("tau must be positive.")
+        if tau > t_obs:
+            raise ValueError("tau cannot be greater than t_obs.")
+
+        mass = self.stellar_mass_formed([t_obs - tau, t_obs])
+        avg_ssfr = (mass[1] - mass[0]) / mass[1] / tau.to(u.yr)
+        return avg_ssfr
+
     def mean_stellar_age(self, ssp: SSPBase, t_obs: u.Quantity,
                          log: bool=False, surviving_mass: bool=False):
         """
@@ -526,6 +581,26 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             return 10 ** (np.sum(weights * age) / np.sum(weights)) << u.Gyr
         else:
             return np.sum(weights * age) / np.sum(weights) << u.Gyr
+
+    def mean_stellar_metallicity(self, ssp: SSPBase, t_obs: u.Quantity):
+        """Compute the mean stellar metallicity at an observing time.
+        
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        
+        Returns
+        -------
+        mean_metals : :class:`astropy.units.Quantity`
+            Mean stellar metallicity (mass fraction) at ``t_obs``.
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        mean_metals = np.nansum(ssp.metallicities[:, None] * weights) / np.nansum(weights)
+        return mean_metals
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
         b = np.arange(nbin)[None, :]
@@ -1294,9 +1369,6 @@ class BetaCEM(ChemicalEvolutionModel):
         x = (t - t0) / (t1 - t0)
         return np.clip(x, 0.0, 1.0)
 
-    # -----------------------------------------------------------------
-    # CEM API
-    # -----------------------------------------------------------------
     @_check_time_dec
     def stellar_mass_formed(self, time: u.Gyr) -> u.Quantity:
         """
@@ -1352,6 +1424,33 @@ class BetaCEM(ChemicalEvolutionModel):
             x_peak = (self._alpha - 1.0) / (self._alpha + self._beta - 2.0)
             return t0 + x_peak * dt
         return None
+
+
+class BetaZPowerLawCEM(MassPropMetallicityMixin, BetaCEM):
+    """A :class:`BetaCEM` with a Mass-dependent Metallicity chemical model.
+    
+    See also
+    --------
+    :class:`MassPropMetallicityMixin`
+    """
+    name = "beta_zpowlaw_cem"
+
+    def __init__(
+        self,
+        *,
+        ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
+        alpha_powerlaw: Parameter | u.Quantity | float = 1 << u.dimensionless_unscaled,
+        **kwargs,
+    ):
+        super().__init__(ism_metallicity_today=ism_metallicity_today, **kwargs)
+        self.ism_metallicity_today = check_parameter(
+            self.ism_metallicity_today, u.dimensionless_unscaled,
+            doc="Metallicity of stars born at present",
+        )
+        self.alpha_powerlaw = check_parameter(
+            alpha_powerlaw, u.dimensionless_unscaled,
+            doc="Metallicity evolution power-law exponent",
+        )
 
 
 class TabularCEM(ChemicalEvolutionModel):

@@ -32,7 +32,7 @@ class SSPBase(object):
     wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
     """
-    default_path = os.path.join(os.path.dirname(__file__), "data", "ssp")
+    default_path = os.getenv("PST_SSP_DIR", os.path.join(os.path.dirname(__file__), "data", "ssp"))
 
     @property
     def name(self):
@@ -1095,12 +1095,12 @@ class PyPopStar(SSPBase):
         header = 'SSP-{}'.format(IMF)
         if nebular:
             if verbose:
-                print("> Initialising Popstar models (neb em) (IMF='"
+                print("> Initialising PyPopstar models (neb em) (IMF='"
                       + IMF + "')")
             column = 'flux_total'
         else:
             if verbose:
-                print("> Initialising Popstar models (no neb em) (IMF='"
+                print("> Initialising PyPopstar models (no neb em) (IMF='"
                       + IMF + "')")
             column = 'flux_stellar'
         with fits.open(os.path.join(self.path, header+'_Z{:03.3f}_logt{:05.2f}.fits'.format(

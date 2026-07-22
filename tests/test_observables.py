@@ -1,5 +1,6 @@
 import unittest
 import os
+import tempfile
 import numpy as np
 from astropy import units as u
 from astropy import constants
@@ -93,6 +94,209 @@ class TestObservables(unittest.TestCase):
         )
         self.assertTrue(np.isfinite(ew2))
         self.assertTrue(np.isfinite(ew2_err))
+
+    def test_equivalent_width_error_shape_consistency(self):
+        eqwidth = observables.EquivalentWidth.from_name("lick_ha")
+        ew_1d, ew_err_1d = eqwidth.compute_ew(
+            self.dummy_wavelength,
+            self.dummy_flam,
+            spectra_err=0.1 * self.dummy_flam,
+        )
+
+        ew_2d, ew_err_2d = eqwidth.compute_ew(
+            self.dummy_wavelength,
+            self.dummy_flam[:, np.newaxis],
+            spectra_err=(0.1 * self.dummy_flam)[:, np.newaxis],
+        )
+
+        self.assertTrue(np.isclose(ew_1d, ew_2d[0]))
+        self.assertTrue(np.isclose(ew_err_1d, ew_err_2d[0]))
+
+    def test_equivalent_width_error_matches_analytic_constant_spectrum(self):
+        wavelength = np.linspace(3500.0, 4500.0, 1001) * u.angstrom
+        flux_level = 10.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        sigma_level = 2.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        spectra = np.ones(wavelength.size) * flux_level
+        spectra_err = np.ones(wavelength.size) * sigma_level
+
+        eqwidth = observables.EquivalentWidth(
+            left_wl_range=(3600.0, 3700.0),
+            central_wl_range=(3900.0, 4100.0),
+            right_wl_range=(4300.0, 4400.0),
+        )
+
+        ew, ew_err = eqwidth.compute_ew(wavelength, spectra, spectra_err=spectra_err)
+
+        left_mask = ((wavelength >= eqwidth.left_wl_range[0])
+                     & (wavelength <= eqwidth.left_wl_range[1]))
+        right_mask = ((wavelength >= eqwidth.right_wl_range[0])
+                      & (wavelength <= eqwidth.right_wl_range[1]))
+        central_mask = ((wavelength >= eqwidth.central_wl_range[0])
+                        & (wavelength <= eqwidth.central_wl_range[1]))
+
+        n_left = np.sum(left_mask)
+        n_right = np.sum(right_mask)
+
+        left_mean_wl = eqwidth.left_wl_range.mean()
+        right_mean_wl = eqwidth.right_wl_range.mean()
+        central_wl = wavelength[central_mask]
+        t = (central_wl - left_mean_wl) / (right_mean_wl - left_mean_wl)
+
+        if central_wl.size < 2:
+            trapz_w = np.zeros_like(central_wl)
+        else:
+            trapz_w = np.empty_like(central_wl)
+            trapz_w[0] = 0.5 * (central_wl[1] - central_wl[0])
+            trapz_w[-1] = 0.5 * (central_wl[-1] - central_wl[-2])
+            if central_wl.size > 2:
+                trapz_w[1:-1] = 0.5 * (central_wl[2:] - central_wl[:-2])
+
+        var_cont = sigma_level**2 * ((1 - t)**2 / n_left + t**2 / n_right)
+        expected_ew_var = np.sum((trapz_w / flux_level)**2 * (sigma_level**2 + var_cont))
+        expected_ew_err = np.sqrt(expected_ew_var)
+
+        self.assertTrue(np.isclose(ew, 0.0 * u.angstrom, atol=1e-10 * u.angstrom))
+        self.assertTrue(np.isclose(ew_err, expected_ew_err, rtol=1e-12))
+
+    def test_equivalent_width_uses_wavelength_resolved_integrand(self):
+        wavelength = np.linspace(3500.0, 4500.0, 2001) * u.angstrom
+        eqwidth = observables.EquivalentWidth(
+            left_wl_range=(3600.0, 3700.0),
+            central_wl_range=(3900.0, 4100.0),
+            right_wl_range=(4300.0, 4400.0),
+        )
+
+        left_mean_wl = eqwidth.left_wl_range.mean()
+        right_mean_wl = eqwidth.right_wl_range.mean()
+
+        true_left = 12.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        true_right = 8.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        slope = (true_right - true_left) / (right_mean_wl - left_mean_wl)
+        continuum = true_left + slope * (wavelength - left_mean_wl)
+
+        line_profile = 1.0 - 0.2 * np.exp(-0.5 * ((wavelength - 4000.0 * u.angstrom)
+                                                  / (10.0 * u.angstrom))**2)
+        spectra = continuum * line_profile
+
+        ew, _ = eqwidth.compute_ew(wavelength, spectra)
+
+        central_mask = ((wavelength >= eqwidth.central_wl_range[0])
+                        & (wavelength <= eqwidth.central_wl_range[1]))
+        central_wl = wavelength[central_mask]
+        t = (central_wl - left_mean_wl) / (right_mean_wl - left_mean_wl)
+        fcont = (1 - t) * true_left + t * true_right
+        expected_ew = np.trapezoid(1 - spectra[central_mask] / fcont, x=central_wl)
+
+        self.assertTrue(np.isclose(ew, expected_ew, rtol=1e-12))
+
+    def test_equivalent_width_from_atlas(self):
+        hb = observables.EquivalentWidth.from_atlas("Lick_Hbeta")
+        self.assertTrue(np.allclose(hb.left_wl_range.value, [4827.875,4847.875]))
+        self.assertTrue(np.allclose(hb.central_wl_range.value, [4847.875,4876.625]))
+        self.assertTrue(np.allclose(hb.right_wl_range.value, [4876.625,4891.625]))
+        cnb = observables.EquivalentWidth.from_atlas("BH_CNB")
+        self.assertTrue(np.allclose(cnb.left_wl_range.value, [3785.0, 3810.0]))
+        self.assertTrue(np.allclose(cnb.central_wl_range.value, [3810.0, 3910.0]))
+        self.assertTrue(np.allclose(cnb.right_wl_range.value, [3910.0, 3925.0]))
+
+    def test_flux_ratio_basic_and_uncertainty(self):
+        wavelength = np.linspace(3900.0, 4300.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * 5.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0), name="flat_ratio")
+
+        ratio, ratio_err = fr.compute_flux_ratio(
+            wavelength,
+            spectra,
+            spectra_err=0.1 * spectra,
+        )
+
+        self.assertTrue(np.isclose(ratio, 1.0))
+        self.assertTrue(np.isfinite(ratio_err))
+        self.assertTrue(ratio_err > 0)
+
+    def test_flux_ratio_shape_consistency(self):
+        wavelength = np.linspace(3900.0, 4300.0, 2000) * u.angstrom
+        base = np.ones(wavelength.size) * 2.0 * u.erg / (u.s * u.cm**2 * u.angstrom)
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0))
+
+        ratio_1d, _ = fr.compute_flux_ratio(wavelength, base)
+        ratio_2d, _ = fr.compute_flux_ratio(wavelength, base[:, np.newaxis])
+
+        self.assertTrue(np.isclose(ratio_1d, ratio_2d[0]))
+
+    def test_flux_ratio_json_roundtrip(self):
+        fr = observables.FluxRatio((4000.0, 4100.0), (4200.0, 4300.0), name="test_fr")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "flux_ratio.json")
+            fr.to_json(path)
+            fr2 = observables.FluxRatio.from_json(path)
+
+        self.assertEqual(fr2.name, fr.name)
+        self.assertTrue(np.allclose(fr2.red_wl_range.value, fr.red_wl_range.value))
+        self.assertTrue(np.allclose(fr2.blue_wl_range.value, fr.blue_wl_range.value))
+
+    def test_d4000_index(self):
+        wavelength = np.linspace(3600.0, 4400.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * u.erg / (u.s * u.cm**2 * u.angstrom)
+        d4000 = observables.D4000Index()
+        value, _ = d4000.compute_flux_ratio(wavelength, spectra)
+        self.assertTrue(np.isclose(value, 1.0))
+
+    def test_hk_index(self):
+        wavelength = np.linspace(3600.0, 4400.0, 2000) * u.angstrom
+        spectra = np.ones(wavelength.size) * u.erg / (u.s * u.cm**2 * u.angstrom)
+        hk = observables.HKIndex()
+        value, _ = hk.compute_flux_ratio(wavelength, spectra)
+        self.assertTrue(np.isclose(value, 1.0))
+
+
+class TestEquivalentWidthList(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.wavelength = np.linspace(3500.0, 7000.0, 5000) * u.angstrom
+        base = np.ones(self.wavelength.size) * 10.0
+        absorption = 1.0 - 0.15 * np.exp(-0.5 * ((self.wavelength.value - 6563.0) / 3.0) ** 2)
+        emission = 1.0 + 0.10 * np.exp(-0.5 * ((self.wavelength.value - 4861.0) / 4.0) ** 2)
+        self.spectrum = (base * absorption * emission) * u.erg / (u.s * u.cm**2 * u.angstrom)
+        self.spectrum_err = 0.05 * self.spectrum
+
+        self.ew_ha = observables.EquivalentWidth.from_name("lick_ha")
+        self.ew_hb = observables.EquivalentWidth.from_name("lick_hb")
+
+    def test_requires_wavelength(self):
+        ew_list = observables.EquivalentWidthList([self.ew_ha, self.ew_hb])
+        with self.assertRaises(TypeError):
+            ew_list.compute_ew(self.spectrum)
+
+    def test_matches_individual_indices(self):
+        ew_list = observables.EquivalentWidthList([self.ew_ha, self.ew_hb])
+        ew_many, ew_many_err = ew_list.compute_ew(
+            self.wavelength,
+            self.spectrum,
+            spectra_err=self.spectrum_err,
+        )
+
+        ew_ha, ew_ha_err = self.ew_ha.compute_ew(self.wavelength, self.spectrum, spectra_err=self.spectrum_err)
+        ew_hb, ew_hb_err = self.ew_hb.compute_ew(self.wavelength, self.spectrum, spectra_err=self.spectrum_err)
+
+        self.assertTrue(np.isclose(ew_many[0], ew_ha, rtol=1e-12))
+        self.assertTrue(np.isclose(ew_many[1], ew_hb, rtol=1e-12))
+        self.assertTrue(np.isclose(ew_many_err[0], ew_ha_err, rtol=1e-12))
+        self.assertTrue(np.isclose(ew_many_err[1], ew_hb_err, rtol=1e-12))
+
+    def test_shape_for_batched_spectra(self):
+        ew_list = observables.EquivalentWidthList([self.ew_ha, self.ew_hb])
+        spectra = np.vstack([self.spectrum.value, 1.2 * self.spectrum.value]) * self.spectrum.unit
+        spectra = spectra.T
+        ew_many, ew_many_err = ew_list.compute_ew(
+            self.wavelength,
+            spectra,
+            spectra_err=0.1 * spectra,
+        )
+
+        self.assertEqual(ew_many.shape, (2, 2))
+        self.assertEqual(ew_many_err.shape, (2, 2))
 
 # Add these tests to your existing TestObservables class.
 # They assume FilterList is available as observables.FilterList (or adjust import accordingly).

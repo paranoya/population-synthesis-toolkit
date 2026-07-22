@@ -139,8 +139,88 @@ class TestModels(unittest.TestCase):
 
         self.assertEqual(mass[0], 0.0)
         self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun, rtol=1e-4))
-        self.assertEqual(metals[0], 0.0)
+        self.assertEqual(metals[0], 1e-6)
         self.assertTrue(np.isclose(metals[-1], 0.02, rtol=1e-4))
+
+    def test_beta_cem_direct_shape_parameters(self):
+        model = models.BetaCEM(
+            mass_today=1.0 * u.Msun,
+            alpha=2.0,
+            beta=3.0,
+            t_start=1.0 * u.Gyr,
+            t_end=11.0 * u.Gyr,
+            today=13.7 * u.Gyr,
+            ism_metallicity_today=0.02,
+        )
+
+        times = np.array([0.0, 1.0, 6.0, 11.0, 13.7]) * u.Gyr
+        mass = model.stellar_mass_formed(times)
+        sfr = model.sfr(times)
+        metals = model.ism_metallicity(times)
+
+        self.assertEqual(model.name, "beta_cem")
+        self.assertTrue(np.isclose(mass[0], 0.0 * u.Msun))
+        self.assertTrue(np.isclose(mass[1], 0.0 * u.Msun))
+        self.assertTrue(np.isclose(mass[-2], 1.0 * u.Msun))
+        self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun))
+        self.assertTrue(np.all(np.diff(mass.to_value(u.Msun)) >= 0.0))
+        self.assertTrue(u.isclose(model.t_peak(), (1.0 + 10.0 / 3.0) * u.Gyr))
+        self.assertTrue(np.all(sfr >= 0.0 * u.Msun / u.Gyr))
+        self.assertTrue(np.isclose(sfr[0], 0.0 * u.Msun / u.Gyr))
+        self.assertTrue(np.isclose(sfr[-1], 0.0 * u.Msun / u.Gyr))
+        self.assertTrue(np.allclose(metals, 0.02))
+
+    def test_beta_cem_mean_concentration_parameters(self):
+        model = models.BetaCEM(
+            mass_today=2.0 * u.Msun,
+            t_mean=0.25,
+            kappa=8.0,
+            today=13.7 * u.Gyr,
+            ism_metallicity_today=0.02,
+        )
+
+        mass = model.stellar_mass_formed(self.dummy_times)
+
+        self.assertEqual(model.alpha_val, 2.0)
+        self.assertEqual(model.beta_val, 6.0)
+        self.assertEqual(model.kappa_val, 8.0)
+        self.assertTrue(np.isclose(model.t_mean_q, 0.25 * 13.7 * u.Gyr))
+        self.assertTrue(np.isclose(mass[0], 0.0 * u.Msun, rtol=1e-4))
+        self.assertTrue(np.isclose(mass[-1], 2.0 * u.Msun, rtol=1e-4))
+
+    def test_beta_zpowerlaw(self):
+        model = models.BetaZPowerLawCEM(
+            mass_today=1.0 * u.Msun,
+            alpha=2.0,
+            beta=2.0,
+            today=13.7 * u.Gyr,
+            ism_metallicity_today=0.02,
+            alpha_powerlaw=1.0,
+        )
+
+        mass = model.stellar_mass_formed(self.dummy_times)
+        metals = model.ism_metallicity(self.dummy_times)
+
+        self.assertEqual(model.name, "beta_zpowlaw_cem")
+        self.assertTrue(np.isclose(mass[0], 0.0 * u.Msun, rtol=1e-4))
+        self.assertTrue(np.isclose(mass[-1], 1.0 * u.Msun, rtol=1e-4))
+        self.assertTrue(np.all(np.diff(metals) >= 0.0))
+        self.assertTrue(np.isclose(metals[-1], 0.02, rtol=1e-4))
+
+    def test_beta_cem_rejects_invalid_parameterizations(self):
+        with self.assertRaises(ValueError):
+            _ = models.BetaCEM(mass_today=1.0 * u.Msun, alpha=0.0, beta=2.0, today=13.7)
+
+        with self.assertRaises(ValueError):
+            _ = models.BetaCEM(mass_today=1.0 * u.Msun, t_mean=0.5, today=13.7)
+
+        with self.assertRaises(ValueError):
+            _ = models.BetaCEM(
+                mass_today=1.0 * u.Msun,
+                t_mean=1.0,
+                kappa=5.0,
+                today=13.7,
+            )
     
     def test_tabular(self):
         low_res_time = np.linspace(0, 13.7, 10) * u.Gyr
@@ -225,6 +305,20 @@ class TestModels(unittest.TestCase):
         )
         tf = model.time_at_stellar_mass_frac([0.1, 0.5, 0.9], time_res=0.05 * u.Gyr)
         self.assertTrue(np.all(np.diff(tf.to_value(u.Gyr)) > 0))
+
+    def test_average_ssfr_over_tau_uses_lookback_interval(self):
+        model = LinearCEM(today=13.7 * u.Gyr)
+
+        ssfr = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=2.0 * u.Gyr)
+        expected = ((10.0 - 8.0) / 10.0 / (2.0 * u.Gyr)).to(1 / u.yr)
+
+        self.assertTrue(u.isclose(ssfr, expected))
+
+        with self.assertRaises(ValueError):
+            _ = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=0.0 * u.Gyr)
+
+        with self.assertRaises(ValueError):
+            _ = model.average_ssfr_over_tau(t_obs=10.0 * u.Gyr, tau=11.0 * u.Gyr)
 
     def test_compute_photometry_ndarray_and_age_bins(self):
         model = models.ExponentialDelayedCEM(

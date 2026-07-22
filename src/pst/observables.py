@@ -12,6 +12,7 @@ import os
 from astropy import units as u
 from astropy import constants as const
 from astropy import constants
+from astropy.io import ascii
 import requests
 import json
 from matplotlib import pyplot as plt
@@ -20,6 +21,28 @@ from pst.utils import check_unit, flux_conserving_interpolation, trapz
 
 ArrayLike = Union[np.ndarray, u.Quantity]
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+DEFAULT_EW_ATLAS = os.path.join(PST_DATA_DIR, "lick", "atlas_spectral_indices.csv")
+
+def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, keep_emission=False, **kwargs_atlas):
+    """Load the built-in equivalent-width atlas.
+
+    Parameters
+    ----------
+    atlas : str
+        Path to the atlas file.
+    keep_emission : bool
+        Whether to keep emission lines in the atlas.
+
+    Returns
+    -------
+    table : astropy.table.Table
+        Table containing the equivalent-width indices.
+    """
+    atlas = ascii.read(atlas, **kwargs_atlas)
+    if not keep_emission:
+        # Filter out emission lines
+        atlas = atlas[atlas["catalog"] != "Emission"]
+    return atlas
 
 
 def list_of_available_filters():
@@ -872,11 +895,12 @@ class EquivalentWidth(object):
     >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
     >>> ew_value, ew_err = ew.compute_ew(wavelength, spectra)
     """
-    def __init__(self, left_wl_range, central_wl_range, right_wl_range):
+    def __init__(self, left_wl_range, central_wl_range, right_wl_range, name=""):
         self.left_wl_range = np.array(left_wl_range)
         self.central_wl_range = np.array(central_wl_range)
         self.right_wl_range = np.array(right_wl_range)
-    
+        self.name = name
+
     @property
     def left_wl_range(self) -> u.Quantity:
         r"""Spectral range defining the left pseudocontinuum window :math:`\lambda_{\rm B,\,min}, \lambda_{\rm B,\,max}`."""
@@ -942,55 +966,185 @@ class EquivalentWidth(object):
             The associated error of the equivalent width.
         """
 
-        left_pts = np.where(np.searchsorted(self.left_wl_range, wavelength) == 1)[0]
-        right_pts = np.where(np.searchsorted(self.right_wl_range, wavelength) == 1)[0]
-        lick_pts = np.where(np.searchsorted(self.central_wl_range, wavelength) == 1)[0]
-        delta_ew = self.central_wl_range[1] - self.central_wl_range[0]
-        # pseudo-continuum interpolation
-        right_weight = (self.central_wl_range.mean() - self.left_wl_range.mean()
-                        ) / (self.right_wl_range.mean() - self.left_wl_range.mean())
+        wavelength = check_unit(wavelength, u.angstrom)
+
+        if wavelength.ndim != 1:
+            raise ValueError("wavelength must be 1D")
+        if spectra.shape[0] != wavelength.size:
+            raise ValueError("spectra first axis must match wavelength size")
+
+        left_mask = ((wavelength >= self.left_wl_range[0])
+                     & (wavelength <= self.left_wl_range[1]))
+        right_mask = ((wavelength >= self.right_wl_range[0])
+                      & (wavelength <= self.right_wl_range[1]))
+        central_mask = ((wavelength >= self.central_wl_range[0])
+                        & (wavelength <= self.central_wl_range[1]))
+
+        if not np.any(left_mask):
+            raise ValueError(f"No overlap between left_wl_range {self.left_wl_range} and wavelength grid {wavelength[0]}-{wavelength[-1]}")
+        if not np.any(right_mask):
+            raise ValueError(f"No overlap between right_wl_range {self.right_wl_range} and wavelength grid {wavelength[0]}-{wavelength[-1]}")
+        if not np.any(central_mask):
+            raise ValueError(f"No overlap between central_wl_range {self.central_wl_range} and wavelength grid {wavelength[0]}-{wavelength[-1]}")
+
+        # Reshape spectra to 2D for vectorized computation.
+        original_shape = spectra.shape[1:] if spectra.ndim > 1 else None
+        spectra_2d = spectra.reshape(wavelength.size, -1)
+
+        # Pseudocontinuum anchors from side bands.
+        left_mean_wl = self.left_wl_range.mean()
+        right_mean_wl = self.right_wl_range.mean()
+        central_wl = wavelength[central_mask]
+        t = (central_wl - left_mean_wl) / (right_mean_wl - left_mean_wl)
+
+        left_cont = np.nanmean(spectra_2d[left_mask, :], axis=0)
+        right_cont = np.nanmean(spectra_2d[right_mask, :], axis=0)
+        central_flux = spectra_2d[central_mask, :]
+        # Interpolate pseudocontinuum across the central band.
+        pseudocont = ((1 - t)[:, np.newaxis] * left_cont[np.newaxis, :]
+                      + t[:, np.newaxis] * right_cont[np.newaxis, :])
+
+        # Compute EW
+        integrand = 1 - central_flux / pseudocont
+        ew = trapz(integrand, x=central_wl, axis=0)
+
+        if spectra_err is None:
+            ew_err = np.nan
+        else:
+            if spectra_err.shape != spectra.shape:
+                raise ValueError("spectra_err must have the same shape as spectra")
+
+            spectra_err_2d = spectra_err.reshape(wavelength.size, -1)
+
+            left_var_samples = spectra_err_2d[left_mask, :] ** 2
+            right_var_samples = spectra_err_2d[right_mask, :] ** 2
+            central_var_samples = spectra_err_2d[central_mask, :] ** 2
+
+            # Variance associated to the mean, sum(sigma_i^2) / N^2
+            n_left = np.sum(np.isfinite(left_var_samples), axis=0)
+            n_right = np.sum(np.isfinite(right_var_samples), axis=0)
+
+            left_cont_var = np.where(
+                n_left > 0,
+                np.nansum(left_var_samples, axis=0) / n_left**2,
+                np.nan,
+            )
+            right_cont_var = np.where(
+                n_right > 0,
+                np.nansum(right_var_samples, axis=0) / n_right**2,
+                np.nan,
+            )
+            # Propagate the error associated to the continuum
+            pseudocont_var = ((1 - t)[:, np.newaxis]**2 * left_cont_var[np.newaxis, :]
+                              + t[:, np.newaxis]**2 * right_cont_var[np.newaxis, :])
+
+            # Trapezoidal integration weights to propagate per-pixel variance.
+            if central_wl.size < 2:
+                trapz_w = np.zeros_like(central_wl)
+            else:
+                trapz_w = np.empty_like(central_wl)
+                trapz_w[0] = 0.5 * (central_wl[1] - central_wl[0])
+                trapz_w[-1] = 0.5 * (central_wl[-1] - central_wl[-2])
+                if central_wl.size > 2:
+                    trapz_w[1:-1] = 0.5 * (central_wl[2:] - central_wl[:-2])
+
+            flux_term = ((trapz_w[:, np.newaxis] / pseudocont)**2) * central_var_samples
+            cont_term = ((trapz_w[:, np.newaxis] * central_flux / pseudocont**2)**2) * pseudocont_var
+            ew_var = np.nansum(flux_term + cont_term, axis=0)
+            ew_err = np.sqrt(ew_var)
+
+        if spectra.ndim == 1:
+            ew = ew[0]
+            if spectra_err is not None:
+                ew_err = ew_err[0]
+        else:
+            ew = ew.reshape(original_shape)
+            if spectra_err is not None:
+                ew_err = ew_err.reshape(original_shape)
+
+        return ew << wavelength.unit, ew_err << wavelength.unit
+
+    def plot_ew(self, wavelength, spectra, spectra_err=None, ax=None, show=False):
+        """Plot the equivalent width computation.
+        
+        Parameters
+        ----------
+        wavelength : array or Quantity
+            Wavelength grid associated with ``spectra``.
+        spectra : array or Quantity
+            Input spectra with shape ``(n_wave, ...)``.
+        spectra_err : array or Quantity, optional
+            Uncertainty array with same shape as ``spectra``.
+        ax : matplotlib.axes.Axes, optional
+            Matplotlib axis to plot on. If None, a new figure and axis are created.
+        show : bool, optional
+            If True, display the plot by calling ``plt.show()``. This requires
+            an interactive matplotlib session. Default is False.
+        """
+        wavelength = check_unit(wavelength, u.angstrom)
+        spectra = check_unit(spectra)
 
         if spectra.ndim > 1:
-            left_cont = np.nanmean(spectra[left_pts, :], axis=0)
-            right_cont = np.nanmean(spectra[right_pts, :], axis=0)
-            pseudocont = (1 - right_weight) * left_cont + right_weight * right_cont
-            flux = np.nanmean(spectra[lick_pts], axis=0)
-            ew = delta_ew * (1 - flux/pseudocont)
-            if spectra_err is None:
-                ew_err = np.nan
-            else:
-                left_cont_var = np.nanmean(spectra_err[left_pts, :]**2,
-                                        axis=0) / left_pts.size
-                right_cont_var = np.nanmean(spectra_err[right_pts, :]**2,
-                                            axis=0) / right_pts.size
-                pseudocont_var = ((1 - right_weight) * left_cont_var
-                                + right_weight * right_cont_var)
-                flux_var = np.nanmean(spectra_err[lick_pts]**2, axis=0)
-                ew_var = ((delta_ew / pseudocont)**2 * flux_var
-                        + (delta_ew * flux/pseudocont**2)**2 * pseudocont_var)
-                ew_err = np.sqrt(ew_var)
-        else:
-            left_cont = np.nanmean(spectra[left_pts])
-            right_cont = np.nanmean(spectra[right_pts])
-            pseudocont = (1 - right_weight) * left_cont + right_weight * right_cont
-            flux = np.nanmean(spectra[lick_pts])
-            ew = delta_ew * (1 - flux/pseudocont)
+            raise ValueError("spectra must be 1D for plotting")
 
-            if spectra_err is None:
-                ew_err = np.nan
-            else:
-                left_cont_var = np.nanmean(spectra_err[left_pts]**2
-                                        ) / left_pts.size
-                right_cont_var = np.nanmean(spectra_err[right_pts]**2
-                                            ) / right_pts.size
-                pseudocont_var = ((1 - right_weight) * left_cont_var
-                                + right_weight * right_cont_var)
-                flux_var = np.nanmean(spectra_err[lick_pts]**2)
-                ew_var = delta_ew**2 * (
-                    flux_var / lick_pts.size / pseudocont**2
-                    + flux**2 * pseudocont_var / pseudocont**4)
-                ew_err = np.sqrt(ew_var)
-        return ew, ew_err
+        ew, ew_err = self.compute_ew(wavelength, spectra, spectra_err=spectra_err)
+
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = None
+
+        # Remove units for plotting
+        wl = wavelength.to_value(u.angstrom) if isinstance(wavelength, u.Quantity) else wavelength
+        first_idx = np.searchsorted(wl, self.left_wl_range[0].value)
+        first_idx = max(first_idx - 2, 0)
+        last_idx = np.searchsorted(wl, self.right_wl_range[1].value)
+        last_idx = min(last_idx + 2, wl.size - 1)
+        wl = wl[first_idx:last_idx]
+        spec = spectra.value[first_idx:last_idx] if isinstance(spectra, u.Quantity) else spectra[first_idx:last_idx]
+
+        ax.plot(wl, spec, label="Spectra")
+        # add the error
+        if spectra_err is not None:
+            spec_err = spectra_err.value[first_idx:last_idx] if isinstance(spectra_err, u.Quantity) else spectra_err[first_idx:last_idx]
+            ax.fill_between(wl, spec - spec_err, spec + spec_err, color='gray', alpha=0.3,
+                            label="Spectra error")
+
+        ax.axvspan(self.left_wl_range[0].value, self.left_wl_range[1].value, color='blue', alpha=0.3,
+                    label="Left continuum")
+        ax.axvspan(self.central_wl_range[0].value, self.central_wl_range[1].value, color='green', alpha=0.3,
+                    label="Central band")
+        ax.axvspan(self.right_wl_range[0].value, self.right_wl_range[1].value, color='red', alpha=0.3,
+                    label="Right continuum")
+        ax.annotate(f"{self.name} EW = {ew:.2f} ± {ew_err:.2f}", xy=(0.05, 0.95), xycoords='axes fraction',
+                    fontsize=12, ha='left', va='top',
+                    bbox=dict(boxstyle="round", fc="w", ec="0.5", alpha=0.9))
+        ax.set_xlabel(f"Wavelength ({wavelength.unit})")
+        ax.set_ylabel(f"Spectra ({spectra.unit})")
+        ax.set_xlim(self.left_wl_range[0].value - 10, self.right_wl_range[1].value + 10)
+        ax.set_ylim()
+        ax.legend()
+        if show:
+            plt.show()
+        else:
+            plt.close()
+        return fig, ax
+
+    def to_json(self, path):
+        """Save the :class:`EquivalentWidth` to a JSON file.
+        
+        Parameters
+        ----------
+        path : str
+            Path to the JSON file.
+        """
+        data = {
+            "left_wl_range": self.left_wl_range.value.tolist(),
+            "central_wl_range": self.central_wl_range.value.tolist(),
+            "right_wl_range": self.right_wl_range.value.tolist(),
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=4)
 
     @classmethod
     def from_json(cls, path):
@@ -1020,11 +1174,377 @@ class EquivalentWidth(object):
 
         Returns
         -------
-        ew : :class:`EquivvalentWidth`
+        ew : :class:`EquivalentWidth`
         """
         json_file = os.path.join(PST_DATA_DIR, "lick", name + ".json")
         if os.path.isfile(json_file):
             return cls.from_json(json_file)
         else:
-            raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
-                                    f"associated to input name {name}")
+            try:
+                return cls.from_atlas(name)
+            except (FileNotFoundError, ValueError) as e:
+                raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
+                                        f"associated to input name {name}") from e
+
+    @classmethod
+    def from_atlas(cls, name, atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
+        """Load a :class:`EquivalentWidth` from an atlas file.
+        
+        Parameters
+        ----------
+        atlas : str
+            Path to the atlas file.
+
+        Returns
+        -------
+        ew : :class:`EquivalentWidth`
+        """
+        # Load the atlas file
+        atlas = _load_ew_atlas(atlas, **kwargs_atlas)
+        if "id" in atlas.colnames:
+            position = name == np.asarray(atlas["id"]).astype(str)
+        else:
+            position = name == np.asarray(atlas["name"]).astype(str)
+        if not np.any(position) and "catalog" in atlas.colnames:
+            joined_name = np.asarray(atlas["catalog"]).astype(str) + "_" + np.asarray(atlas["name"]).astype(str)
+            position = name == joined_name
+        if not np.any(position):
+            raise ValueError(f"Index {name} not found in atlas {atlas}")
+        row = atlas[position][-1]
+        return cls(
+            left_wl_range=(row["left_wl_begin"], row["left_wl_end"]),
+            central_wl_range=(row["central_wl_begin"], row["central_wl_end"]),
+            right_wl_range=(row["right_wl_begin"], row["right_wl_end"]),
+            name=name
+        )
+
+class EquivalentWidthList(object):
+    """A list of :class:`EquivalentWidth` instances for faster computations."""
+
+    def __init__(self, equivalent_widths):
+        self.equivalent_widths = list(equivalent_widths)
+        if len(self.equivalent_widths) == 0:
+            raise ValueError("equivalent_widths cannot be empty")
+        self.names = [ew.name for ew in self.equivalent_widths]
+
+    @property
+    def n_indices(self):
+        """Number of equivalent-width indices in the list."""
+        return len(self.equivalent_widths)
+
+    @classmethod
+    def from_names(cls, names):
+        """Build a list from built-in JSON index names in ``data/lick``."""
+        return cls([EquivalentWidth.from_name(name) for name in names])
+
+    @classmethod
+    def from_atlas(cls, names, atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
+        """Build a list from index names in an atlas table."""
+        return cls(
+            [EquivalentWidth.from_atlas(name, atlas=atlas, **kwargs_atlas) for name in names],
+        )
+
+    def compute_ew(self, wavelength, spectra, spectra_err=None):
+        """Compute equivalent widths for all indices in the list.
+
+        Parameters
+        ----------
+        wavelength : array or Quantity
+            Wavelength grid associated with ``spectra``.
+        spectra : array or Quantity
+            Input spectra with shape ``(n_wave, ...)``.
+        spectra_err : array or Quantity, optional
+            Uncertainty array with same shape as ``spectra``.
+
+        Returns
+        -------
+        ew : Quantity
+            Equivalent widths with shape ``(..., n_indices)``.
+        ew_err : Quantity or float
+            Equivalent-width uncertainties with shape ``(..., n_indices)``, or
+            ``np.nan`` if ``spectra_err`` is not provided.
+        """
+        wl = check_unit(wavelength, u.angstrom)
+        if wl.ndim != 1:
+            raise ValueError("wavelength must be 1D")
+
+        ew_all = []
+        ew_err_all = []
+
+        for ew in self.equivalent_widths:
+            ew_idx, ew_err_idx = ew.compute_ew(
+                wl,
+                spectra,
+                spectra_err=spectra_err,
+            )
+            ew_all.append(ew_idx)
+            ew_err_all.append(ew_err_idx)
+
+        unit = ew_all[0].unit
+        ew = u.Quantity(
+            np.asarray([value.to_value(unit) for value in ew_all]),
+            unit=unit,
+        )
+        if spectra_err is None:
+            ew_err = np.nan
+        else:
+            ew_err = u.Quantity(
+                np.asarray([value.to_value(unit) for value in ew_err_all]),
+                unit=unit,
+            )
+
+        original_shape = spectra.shape[1:] if spectra.ndim > 1 else ()
+
+        if original_shape == ():
+            ew = ew
+            if spectra_err is not None:
+                ew_err = ew_err
+        else:
+            ew = np.moveaxis(ew.reshape((self.n_indices,) + original_shape), 0, -1)
+            if spectra_err is not None:
+                ew_err = np.moveaxis(ew_err.reshape((self.n_indices,) + original_shape), 0, -1)
+
+        return ew, ew_err
+
+
+def show_available_equivalent_widths():
+    """Print the list of available equivalent-width indices in the built-in atlas."""
+    atlas = _load_ew_atlas()
+    print("Available equivalent-width indices:")
+    for row in atlas:
+        index_name = row["id"] if "id" in atlas.colnames else f"{row['catalog']}_{row['name']}"
+        print(f" - name: {index_name}, left_wl_range: ({row['left_wl_begin']}, {row['left_wl_end']}), right_wl_range: ({row['right_wl_begin']}, {row['right_wl_end']}), central_wl_range: ({row['central_wl_begin']}, {row['central_wl_end']})")
+
+class FluxRatio(object):
+    r"""Flux ratio between two spectral regions.
+
+    Description
+    -----------
+    Given a stellar spectra :math:`F_\lambda`, the flux ratio is defined as the
+    ratio of the average flux in two spectral regions, defined by their wavelength
+    ranges. It is computed as:
+
+    .. math::
+        R = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where :math:`\langle F_\lambda \rangle` is the average flux in the
+    specified spectral region.
+
+    Example
+    -------
+    >>> from pst.observables import FluxRatio
+    >>> fr = FluxRatio(red_wl_range=(4000, 4100),
+    ...                blue_wl_range=(4200, 4300))
+    >>> wavelength = np.linspace(3900, 4400, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> fr_value, fr_err = fr.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self, blue_wl_range=None, red_wl_range=None, name=None,
+                 region1_wl_range=None, region2_wl_range=None):
+        # Backward compatibility with previous argument names.
+        if red_wl_range is None and region1_wl_range is not None:
+            red_wl_range = region1_wl_range
+        if blue_wl_range is None and region2_wl_range is not None:
+            blue_wl_range = region2_wl_range
+
+        if red_wl_range is None or blue_wl_range is None:
+            raise ValueError("Both red_wl_range and blue_wl_range must be provided")
+
+        self.red_wl_range = np.array(red_wl_range)
+        self.blue_wl_range = np.array(blue_wl_range)
+        self.name = name
+
+    @property
+    def red_wl_range(self) -> u.Quantity:
+        """Spectral window used for the numerator average flux."""
+        return self._red_wl_range
+
+    @red_wl_range.setter
+    def red_wl_range(self, value):
+        if not isinstance(value, u.Quantity):
+            self._red_wl_range = value * u.angstrom
+        else:
+            self._red_wl_range = value
+
+    @property
+    def blue_wl_range(self) -> u.Quantity:
+        """Spectral window used for the denominator average flux."""
+        return self._blue_wl_range
+
+    @blue_wl_range.setter
+    def blue_wl_range(self, value):
+        if not isinstance(value, u.Quantity):
+            self._blue_wl_range = value * u.angstrom
+        else:
+            self._blue_wl_range = value
+
+    @property
+    def region1_wl_range(self) -> u.Quantity:
+        """Backward compatible alias for ``red_wl_range``."""
+        return self.red_wl_range
+
+    @region1_wl_range.setter
+    def region1_wl_range(self, value):
+        self.red_wl_range = value
+
+    @property
+    def region2_wl_range(self) -> u.Quantity:
+        """Backward compatible alias for ``blue_wl_range``."""
+        return self.blue_wl_range
+
+    @region2_wl_range.setter
+    def region2_wl_range(self, value):
+        self.blue_wl_range = value
+
+    def compute_flux_ratio(self, wavelength, spectra, spectra_err=None):
+        """Compute the flux ratio between two spectral windows.
+
+        Parameters
+        ----------
+        wavelength : array or Quantity
+            Wavelength grid associated with ``spectra``.
+        spectra : array or Quantity
+            Input spectra with shape ``(n_wave, ...)``.
+        spectra_err : array or Quantity, optional
+            Uncertainty array with same shape as ``spectra``.
+
+        Returns
+        -------
+        ratio : Quantity or ndarray
+            Flux ratio with shape ``...``.
+        ratio_err : Quantity or ndarray or float
+            Flux-ratio uncertainty with shape ``...`` if ``spectra_err`` is
+            provided, otherwise ``np.nan``.
+        """
+        wl = check_unit(wavelength, u.angstrom)
+        if wl.ndim != 1:
+            raise ValueError("wavelength must be 1D")
+        if spectra.shape[0] != wl.size:
+            raise ValueError("spectra first axis must match wavelength size")
+
+        red_mask = ((wl >= self.red_wl_range[0])
+                    & (wl <= self.red_wl_range[1]))
+        blue_mask = ((wl >= self.blue_wl_range[0])
+                     & (wl <= self.blue_wl_range[1]))
+
+        if not np.any(red_mask):
+            raise ValueError("red_wl_range does not overlap wavelength grid")
+        if not np.any(blue_mask):
+            raise ValueError("blue_wl_range does not overlap wavelength grid")
+
+        original_shape = spectra.shape[1:] if spectra.ndim > 1 else ()
+        spectra_2d = spectra.reshape(wl.size, -1)
+
+        flux_red = np.nanmean(spectra_2d[red_mask, :], axis=0)
+        flux_blue = np.nanmean(spectra_2d[blue_mask, :], axis=0)
+        ratio = flux_red / flux_blue
+
+        if spectra_err is None:
+            ratio_err = np.nan
+        else:
+            if spectra_err.shape != spectra.shape:
+                raise ValueError("spectra_err must have the same shape as spectra")
+
+            spectra_err_2d = spectra_err.reshape(wl.size, -1)
+            red_var_samples = spectra_err_2d[red_mask, :] ** 2
+            blue_var_samples = spectra_err_2d[blue_mask, :] ** 2
+
+            n_red = np.sum(np.isfinite(red_var_samples), axis=0)
+            n_blue = np.sum(np.isfinite(blue_var_samples), axis=0)
+
+            flux_red_var = np.where(
+                n_red > 0,
+                np.nansum(red_var_samples, axis=0) / n_red**2,
+                np.nan,
+            )
+            flux_blue_var = np.where(
+                n_blue > 0,
+                np.nansum(blue_var_samples, axis=0) / n_blue**2,
+                np.nan,
+            )
+
+            ratio_var = ratio**2 * (flux_red_var / flux_red**2 + flux_blue_var / flux_blue**2)
+            ratio_err = np.sqrt(ratio_var)
+
+        if original_shape == ():
+            ratio = ratio[0]
+            if spectra_err is not None:
+                ratio_err = ratio_err[0]
+        else:
+            ratio = ratio.reshape(original_shape)
+            if spectra_err is not None:
+                ratio_err = ratio_err.reshape(original_shape)
+
+        return ratio, ratio_err
+
+    def to_json(self, path):
+        """Save the :class:`FluxRatio` definition to a JSON file."""
+        data = {
+            "red_wl_range": self.red_wl_range.value.tolist(),
+            "blue_wl_range": self.blue_wl_range.value.tolist(),
+            "name": self.name,
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=4)
+
+    @classmethod
+    def from_json(cls, path):
+        """Load a :class:`FluxRatio` from a JSON file."""
+        with open(path, "r") as f:
+            data = json.load(f)
+        # Backward compatibility with old JSON keys.
+        if "region1_wl_range" in data and "red_wl_range" not in data:
+            data["red_wl_range"] = data.pop("region1_wl_range")
+        if "region2_wl_range" in data and "blue_wl_range" not in data:
+            data["blue_wl_range"] = data.pop("region2_wl_range")
+        return cls(**data)
+
+class D4000Index(FluxRatio):
+    r"""D4000 index, a specific flux ratio between two spectral regions.
+
+    Description
+    -----------
+    The D4000 index is defined as the ratio of the average flux in the red and blue
+    spectral regions around 4000 Angstroms. It is computed as:
+
+    .. math::
+        D4000 = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where the blue region is defined by :math:`3750-3950` Angstroms and the red
+    region by :math:`4050-4250` Angstroms.
+
+    Example
+    -------
+    >>> from pst.observables import D4000Index
+    >>> d4000 = D4000Index()
+    >>> wavelength = np.linspace(3800, 4200, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> d4000_value, d4000_err = d4000.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self):
+        super().__init__(red_wl_range=(4050, 4250), blue_wl_range=(3750, 3950), name="D4000")
+
+class HKIndex(FluxRatio):
+    r"""HK index, a specific flux ratio between two spectral regions.
+
+    Description
+    -----------
+    The HK index is defined as the ratio of the average flux in the red and blue
+    spectral regions around 4000 Angstroms. It is computed as:
+
+    .. math::
+        HK = \frac{\langle F_\lambda \rangle_{\rm red}}{\langle F_\lambda \rangle_{\rm blue}}
+
+    where the blue region is defined by :math:`3920-3945` Angstroms and the red
+    region by :math:`3955-3980` Angstroms.
+
+    Example
+    -------
+    >>> from pst.observables import HKIndex
+    >>> hk = HKIndex()
+    >>> wavelength = np.linspace(3800, 4200, 1000) * u.angstrom
+    >>> spectra = np.random.normal(1, 0.1, size=wavelength.size) * u.erg / u.s / u.cm**2 / u.angstrom
+    >>> hk_value, hk_err = hk.compute_flux_ratio(wavelength, spectra)
+    """
+    def __init__(self):
+        super().__init__(red_wl_range=(3955., 3980.), blue_wl_range=(3920, 3945.), name="HK")
