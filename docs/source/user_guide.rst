@@ -441,7 +441,7 @@ For repeated measurements, you can group several indices with
 
      from pst.observables import EquivalentWidthList
 
-     indices = EquivalentWidthList.from_atlas(["Mg1", "TiO2"])
+     indices = EquivalentWidthList.from_atlas(["Lick_Mg1", "Lick_TiO2"])
      ew_values, ew_errors = indices.compute_ew(
              wavelength=ssp.wavelength,
              spectra=sed,
