@@ -1173,14 +1173,17 @@ class EquivalentWidth(object):
 
         Returns
         -------
-        ew : :class:`EquivvalentWidth`
+        ew : :class:`EquivalentWidth`
         """
         json_file = os.path.join(PST_DATA_DIR, "lick", name + ".json")
         if os.path.isfile(json_file):
             return cls.from_json(json_file)
         else:
-            raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
-                                    f"associated to input name {name}")
+            try:
+                return cls.from_atlas(name)
+            except (FileNotFoundError, ValueError) as e:
+                raise FileNotFoundError(f"There is no JSON file\n -{json_file}"
+                                        f"associated to input name {name}") from e
 
     @classmethod
     def from_atlas(cls, name, atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
