@@ -23,13 +23,15 @@ ArrayLike = Union[np.ndarray, u.Quantity]
 PST_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DEFAULT_EW_ATLAS = os.path.join(PST_DATA_DIR, "lick", "atlas_spectral_indices.csv")
 
-def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
+def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, keep_emission=False, **kwargs_atlas):
     """Load the built-in equivalent-width atlas.
 
     Parameters
     ----------
     atlas : str
         Path to the atlas file.
+    keep_emission : bool
+        Whether to keep emission lines in the atlas.
 
     Returns
     -------
@@ -37,7 +39,7 @@ def _load_ew_atlas(atlas=DEFAULT_EW_ATLAS, **kwargs_atlas):
         Table containing the equivalent-width indices.
     """
     atlas = ascii.read(atlas, **kwargs_atlas)
-    if not kwargs_atlas.get("keep_emission", False):
+    if not keep_emission:
         # Filter out emission lines
         atlas = atlas[atlas["catalog"] != "Emission"]
     return atlas
@@ -1078,6 +1080,12 @@ class EquivalentWidth(object):
             If True, display the plot by calling ``plt.show()``. This requires
             an interactive matplotlib session. Default is False.
         """
+        wavelength = check_unit(wavelength, u.angstrom)
+        spectra = check_unit(spectra)
+
+        if spectra.ndim > 1:
+            raise ValueError("spectra must be 1D for plotting")
+
         ew, ew_err = self.compute_ew(wavelength, spectra, spectra_err=spectra_err)
 
         if ax is None:
