@@ -413,7 +413,7 @@ The equivalent width is defined as:
 
 .. math::
 
-     EW = \int_{\lambda_1}^{\lambda_2} \left(1 - \frac{F_\lambda(\lambda)}{F_{\rm cont}(\lambda)}\right) d\lambda~~[\mathring{\text{A}}^{-1}]
+     EW = \int_{\lambda_1}^{\lambda_2} \left(1 - \frac{F_\lambda(\lambda)}{F_{\rm cont}(\lambda)}\right) d\lambda~~[\mathring{\text{A}}]
 
 where :math:`F_{\rm cont}` is the pseudo-continuum interpolated between the
 blue and red side bands.
