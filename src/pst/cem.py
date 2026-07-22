@@ -115,7 +115,29 @@ class MassPropMetallicityMixin:
 		self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),                1e-6 << u.dimensionless_unscaled, None)
 
     def mean_stellar_metallicity(self, ssp, t_obs):
-        """TODO"""
+        """Compute the mean stellar metallicity at an observing time.
+        
+        The mean stellar metallicity of this model has the following analytic form:
+
+        .. math::
+            \langle Z_\star \rangle = \frac{Z(t_{\rm obs})}{1 + \alpha}
+        
+        where :math:`Z(t_{\rm obs})` is the ISM metallicity at the observing time and
+        :math:`\alpha` is the power-law exponent controlling the enrichment rate.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model providing an age grid ``ssp.ages`` (shape ``(A,)``),
+            metallicity grid, and a mapping function ``get_weights``.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation. Only SSP ages younger than ``t_obs`` contribute.
+        
+        Returns
+        -------
+        mean_metals : :class:`astropy.units.Quantity`
+            Mean stellar metallicity (mass fraction) at ``t_obs``.
+        """
         return self.ism_metallicity(t_obs) / (1 + self.alpha_powerlaw)
 
 def sfh_quenching_decorator(stellar_mass_formed):
@@ -503,7 +525,6 @@ class ChemicalEvolutionModel(ModelBase, ABC):
 
         This method computes the average sSFR over the interval [t_obs - tau, t_obs] as:
         .. math::
-
             \\langle \\mathrm{sSFR} \\rangle_\\tau = \\frac{M_\\star(t_{\\mathrm{obs}}) - M_\\star(t_{\\mathrm{obs}} - \\tau)}{M_\\star(t_{\\mathrm{obs}}) \\cdot \\tau}
         
         Parameters
