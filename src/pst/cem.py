@@ -140,6 +140,247 @@ class MassPropMetallicityMixin:
         """
         return self.ism_metallicity(t_obs) / (1 + self.alpha_powerlaw)
 
+
+class LogNormalMetallicityDistributionMixin:
+    r"""Bidimensional log-normal metallicity distribution.
+
+    The model is given by the following conditional distribution:
+
+    .. math::
+
+        \log_{10} Z \sim \mathcal{N}(\mu_{\log Z}, \sigma_{\log Z}^2),
+
+    where ``sigma_log_metallicity`` is expressed in dex.  The location is
+    shifted so that the untruncated log-normal distribution has arithmetic
+    mean :meth:`ism_metallicity`.
+
+    Notes
+    -----
+    The CEM model must implement :meth:`ism_metallicity`, interpreted here as
+    the arithmetic mean metallicity of stars born at each cosmic time.
+    """
+
+    @property
+    def sigma_log_metallicity(self) -> Parameter:
+        """Scatter in log10 ISM metallicity at fixed formation time (dex)."""
+        return self._sigma_log_metallicity
+
+    @sigma_log_metallicity.setter
+    def sigma_log_metallicity(self, value):
+        parameter = check_parameter(
+            value,
+            u.dimensionless_unscaled,
+            doc="Scatter in log10 ISM metallicity at fixed formation time (dex)",
+            vrange=(0.0, np.inf),
+        )
+        if parameter.vrange is None:
+            parameter.vrange = (0.0, np.inf)
+        if parameter.size != 1:
+            raise ValueError("sigma_log_metallicity must be a scalar")
+        if parameter.q < 0:
+            raise ValueError("sigma_log_metallicity cannot be negative")
+        self._sigma_log_metallicity = parameter
+
+    @property
+    def metallicity_distribution_is_delta(self) -> bool:
+        """Whether the conditional metallicity distribution has zero width."""
+        return self.sigma_log_metallicity.to_value() == 0.0
+
+    @_check_time_dec
+    def metallicity_distribution(
+        self,
+        times: u.Quantity,
+        metallicity_bin_edges: u.Quantity,
+    ) -> np.ndarray:
+        """Return conditional metallicity probabilities at formation times.
+
+        Probabilities are evaluated by integrating the log-normal distribution
+        between consecutive metallicity-bin edges.  The result is normalized
+        over the supplied metallicity range, i.e. it represents the distribution
+        conditional on the available SSP metallicity support.
+
+        Parameters
+        ----------
+        times : array-like or :class:`astropy.units.Quantity`
+            Cosmic formation times. Bare values are interpreted as Gyr.
+        metallicity_bin_edges : array-like or :class:`astropy.units.Quantity`
+            Strictly increasing, positive metallicity-bin edges.
+
+        Returns
+        -------
+        probabilities : ndarray
+            Array with shape ``times.shape + (n_metallicity_bins,)``. Every
+            conditional distribution sums to one.
+        """
+        edges = check_unit(
+            metallicity_bin_edges, u.dimensionless_unscaled
+        ).value
+
+        if edges.ndim != 1 or edges.size < 2:
+            raise ValueError("metallicity_bin_edges must be a one-dimensional array")
+        if np.any(~np.isfinite(edges)) or np.any(edges <= 0):
+            raise ValueError("metallicity_bin_edges must be finite and positive")
+        if np.any(np.diff(edges) <= 0):
+            raise ValueError("metallicity_bin_edges must be strictly increasing")
+
+        input_shape = times.shape
+        times_1d = np.atleast_1d(times)
+        mean_metallicity = np.asarray(
+            self.ism_metallicity(times_1d).to_value(u.dimensionless_unscaled),
+            dtype=float,
+        ).reshape(-1)
+        if np.any(~np.isfinite(mean_metallicity)) or np.any(mean_metallicity <= 0):
+            raise ValueError("ism_metallicity must be finite and positive")
+
+        n_bins = edges.size - 1
+        probabilities = np.zeros((mean_metallicity.size, n_bins), dtype=float)
+        log_edges = np.log10(edges)
+
+        if self.metallicity_distribution_is_delta:
+            # cumulative distribution is a step function
+            indices = np.searchsorted(edges, mean_metallicity, side="right") - 1
+            indices = np.clip(indices, 0, n_bins - 1)
+            probabilities[np.arange(mean_metallicity.size), indices] = 1.0
+        else:
+            sigma = self.sigma_log_metallicity.to_value(
+                u.dimensionless_unscaled
+            )
+
+            location = (
+                np.log10(mean_metallicity)
+                - 0.5 * np.log(10.0) * sigma**2
+            )
+            standardized_edges = (
+                log_edges[np.newaxis, :] - location[:, np.newaxis]
+            ) / sigma
+            # Compute the integral of the log-normal distribution between consecutive edges
+            probabilities = np.diff(special.ndtr(standardized_edges), axis=-1)
+            probabilities = np.clip(probabilities, 0.0, None)
+
+            normalizations = probabilities.sum(axis=-1)
+            valid = normalizations > np.finfo(float).tiny  # numerical buffer
+            probabilities[valid] /= normalizations[valid, np.newaxis]
+
+            # If the requested support lies entirely in a numerically underflowed
+            # tail, reproduce SSP edge clipping by assigning it to the nearest bin.
+            if np.any(~valid):
+                indices = np.searchsorted(
+                    log_edges, location[~valid], side="right"
+                ) - 1
+                indices = np.clip(indices, 0, n_bins - 1)
+                probabilities[~valid] = 0.0
+                probabilities[np.flatnonzero(~valid), indices] = 1.0
+
+        return probabilities.reshape(input_shape + (n_bins,))
+
+    @_check_time_dec
+    def metallicity_interpolation_weights(
+        self,
+        times: u.Quantity,
+        metallicity_nodes: u.Quantity,
+    ) -> np.ndarray:
+        r"""Project the log-normal distribution onto linear SSP basis functions.
+
+        The returned coefficients are the expectation values of the piecewise
+        linear interpolation weights used by :meth:`pst.SSP.SSPBase.get_weights`
+        in ``log10(Z)``. Probability below or above the SSP grid is assigned to
+        the corresponding edge node, matching that method's clipping behavior.
+
+        Unlike assigning probability to nearest-node bins, this projection is
+        continuous at zero scatter and converges to the deterministic SSP
+        interpolation as ``sigma_log_metallicity`` tends to zero.
+        """
+        nodes = check_unit(
+            metallicity_nodes, u.dimensionless_unscaled
+        ).value
+        if nodes.ndim != 1 or nodes.size < 2:
+            raise ValueError(
+                "metallicity_nodes must be a one-dimensional array with at least "
+                "two entries"
+            )
+        if np.any(~np.isfinite(nodes)) or np.any(nodes <= 0):
+            raise ValueError("metallicity_nodes must be finite and positive")
+        if np.any(np.diff(nodes) <= 0):
+            raise ValueError("metallicity_nodes must be strictly increasing")
+
+        input_shape = times.shape
+        times_1d = np.atleast_1d(times)
+        mean_metallicity = np.asarray(
+            self.ism_metallicity(times_1d).to_value(
+                u.dimensionless_unscaled
+            ),
+            dtype=float,
+        ).reshape(-1)
+        if np.any(~np.isfinite(mean_metallicity)) or np.any(
+            mean_metallicity <= 0
+        ):
+            raise ValueError("ism_metallicity must be finite and positive")
+
+        log_nodes = np.log10(nodes)
+        n_times = mean_metallicity.size
+        n_nodes = nodes.size
+        weights = np.zeros((n_times, n_nodes), dtype=float)
+
+        if self.metallicity_distribution_is_delta:
+            log_metallicity = np.log10(mean_metallicity)
+            upper = np.searchsorted(log_nodes, log_metallicity)
+            upper = np.clip(upper, 1, n_nodes - 1)
+            lower = upper - 1
+            fraction = (
+                (log_metallicity - log_nodes[lower])
+                / (log_nodes[upper] - log_nodes[lower])
+            )
+            fraction = np.clip(fraction, 0.0, 1.0)
+            rows = np.arange(n_times)
+            weights[rows, lower] = 1.0 - fraction
+            weights[rows, upper] += fraction
+        else:
+            sigma = float(
+                self.sigma_log_metallicity.to_value(
+                    u.dimensionless_unscaled
+                )
+            )
+            location = (
+                np.log10(mean_metallicity)
+                - 0.5 * np.log(10.0) * sigma**2
+            )
+            standardized_nodes = (
+                log_nodes[np.newaxis, :] - location[:, np.newaxis]
+            ) / sigma
+            node_cdf = special.ndtr(standardized_nodes)
+            node_pdf = (
+                np.exp(-0.5 * standardized_nodes**2)
+                / np.sqrt(2.0 * np.pi)
+            )
+
+            # SSP interpolation clips values outside the grid to an edge node.
+            weights[:, 0] = node_cdf[:, 0]
+            weights[:, -1] = special.ndtr(-standardized_nodes[:, -1])
+
+            for index, width in enumerate(np.diff(log_nodes)):
+                probability = node_cdf[:, index + 1] - node_cdf[:, index]
+                first_moment = (
+                    location * probability
+                    + sigma * (node_pdf[:, index] - node_pdf[:, index + 1])
+                )
+                upper_weight = (
+                    first_moment - log_nodes[index] * probability
+                ) / width
+                upper_weight = np.clip(upper_weight, 0.0, probability)
+                weights[:, index] += probability - upper_weight
+                weights[:, index + 1] += upper_weight
+
+            # Suppress round-off at extreme Gaussian tails and conserve mass.
+            weights = np.clip(weights, 0.0, None)
+            normalization = weights.sum(axis=-1)
+            if np.any(normalization <= np.finfo(float).tiny):
+                raise RuntimeError(
+                    "Could not project metallicity distribution onto SSP nodes"
+                )
+            weights /= normalization[:, np.newaxis]
+
+        return weights.reshape(input_shape + (n_nodes,))
+
 def sfh_quenching_decorator(stellar_mass_formed):
     """
     Decorator that enforces a hard quenching event in a cumulative SFH.
@@ -715,6 +956,236 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
         out_val = np.einsum("bza,za,an->nb", photometry.value, weights.value, M)
         return out_val * (photometry.unit * weights.unit)
+
+
+class ChemicalEvolutionModel2D(ChemicalEvolutionModel, ABC):
+    r"""Base class for bidimensional CEMs.
+
+    At variance with :class:`ChemicalEvolutionModel`, which assigns one metallicity
+    to all stars formed at a given cosmic time, this class instead represents
+
+    .. math::
+
+        \Phi(t, Z) = \frac{\mathrm{d}^2 M_\star}
+        {\mathrm{d}t\,\mathrm{d}\log Z}
+
+    through the cumulative SFH and a conditional metallicity distribution
+    :math:`p(Z\mid t)`.
+    """
+
+    @property
+    def metallicity_distribution_is_delta(self) -> bool:
+        r"""Whether :math:`p(Z\mid t)` is a delta distribution."""
+        return False
+
+    @abstractmethod
+    def metallicity_distribution(
+        self,
+        times: u.Quantity,
+        metallicity_bin_edges: u.Quantity,
+    ) -> np.ndarray:
+        r"""Evaluate :math:`p(Z\mid t)` in metallicity bins.
+
+        Implementations must return a non-negative array with shape
+        ``times.shape + (len(metallicity_bin_edges) - 1,)`` normalized to one
+        along the last axis.
+        """
+        return
+
+    @abstractmethod
+    def metallicity_interpolation_weights(
+        self,
+        times: u.Quantity,
+        metallicity_nodes: u.Quantity,
+    ) -> np.ndarray:
+        r"""Return SSP interpolation-node weights for :math:`p(Z\mid t)`.
+
+        Implementations must return a non-negative array with shape
+        ``times.shape + (len(metallicity_nodes),)`` normalized to one along the
+        final axis. The weights should use the same interpolation basis as the
+        target SSP model and vary continuously when distribution parameters
+        approach a delta function.
+        """
+        return
+
+    @staticmethod
+    def _validated_mass_differences(cumulative_mass: u.Quantity) -> u.Quantity:
+        """Difference a cumulative SFH while tolerating floating-point noise."""
+        bin_mass = np.diff(cumulative_mass)
+        if np.any(~np.isfinite(bin_mass)):
+            raise ValueError("stellar_mass_formed returned non-finite values")
+
+        mass_scale = np.max(np.abs(cumulative_mass))
+        tolerance = 32.0 * np.finfo(float).eps * mass_scale
+        if np.any(bin_mass < -tolerance):
+            raise ValueError("stellar_mass_formed must be non-decreasing")
+
+        # Monotone interpolation can still produce differences of order one
+        # machine epsilon when adjacent cumulative values should be identical.
+        return np.where(
+            bin_mass < 0.0 * bin_mass.unit,
+            0.0 * bin_mass.unit,
+            bin_mass,
+        )
+
+    def joint_mass_weights(
+        self,
+        time_bin_edges: u.Quantity,
+        metallicity_bin_edges: u.Quantity,
+    ) -> u.Quantity:
+        """Return formed mass in joint cosmic-time and metallicity bins.
+
+        Parameters
+        ----------
+        time_bin_edges : array-like or :class:`astropy.units.Quantity`
+            Strictly increasing cosmic formation-time edges.
+        metallicity_bin_edges : array-like or :class:`astropy.units.Quantity`
+            Strictly increasing, positive metallicity-bin edges.
+
+        Returns
+        -------
+        joint_mass : :class:`astropy.units.Quantity`
+            Formed mass with shape ``(n_time_bins, n_metallicity_bins)``.
+        """
+        time_edges = check_unit(time_bin_edges, u.Gyr)
+        if time_edges.ndim != 1 or time_edges.size < 2:
+            raise ValueError("time_bin_edges must be a one-dimensional array")
+        if np.any(~np.isfinite(time_edges)) or np.any(np.diff(time_edges) <= 0):
+            raise ValueError("time_bin_edges must be finite and strictly increasing")
+
+        metallicity_edges = check_unit(
+            metallicity_bin_edges, u.dimensionless_unscaled
+        )
+        if metallicity_edges.ndim != 1 or metallicity_edges.size < 2:
+            raise ValueError("metallicity_bin_edges must be a one-dimensional array")
+        if np.any(~np.isfinite(metallicity_edges)) or np.any(metallicity_edges <= 0):
+            raise ValueError("metallicity_bin_edges must be finite and positive")
+        if np.any(np.diff(metallicity_edges) <= 0):
+            raise ValueError("metallicity_bin_edges must be strictly increasing")
+
+        cumulative_mass = self.stellar_mass_formed(time_edges)
+        bin_mass = self._validated_mass_differences(cumulative_mass)
+
+        bin_time = 0.5 * (time_edges[:-1] + time_edges[1:])
+        probabilities = np.asarray(
+            self.metallicity_distribution(bin_time, metallicity_edges),
+            dtype=float,
+        )
+        expected_shape = (bin_time.size, metallicity_edges.size - 1)
+        if probabilities.shape != expected_shape:
+            raise ValueError(
+                "metallicity_distribution returned shape "
+                f"{probabilities.shape}; expected {expected_shape}"
+            )
+        if np.any(~np.isfinite(probabilities)) or np.any(probabilities < 0):
+            raise ValueError(
+                "metallicity_distribution must return finite, non-negative probabilities"
+            )
+        if not np.allclose(probabilities.sum(axis=-1), 1.0, rtol=1e-10, atol=1e-12):
+            raise ValueError(
+                "metallicity_distribution must be normalized along its last axis"
+            )
+
+        return bin_mass[:, np.newaxis] * probabilities
+
+    @weights_cache_decorator
+    def interpolate_ssp_masses(
+        self,
+        ssp: SSPBase,
+        t_obs: u.Quantity,
+        oversample_factor: int = 10,
+    ) -> u.Quantity:
+        """Project the joint formation-time--metallicity distribution onto an SSP grid.
+
+        A zero-width conditional metallicity distribution uses the parent CEM
+        implementation, preserving the deterministic model exactly.
+        """
+        t_obs = check_unit(t_obs, u.Gyr)
+        if self.metallicity_distribution_is_delta:
+            return super().interpolate_ssp_masses(
+                ssp, t_obs, oversample_factor=oversample_factor
+            )
+
+        if not isinstance(oversample_factor, (int, np.integer)) or oversample_factor < 1:
+            raise ValueError("oversample_factor must be a positive integer")
+
+        age_bins = np.hstack(
+            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr]
+        )
+        age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
+        age_bins[-1] = t_obs
+
+        fractions = np.arange(oversample_factor) / oversample_factor
+        age_bins = np.hstack(
+            [
+                (1 - fractions) * age_bins[i] + fractions * age_bins[i + 1]
+                for i in range(age_bins.size - 1)
+            ]
+            + [t_obs]
+        )
+
+        # joint_mass_weights uses increasing cosmic time, whereas SSP age runs
+        # in the opposite direction.
+        formation_time_edges = (t_obs - age_bins)[::-1]
+        formation_time = 0.5 * (
+            formation_time_edges[:-1] + formation_time_edges[1:]
+        )
+        cumulative_mass = self.stellar_mass_formed(formation_time_edges)
+        bin_mass = self._validated_mass_differences(cumulative_mass)
+
+        metallicity_weights = np.asarray(
+            self.metallicity_interpolation_weights(
+                formation_time, ssp.metallicities
+            ),
+            dtype=float,
+        )
+        expected_shape = (formation_time.size, ssp.metallicities.size)
+        if metallicity_weights.shape != expected_shape:
+            raise ValueError(
+                "metallicity_interpolation_weights returned shape "
+                f"{metallicity_weights.shape}; expected {expected_shape}"
+            )
+        if np.any(~np.isfinite(metallicity_weights)) or np.any(
+            metallicity_weights < 0
+        ):
+            raise ValueError(
+                "metallicity_interpolation_weights must return finite, "
+                "non-negative weights"
+            )
+        if not np.allclose(
+            metallicity_weights.sum(axis=-1),
+            1.0,
+            rtol=1e-10,
+            atol=1e-12,
+        ):
+            raise ValueError(
+                "metallicity_interpolation_weights must be normalized along "
+                "its last axis"
+            )
+        joint_mass = bin_mass[:, np.newaxis] * metallicity_weights
+
+        bin_age = t_obs - formation_time
+        n_time, n_metallicity = joint_mass.shape
+        ages = np.repeat(bin_age[:, np.newaxis], n_metallicity, axis=1)
+        metallicities = np.repeat(
+            ssp.metallicities[np.newaxis, :], n_time, axis=0
+        )
+
+        return ssp.get_weights(
+            ages=ages.ravel(),
+            metallicities=metallicities.ravel(),
+            masses=joint_mass.ravel(),
+        )
+
+    def mean_stellar_metallicity(
+        self, ssp: SSPBase, t_obs: u.Quantity
+    ) -> u.Quantity:
+        """Return the formed-mass-weighted metallicity on the projected SSP grid."""
+        weights = self.interpolate_ssp_masses(ssp, t_obs)
+        return (
+            np.nansum(ssp.metallicities[:, np.newaxis] * weights)
+            / np.nansum(weights)
+        )
 
 
 class SingleBurstCEM(ChemicalEvolutionModel):
@@ -1851,6 +2322,45 @@ class TabularMassFracCEM(TabularCEM_ZPowerLaw):
             fixed=False,
             doc="Extended cosmic-time grid including Big Bang and observing-time anchors",
         )
+
+
+class TabularMassFracCEM2D(
+    LogNormalMetallicityDistributionMixin,
+    ChemicalEvolutionModel2D,
+    TabularMassFracCEM,
+):
+    r"""Mass-fraction SFH with power-law mean enrichment and metallicity scatter.
+
+    This is the two-dimensional counterpart of :class:`TabularMassFracCEM`.
+    It retains the same cumulative SFH and mean enrichment law,
+
+    .. math::
+
+        \overline{Z}(t) = Z_{\rm today}
+        \left(\frac{M_\star(t)}{M_\star({\rm today})}\right)^{\alpha_Z},
+
+    while distributing the mass formed at each time log-normally in metallicity.
+
+    Parameters
+    ----------
+    sigma_log_metallicity : float, Quantity, or Parameter, optional
+        Standard deviation of log10 stellar metallicity at fixed formation time,
+        in dex. The default is zero, which exactly recovers
+        :class:`TabularMassFracCEM`.
+    **kwargs
+        Arguments accepted by :class:`TabularMassFracCEM`.
+    """
+
+    name = "tabular_mass_frac_cem_2d"
+
+    def __init__(
+        self,
+        *,
+        sigma_log_metallicity: Parameter | u.Quantity | float = 0.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.sigma_log_metallicity = sigma_log_metallicity
 
 
 class ParticleListCEM(ChemicalEvolutionModel):
