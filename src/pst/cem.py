@@ -1923,10 +1923,127 @@ class BetaZPowerLawCEM(MassPropMetallicityMixin, BetaCEM):
             doc="Metallicity evolution power-law exponent",
         )
 
+# This code is meant to replace the previous PCHIP implementation
+# with a more efficient and numerically stable version that avoids scipy's overhead.
+
+def _one_sided_slope(h0, h1, m0, m1):
+    """PCHIP one-sided end slope (same as scipy's PchipInterpolator)."""
+    slope = ((2.0 * h0 + h1) * m0 - h0 * m1) / (h0 + h1)
+    if np.sign(slope) != np.sign(m0):
+        return 0.0
+    if np.sign(m0) != np.sign(m1) and abs(slope) > 3.0 * abs(m0):
+        return 3.0 * m0
+    return slope
+
+
+def _exponential_end_slope(h1, h0, m1, m0):
+    r"""SFR at the last node of a cumulative mass table.
+
+    The mean SFRs of the last two intervals, :math:`m_1` (previous) and
+    :math:`m_0` (last), are placed at the interval mid-times and joined by an
+    exponential, :math:`{\rm SFR}(t) \propto e^{kt}`, which is extrapolated to
+    the last node:
+
+    .. math::
+        \dot M(t_n) = m_0 \left(\frac{m_0}{m_1}\right)^{h_0 / (h_0 + h_1)},
+
+    with :math:`h_0, h_1` the lengths of the last and previous intervals. The
+    result is limited to :math:`3 m_0` so that the Hermite cubic on the last
+    interval remains monotone.
+
+    Returns ``None`` when the last two intervals are not monotonically
+    non-decreasing (the caller then keeps the standard PCHIP slope).
+    """
+    if m1 < 0 or m0 < 0:
+        return None
+    if m0 == 0:
+        return 0.0
+    if m1 == 0:
+        return 3.0 * m0
+    return min(m0 * (m0 / m1) ** (h0 / (h0 + h1)), 3.0 * m0)
+
+
+class MassHistoryInterpolant:
+    r"""Monotone cubic interpolant of a tabulated cumulative mass history.
+
+    Uses the PCHIP slopes at every node except the last one, i.e. the observing
+    time, where the slope follows the exponential trend of the mean SFR of the
+    last two intervals (see :func:`_exponential_end_slope`).
+
+    Standard PCHIP estimates the end slope from a parabola through the last
+    three nodes and sets it to exactly zero whenever that estimate is negative,
+    which happens whenever the SFR declines steeply towards the end of the table.
+    That forces :math:`{\rm SFR}(t_{\rm obs}) = 0`, creating spurious quenching
+    and removes mass from the youngest stellar populations. The exponential end
+    slope is positive, follows declining and rising trends, and reproduces a
+    constant SFR exactly.
+
+    Parameters
+    ----------
+    times, masses : array-like
+        Strictly increasing times and the cumulative mass formed at each time
+        (plain values in consistent units).
+    """
+    # for performance
+    __slots__ = ("x", "y", "h", "slopes")
+
+    def __init__(self, times, masses):
+        x = np.asarray(times, dtype=float)
+        y = np.asarray(masses, dtype=float)
+        h = np.diff(x)
+        m = np.diff(y) / h
+        slopes = np.empty_like(y)
+        if x.size == 2:
+            slopes[:] = m[0]
+        else:
+            # For the interior segments use PCHIP
+            w1 = 2.0 * h[1:] + h[:-1]
+            w2 = h[1:] + 2.0 * h[:-1]
+            same_sign = (m[:-1] * m[1:]) > 0
+            with np.errstate(divide="ignore", invalid="ignore"):
+                slopes[1:-1] = np.where(
+                    same_sign, (w1 + w2) / (w1 / m[:-1] + w2 / m[1:]), 0.0)
+            slopes[0] = _one_sided_slope(h[0], h[1], m[0], m[1])
+            # exponential end slope at the last node corresponding to obs. time
+            end_slope = _exponential_end_slope(h[-2], h[-1], m[-2], m[-1])
+            slopes[-1] = (end_slope if end_slope is not None
+                          else _one_sided_slope(h[-1], h[-2], m[-1], m[-2]))
+        self.x, self.y, self.h, self.slopes = x, y, h, slopes
+
+    def __call__(self, t, nu=0):
+        """Evaluate the mass history (``nu=0``) or its derivatives (``nu=1, 2``)."""
+        x, y, h, d = self.x, self.y, self.h, self.slopes
+        t = np.asarray(t, dtype=float)
+        k = np.clip(np.searchsorted(x, t, side="right") - 1, 0, x.size - 2)
+        hk = h[k]
+        s = (t - x[k]) / hk
+        y0, y1, d0, d1 = y[k], y[k + 1], d[k], d[k + 1]
+        s2 = s * s
+        if nu == 0:
+            s3 = s2 * s
+            return ((2.0 * s3 - 3.0 * s2 + 1.0) * y0
+                    + (s3 - 2.0 * s2 + s) * hk * d0
+                    + (3.0 * s2 - 2.0 * s3) * y1
+                    + (s3 - s2) * hk * d1)
+        if nu == 1:
+            return ((6.0 * s2 - 6.0 * s) * (y0 - y1) / hk
+                    + (3.0 * s2 - 4.0 * s + 1.0) * d0
+                    + (3.0 * s2 - 2.0 * s) * d1)
+        if nu == 2:
+            return ((12.0 * s - 6.0) * (y0 - y1) / hk
+                    + (6.0 * s - 4.0) * d0
+                    + (6.0 * s - 2.0) * d1)
+
+        raise ValueError("Only nu=0 (mass) and nu=1 (SFR) and nu=2 (SFR') are supported.")
+
 
 class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
-    
+
+    The cumulative mass history is interpolated with a monotone cubic (PCHIP)
+    whose slope at the last node follows the recent SFR trend
+    (see :class:`MassHistoryInterpolant`).
+
     Description
     -----------
     This model represents the chemical evolution of a galaxy by means of a
@@ -2049,7 +2166,7 @@ class TabularCEM(ChemicalEvolutionModel):
         integral : :class:`astropy.units.Quantity`
             The cumulative stellar mass formed at each input time.
         """
-        interpolator = interpolate.PchipInterpolator(
+        interpolator = MassHistoryInterpolant(
            self.table_t.value, self.table_mass.value)
         integral = interpolator(times.to_value(self.table_t.unit)
                                 ) << self.table_mass.unit
@@ -2076,7 +2193,7 @@ class TabularCEM(ChemicalEvolutionModel):
         sfr : :class:`astropy.units.Quantity`
             The star formation rate at each input time.
         """
-        interpolator = interpolate.PchipInterpolator(
+        interpolator = MassHistoryInterpolant(
            self.table_t.value, self.table_mass.value)
         sfr = interpolator(times.to_value(self.table_t.unit), nu=1) << (self.table_mass.unit / self.table_t.unit)
         sfr[times > self.table_t[-1]] = 0
