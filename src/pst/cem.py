@@ -750,8 +750,8 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             today = check_unit(today.q if isinstance(today, Parameter) else today, u.Gyr)
 
         time_res = check_unit(time_res, u.Gyr)
-        dummy_time = np.arange(0, today.to_value("Gyr"),
-                               time_res.to_value("Gyr")) << u.Gyr
+        n = int(np.ceil(today.to_value("Gyr") / time_res.to_value("Gyr"))) + 1
+        dummy_time = np.linspace(0, today.to_value("Gyr"), n) << u.Gyr
         mass_history = self.stellar_mass_formed(dummy_time)
         frac_history = mass_history / mass_history[-1]
         idx = np.searchsorted(frac_history, frac).clip(
