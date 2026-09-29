@@ -494,5 +494,69 @@ class TestModels(unittest.TestCase):
             model.ionising_photon_rate_hi(ssp, 13.0 * u.Gyr, species='CIV')
 
 
+class TestMassHistoryInterpolator(unittest.TestCase):
+    """End condition of the tabular mass-history interpolation."""
+
+    # Last interval (3% of the mass in 2.7 Gyr) is ~5x shallower than the
+    # previous one: standard PCHIP clamps SFR(today) to exactly 0 here.
+    times = np.array([0.0, 4.0, 8.0, 11.0, 13.7])
+    masses = np.array([0.0, 0.3, 0.8, 0.97, 1.0])
+
+    @staticmethod
+    def _expected_end_slope(times, masses):
+        h1, h0 = times[-2] - times[-3], times[-1] - times[-2]
+        m1 = (masses[-2] - masses[-3]) / h1
+        m0 = (masses[-1] - masses[-2]) / h0
+        return min(m0 * (m0 / m1) ** (h0 / (h0 + h1)), 3 * m0)
+
+    def test_declining_sfr_is_not_forced_to_zero(self):
+        from scipy.interpolate import PchipInterpolator
+        standard = PchipInterpolator(self.times, self.masses)(self.times[-1], nu=1)
+        self.assertAlmostEqual(standard, 0.0, places=12)  # the old behaviour
+
+        model = cem.TabularCEM(times=self.times * u.Gyr, masses=self.masses * u.Msun,
+                               metallicities=np.full(self.times.size, 0.02))
+        sfr_today = model.sfr(np.array([self.times[-1] - 1e-9]) * u.Gyr)[0]
+        expected = self._expected_end_slope(self.times, self.masses)
+        self.assertTrue(u.isclose(sfr_today, expected * u.Msun / u.Gyr, rtol=1e-6))
+        # Declining trend: below the mean SFR of the last interval, but positive
+        mean_last = (self.masses[-1] - self.masses[-2]) / (self.times[-1] - self.times[-2])
+        self.assertGreater(sfr_today.to_value(u.Msun / u.Gyr), 0.0)
+        self.assertLess(sfr_today.to_value(u.Msun / u.Gyr), mean_last)
+
+    def test_interpolant_is_monotone_and_passes_through_nodes(self):
+        rng = np.random.default_rng(1)
+        grid = np.linspace(0.0, 13.7, 5001)
+        for _ in range(200):
+            times = np.concatenate(([0.0], np.sort(rng.uniform(0.0, 13.7, 5)), [13.7]))
+            masses = np.concatenate(([0.0], np.sort(rng.uniform(0.0, 1.0, 5)), [1.0]))
+            interp = cem.MassHistoryInterpolant(times, masses)
+            np.testing.assert_allclose(interp(times), masses, atol=1e-12)
+            self.assertTrue(np.all(np.diff(interp(grid)) >= -1e-12))
+            self.assertTrue(np.all(interp(grid, nu=1) >= -1e-12))
+            self.assertGreater(interp(times[-1], nu=1), 0.0)
+
+    def test_constant_sfr_is_reproduced(self):
+        times = np.array([0.0, 2.0, 5.0, 9.0, 12.0, 13.7])
+        interp = cem.MassHistoryInterpolant(times, 0.1 * times)
+        grid = np.linspace(0.0, 13.7, 1001)
+        np.testing.assert_allclose(interp(grid, nu=1), 0.1, rtol=1e-10)
+
+    def test_only_the_last_interval_changes(self):
+        from scipy.interpolate import PchipInterpolator
+        grid = np.linspace(0.0, self.times[-2], 2001)
+        np.testing.assert_allclose(
+            cem.MassHistoryInterpolant(self.times, self.masses)(grid),
+            PchipInterpolator(self.times, self.masses)(grid), rtol=1e-12, atol=1e-14)
+
+    def test_rising_sfr_end_slope_is_limited(self):
+        times = np.array([0.0, 6.0, 12.0, 13.0, 13.7])
+        masses = np.array([0.0, 0.05, 0.2, 0.5, 1.0])
+        mean_last = (masses[-1] - masses[-2]) / (times[-1] - times[-2])
+        slope = cem.MassHistoryInterpolant(times, masses)(times[-1], nu=1)
+        self.assertGreater(slope, mean_last)            # follows the rising trend
+        self.assertLessEqual(slope, 3 * mean_last + 1e-12)
+
+
 if __name__ == '__main__':
     unittest.main()
