@@ -243,29 +243,91 @@ class SSPBase(object):
         masses : np.array, astropy.units.Quantity or None, optional
             Stellar mass corresponding to each SSP.
         """
-        ages = check_unit(ages, u.Gyr)
-        metallicities = check_unit(metallicities, u.dimensionless_unscaled)
-        if masses is None:
-            masses = np.ones(ages.size) << u.Msun
-        else:
-            masses = check_unit(masses, u.Msun)
+        age_idx, weights_age = self.age_interpolation(ages)
+        return self.weights_from_age_interpolation(
+            age_idx, weights_age, metallicities, masses=masses)
 
+    def age_interpolation(self, ages):
+        """Age-grid part of :meth:`get_weights`.
+
+        This part depends only on the input ages and the SSP age grid, so it can be
+        computed once and reused when the same ages are projected many times.
+
+        Parameters
+        ----------
+        ages : np.array or astropy.units.Quantity
+            SSP ages to interpolate (Gyr if bare numbers).
+
+        Returns
+        -------
+        age_idx : np.ndarray of int
+            Index of the upper SSP age node of each input age.
+        weights_age : np.ndarray of float
+            Weight of the upper node, linear in log(age) and clipped to [0, 1].
+        """
+        ages = check_unit(ages, u.Gyr)
         age_idx = np.clip(self.ages.searchsorted(ages), 1, self.ages.size-1)
         weights_age = np.log(ages / self.ages[age_idx-1])
         weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
         weights_age = np.clip(weights_age, 0., 1.)
+        weights_age = np.asarray(
+            u.Quantity(weights_age).to_value(u.dimensionless_unscaled),
+            dtype=float)
+        return age_idx, weights_age
 
-        z_idx = np.clip(self.metallicities.searchsorted(metallicities), 1, self.metallicities.size-1)
-        weights_z = np.log(metallicities / self.metallicities[z_idx-1])
-        weights_z /= np.log(self.metallicities[z_idx] / self.metallicities[z_idx-1])
+    def weights_from_age_interpolation(self, age_idx, weights_age,
+                                       metallicities, masses=None):
+        """Metallicity and mass part of :meth:`get_weights`.
+
+        Parameters
+        ----------
+        age_idx, weights_age : np.ndarray
+            Output of :meth:`age_interpolation`.
+        metallicities : np.array or astropy.units.Quantity
+            Metallicity associated to each age.
+        masses : np.array, astropy.units.Quantity or None, optional
+            Stellar mass corresponding to each age (Msun if bare numbers).
+
+        Returns
+        -------
+        weights : astropy.units.Quantity
+            Mass on the SSP grid, shape ``(n_metallicities, n_ages)``, in Msun.
+        """
+        metallicities = check_unit(metallicities, u.dimensionless_unscaled)
+        metallicities = np.asarray(
+            metallicities.to_value(u.dimensionless_unscaled), dtype=float)
+        grid_z = self.metallicities
+        if isinstance(grid_z, u.Quantity):
+            grid_z = grid_z.to_value(u.dimensionless_unscaled)
+        grid_z = np.asarray(grid_z, dtype=float)
+        n_z, n_age = grid_z.size, self.ages.size
+
+        if masses is None:
+            masses = np.ones(np.size(age_idx))
+        else:
+            masses = np.asarray(
+                check_unit(masses, u.Msun).to_value(u.Msun), dtype=float)
+
+        z_idx = np.clip(grid_z.searchsorted(metallicities), 1, n_z-1)
+        weights_z = np.log(metallicities / grid_z[z_idx-1])
+        weights_z /= np.log(grid_z[z_idx] / grid_z[z_idx-1])
         weights_z = np.clip(weights_z, 0., 1.)
 
-        weights = np.zeros((self.metallicities.size, self.ages.size)) << masses.unit
-        np.add.at(weights, (z_idx, age_idx), masses * weights_age * weights_z)
-        np.add.at(weights, (z_idx-1, age_idx), masses * weights_age * (1-weights_z))
-        np.add.at(weights, (z_idx-1, age_idx-1), masses * (1-weights_age) * (1-weights_z))
-        np.add.at(weights, (z_idx, age_idx-1), masses * (1-weights_age) * weights_z)
-        return weights
+        terms = (
+            (z_idx, age_idx, masses * weights_age * weights_z),
+            (z_idx-1, age_idx, masses * weights_age * (1-weights_z)),
+            (z_idx-1, age_idx-1, masses * (1-weights_age) * (1-weights_z)),
+            (z_idx, age_idx-1, masses * (1-weights_age) * weights_z),
+        )
+        flat_idx, values = [], []
+        for zi, ai, value in terms:
+            zi, ai, value = np.broadcast_arrays(zi, ai, value)
+            flat_idx.append(((zi % n_z) * n_age + ai % n_age).ravel())
+            values.append(value.ravel())
+        weights = np.bincount(np.concatenate(flat_idx),
+                              weights=np.concatenate(values),
+                              minlength=n_z * n_age)
+        return weights.reshape(n_z, n_age) << u.Msun
 
     def get_ssp_l_lambda(self, age, metallicity):
         """Compute the SED associated to an SSP of a given age and metallicity.
