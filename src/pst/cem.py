@@ -35,6 +35,9 @@ def _check_time_dec(func):
     """
     @wraps(func)
     def wrapper(self, time, *args, **kwargs):
+        if type(time) is u.Quantity and time.unit is u.Gyr:
+            # Already a Quantity in Gyr: skip the unit check and the copy
+            return func(self, time, *args, **kwargs)
         if isinstance(time, Parameter):
             tq = time.q.to(u.Gyr)
         else:
@@ -110,9 +113,18 @@ class MassPropMetallicityMixin:
             Dimensionless ISM metallicity (mass fraction) evaluated at each input
             time. Shape matches ``times``.
         """
-        m = self.stellar_mass_formed(times)
+        return self._ism_metallicity_from_mass(self.stellar_mass_formed(times))
+
+    def _ism_metallicity_from_mass(self, m):
+        """ISM metallicity for a given cumulative formed mass ``m``.
+
+        Lets :meth:`~pst.cem.ChemicalEvolutionModel.interpolate_ssp_masses`
+        reuse a mass history it has already evaluated.
+        """
         return np.clip(
-		self.ism_metallicity_today * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),                1e-6 << u.dimensionless_unscaled, None)
+            self.ism_metallicity_today
+            * np.power(m / self.mass_today, self.alpha_powerlaw).decompose(),
+            1e-6 << u.dimensionless_unscaled, None)
 
     def mean_stellar_metallicity(self, ssp, t_obs):
         """Compute the mean stellar metallicity at an observing time.
@@ -413,6 +425,123 @@ def sfh_quenching_decorator(stellar_mass_formed):
         return np.where(tq < qtq, m, m_q)
     return wrapper
 
+
+# Tricks to increase the performance
+def _clean_ssp_weights(weights: np.ndarray, allow_negative: bool) -> np.ndarray:
+    """Zero non-finite (and, unless ``allow_negative``, non-positive) SSP weights.
+
+    Works on plain arrays: comparing a Quantity with ``0`` makes astropy try a
+    unit conversion (and parse a unit string) on every call.
+    """
+    weights = np.where(np.isfinite(weights), weights, 0.0)
+    if not allow_negative:
+        weights = np.where(weights > 0, weights, 0.0)
+    return weights
+
+
+_PRODUCT_UNIT_CACHE = {}
+_PRODUCT_UNIT_CACHE_SIZE = 64
+
+
+def _product_unit(unit_a, unit_b):
+    """Return ``unit_a * unit_b``, cached to replace astropy units composition."""
+    key = (unit_a, unit_b)
+    unit = _PRODUCT_UNIT_CACHE.get(key)
+    if unit is None:
+        unit = unit_a * unit_b
+        if len(_PRODUCT_UNIT_CACHE) >= _PRODUCT_UNIT_CACHE_SIZE:
+            _PRODUCT_UNIT_CACHE.pop(next(iter(_PRODUCT_UNIT_CACHE)))
+        _PRODUCT_UNIT_CACHE[key] = unit
+    return unit
+
+
+class _SSPAgeGrid:
+    """Parameter-independent part of :meth:`ChemicalEvolutionModel.interpolate_ssp_masses`.
+
+    Attributes
+    ----------
+    age_bins : astropy.units.Quantity
+        Oversampled SSP age-bin edges from 0 to ``t_obs``.
+    formation_times : astropy.units.Quantity
+        ``t_obs - age_bins`` (cosmic times of the bin edges).
+    bin_age : astropy.units.Quantity
+        Mid-point age of each bin.
+    bin_formation_times : astropy.units.Quantity
+        ``t_obs - bin_age``.
+    all_times : astropy.units.Quantity
+        ``formation_times`` followed by ``bin_formation_times``, to evaluate
+        the mass history at both with a single call.
+    age_idx, age_weights : np.ndarray or None
+        :meth:`pst.SSP.SSPBase.age_interpolation` of ``bin_age``, or ``None``
+        if the SSP class overrides ``get_weights``.
+    """
+    __slots__ = ("age_bins", "formation_times", "bin_age",
+                 "bin_formation_times", "all_times", "age_idx", "age_weights")
+
+
+_SSP_AGE_GRID_CACHE = {}
+_SSP_AGE_GRID_CACHE_SIZE = 32
+
+
+def _ssp_age_grid(ssp, t_obs, oversample_factor=10):
+    """Return the cached SSP age grid used to project an SFH onto ``ssp``.
+
+    The age bins depend only on the SSP age grid, the observing time and
+    ``oversample_factor``, so they are built once and reused for every
+    evaluation of the SFH. The cache key holds the SSP age values (a changed
+    age grid gives a new entry) and is bounded to
+    ``_SSP_AGE_GRID_CACHE_SIZE`` entries.
+    """
+    ages = ssp.ages
+    t_obs_gyr = (t_obs.to_value(u.Gyr) if hasattr(t_obs, "to_value")
+                 else float(t_obs))
+    key = (np.asarray(getattr(ages, "value", ages)).tobytes(),
+           getattr(ages, "unit", None), float(np.squeeze(t_obs_gyr)),
+           int(oversample_factor))
+    grid = _SSP_AGE_GRID_CACHE.get(key)
+    if grid is not None:
+        return grid
+
+    # define age bins from 0 to t_obs
+    age_bins = np.hstack(
+        [0 << u.yr, np.sqrt(ages[1:] * ages[:-1]), 1e12 << u.yr])
+    age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
+    age_bins[-1] = t_obs
+    # oversample
+    w1 = np.arange(oversample_factor) / oversample_factor
+    age_bins = np.hstack(
+        [(1-w1) * age_bins[i] + w1 * age_bins[i + 1]
+         for i in range(age_bins.size - 1)]
+        + [t_obs])
+
+    grid = _SSPAgeGrid()
+    grid.age_bins = age_bins
+    grid.formation_times = t_obs - age_bins
+    grid.bin_age = (age_bins[1:] + age_bins[:-1]) / 2
+    grid.bin_formation_times = t_obs - grid.bin_age
+    grid.all_times = np.concatenate(
+        [grid.formation_times, grid.bin_formation_times])
+    if type(ssp).get_weights is SSPBase.get_weights:
+        grid.age_idx, grid.age_weights = ssp.age_interpolation(grid.bin_age)
+    else:
+        grid.age_idx = grid.age_weights = None
+    for name in _SSPAgeGrid.__slots__:
+        value = getattr(grid, name)
+        if isinstance(value, np.ndarray):
+            value.flags.writeable = False
+
+    if len(_SSP_AGE_GRID_CACHE) >= _SSP_AGE_GRID_CACHE_SIZE:
+        _SSP_AGE_GRID_CACHE.pop(next(iter(_SSP_AGE_GRID_CACHE)))
+    _SSP_AGE_GRID_CACHE[key] = grid
+    return grid
+
+
+def _metallicity_from_mass(model):
+    """Whether ``model`` uses the :class:`MassPropMetallicityMixin` Z(M) law."""
+    return (isinstance(model, MassPropMetallicityMixin)
+            and type(model).ism_metallicity is MassPropMetallicityMixin.ism_metallicity)
+
+
 def weights_cache_decorator(func):
     """
     Decorator that caches SSP weights computed by a CEM instance.
@@ -597,31 +726,41 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         :meth:`stellar_mass_formed` and :meth:`ism_metallicity` at corresponding
         cosmic times (``t_obs - age``).
 
+        The age bins and their interpolation weights on the SSP age grid are
+        always cached per SSP age grid, ``t_obs`` and ``oversample_factor``.
+        Only the mass and metallicity histories are evaluated on each call.
+
         If caching is enabled, callers should keep ``oversample_factor`` fixed for
         repeated evaluations at the same ``ssp`` and ``t_obs``. Changing
         ``oversample_factor`` does change the interpolation, but it is not part of
         the cache key.
         """
-        # define age bins from 0 to t_obs
-        age_bins = np.hstack(
-            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr])
-        age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
-        age_bins[-1] = t_obs
-        # oversample
-        w1 = np.arange(oversample_factor) / oversample_factor
-        age_bins = np.hstack(
-            [(1-w1) * age_bins[i] + w1 * age_bins[i + 1] for i in range(age_bins.size - 1)]
-            + [t_obs])
+        # The age bins and their mapping onto the SSP age grid do not depend
+        # on the model parameters: they are built once per (SSP ages, t_obs,
+        # oversample_factor) and reused (see ``_ssp_age_grid``).
+        grid = _ssp_age_grid(ssp, t_obs, oversample_factor)
 
         # find bin properties
-        mass = self.stellar_mass_formed(t_obs - age_bins)
+        if _metallicity_from_mass(self):
+            # Z(t) is a function of M(t): evaluate the mass history once, at
+            # the bin edges and at the bin mid-points
+            n_edges = grid.formation_times.size
+            mass_all = self.stellar_mass_formed(grid.all_times)
+            mass = mass_all[:n_edges]
+            bin_metallicity = self._ism_metallicity_from_mass(mass_all[n_edges:])
+        else:
+            mass = self.stellar_mass_formed(grid.formation_times)
+            bin_metallicity = self.ism_metallicity(grid.bin_formation_times)
         bin_mass = mass[:-1] - mass[1:]
-        bin_age = (age_bins[1:] + age_bins[:-1]) / 2
-        bin_metallicity = self.ism_metallicity(t_obs - bin_age)
- 
-        return ssp.get_weights(ages=bin_age,
-                               metallicities=bin_metallicity,
-                               masses=bin_mass)
+
+        if grid.age_idx is None:
+            # SSP class with its own ``get_weights``
+            return ssp.get_weights(ages=grid.bin_age,
+                                   metallicities=bin_metallicity,
+                                   masses=bin_mass)
+        return ssp.weights_from_age_interpolation(
+            grid.age_idx, grid.age_weights,
+            metallicities=bin_metallicity, masses=bin_mass)
 
     def surviving_stellar_mass(self, ssp: SSPBase, t_obs: u.Quantity):
         """
@@ -885,19 +1024,28 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         mapping is performed using :func:`numpy.digitize` on ``ssp.ages``.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
-        weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
-        if not allow_negative:
-            weights = np.where(weights > 0, weights, 0.0 << weights.unit)
-        
+        # Plain arrays from here on; the unit is attached once at the end
+        weights_val = _clean_ssp_weights(weights.value, allow_negative)
+        l_lambda = ssp.L_lambda
+        sed_grid = l_lambda.value
+        out_unit = _product_unit(weights.unit, l_lambda.unit)
+
         if age_bin_edges is None:
-            sed_val = np.einsum("za,zaw->w", weights.value, ssp.L_lambda.value)
-            return sed_val * (weights.unit * ssp.L_lambda.unit)
+            if (sed_grid.dtype == weights_val.dtype and sed_grid.ndim == 3
+                    and sed_grid.flags.c_contiguous):
+                # This operation does not copy the full SSP grid
+                sed_val = weights_val.reshape(-1) @ sed_grid.reshape(
+                    -1, sed_grid.shape[-1])
+            else:
+                # Mixed precision or non-contiguous grid
+                sed_val = np.einsum("za,zaw->w", weights_val, sed_grid)
+            return sed_val << out_unit
 
         idx = np.digitize(ssp.ages, check_unit(age_bin_edges, ssp.ages.unit)
                           ).clip(0, len(age_bin_edges) - 1) - 1
         M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
-        sed_val = np.einsum("za,zaw,an->nw", weights.value, ssp.L_lambda.value, M)
-        return sed_val * (weights.unit * ssp.L_lambda.unit)
+        sed_val = np.einsum("za,zaw,an->nw", weights_val, sed_grid, M)
+        return sed_val << out_unit
 
     def compute_photometry(self, ssp, t_obs, *,
                            photometry: u.Quantity=None, allow_negative: bool=False,
@@ -936,26 +1084,26 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         in the same system as the input grid.
         """
         weights = self.interpolate_ssp_masses(ssp, t_obs)
-        weights = np.where(np.isfinite(weights), weights, 0.0 << weights.unit)
-        if not allow_negative:
-            weights = np.where(weights > 0, weights, 0.0 << weights.unit)
+        # Plain arrays from here on. The unit is attached once at the end
+        weights_val = _clean_ssp_weights(weights.value, allow_negative)
 
         if photometry is None:
             photometry = ssp.photometry
         if not isinstance(photometry, u.Quantity):
             print("Assuming input photometry array in Jy/Msun")
             photometry = photometry << u.Jy / u.Msun
+        out_unit = _product_unit(photometry.unit, weights.unit)
 
         if age_bin_edges is None:
             # (band, z, age) * (z, age) -> band
-            out_val = np.einsum("bza,za->b", photometry.value, weights.value)
-            return out_val * (photometry.unit * weights.unit)
+            out_val = np.einsum("bza,za->b", photometry.value, weights_val)
+            return out_val << out_unit
 
         idx = np.digitize(ssp.ages, check_unit(age_bin_edges, ssp.ages.unit)
                           ).clip(0, len(age_bin_edges) - 1) - 1
         M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
-        out_val = np.einsum("bza,za,an->nb", photometry.value, weights.value, M)
-        return out_val * (photometry.unit * weights.unit)
+        out_val = np.einsum("bza,za,an->nb", photometry.value, weights_val, M)
+        return out_val << out_unit
 
 
 class ChemicalEvolutionModel2D(ChemicalEvolutionModel, ABC):
@@ -1109,20 +1257,8 @@ class ChemicalEvolutionModel2D(ChemicalEvolutionModel, ABC):
         if not isinstance(oversample_factor, (int, np.integer)) or oversample_factor < 1:
             raise ValueError("oversample_factor must be a positive integer")
 
-        age_bins = np.hstack(
-            [0 << u.yr, np.sqrt(ssp.ages[1:] * ssp.ages[:-1]), 1e12 << u.yr]
-        )
-        age_bins = age_bins[:age_bins.searchsorted(t_obs) + 1]
-        age_bins[-1] = t_obs
-
-        fractions = np.arange(oversample_factor) / oversample_factor
-        age_bins = np.hstack(
-            [
-                (1 - fractions) * age_bins[i] + fractions * age_bins[i + 1]
-                for i in range(age_bins.size - 1)
-            ]
-            + [t_obs]
-        )
+        # Cached bins
+        age_bins = _ssp_age_grid(ssp, t_obs, oversample_factor).age_bins
 
         # joint_mass_weights uses increasing cosmic time, whereas SSP age runs
         # in the opposite direction.
@@ -2166,13 +2302,15 @@ class TabularCEM(ChemicalEvolutionModel):
         integral : :class:`astropy.units.Quantity`
             The cumulative stellar mass formed at each input time.
         """
-        interpolator = MassHistoryInterpolant(
-           self.table_t.value, self.table_mass.value)
-        integral = interpolator(times.to_value(self.table_t.unit)
-                                ) << self.table_mass.unit
-        integral[times > self.table_t[-1]] = self.table_mass[-1]
-        integral[times < self.table_t[0]] = 0
-        return integral
+        # Use plain floats
+        table_t, table_mass = self.table_t, self.table_mass
+        t_nodes, m_nodes = table_t.value, table_mass.value
+        t = times.to_value(table_t.unit)
+        integral = MassHistoryInterpolant(t_nodes, m_nodes)(t)
+        integral = np.where(t > t_nodes[-1], m_nodes[-1], integral)
+        integral = np.where(t < t_nodes[0], 0.0, integral)
+        # Add units back
+        return integral << table_mass.unit
 
     @_check_time_dec
     def sfr(self, times: u.Quantity):
