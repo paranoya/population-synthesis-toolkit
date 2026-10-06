@@ -2098,17 +2098,29 @@ def _exponential_end_slope(h1, h0, m1, m0):
         return 3.0 * m0
     return min(m0 * (m0 / m1) ** (h0 / (h0 + h1)), 3.0 * m0)
 
+#: Interpolation modes of :class:`MassHistoryInterpolant` and :class:`TabularCEM`
+MASS_HISTORY_INTERPOLATION_MODES = ("linear", "pchip")
 
 class MassHistoryInterpolant:
-    r"""Monotone cubic interpolant of a tabulated cumulative mass history.
+    r"""Interpolant of a tabulated cumulative mass history and first derivatives.
 
+    Two modes are available:
+
+    - ``"linear"`` (default): the cumulative mass is linear between nodes, so
+      the SFR is constant within each interval and equal to its mean,
+      :math:`\Delta M_i / \Delta t_i` (a step SFH). It adds no structure
+      finer than the tabulated intervals.
+    - ``"pchip"``: monotone cubic (PCHIP) with a smooth SFR. 
+
+    PCHIP mode
+    ----------
     Uses the PCHIP slopes at every node except the last one, i.e. the observing
     time, where the slope follows the exponential trend of the mean SFR of the
     last two intervals (see :func:`_exponential_end_slope`).
 
-    Standard PCHIP estimates the end slope from a parabola through the last
-    three nodes and sets it to exactly zero whenever that estimate is negative,
-    which happens whenever the SFR declines steeply towards the end of the table.
+    PCHIP estimates the end slope from a parabola through the last three nodes
+    and sets it to exactly zero whenever that estimate is negative,
+    which happens whenever the SFR declines steeply towards the end of the array.
     That forces :math:`{\rm SFR}(t_{\rm obs}) = 0`, creating spurious quenching
     and removes mass from the youngest stellar populations. The exponential end
     slope is positive, follows declining and rising trends, and reproduces a
@@ -2119,15 +2131,33 @@ class MassHistoryInterpolant:
     times, masses : array-like
         Strictly increasing times and the cumulative mass formed at each time
         (plain values in consistent units).
+    mode : {"linear", "pchip"}, optional
+        Interpolation mode. Default ``"linear"``.
     """
     # for performance
-    __slots__ = ("x", "y", "h", "slopes")
+    __slots__ = ("x", "y", "h", "slopes", "mode")
 
-    def __init__(self, times, masses):
+    def __init__(self, times, masses, mode="linear"):
+
         x = np.asarray(times, dtype=float)
         y = np.asarray(masses, dtype=float)
         h = np.diff(x)
         m = np.diff(y) / h
+
+        # Linear interpolation mode
+        if mode == "linear":
+            # ``slopes`` holds the mean SFR of each interval
+            self.x, self.y, self.h, self.slopes = x, y, h, m
+            self.mode = mode
+            return
+        
+        # PCHIP interpolation mode
+        if mode != "pchip":
+            raise ValueError(
+                f"Unknown mass-history interpolation '{mode}'. Valid modes: "
+                f"{', '.join(MASS_HISTORY_INTERPOLATION_MODES)}.")
+        
+        self.mode = mode
         slopes = np.empty_like(y)
         if x.size == 2:
             slopes[:] = m[0]
@@ -2151,6 +2181,15 @@ class MassHistoryInterpolant:
         x, y, h, d = self.x, self.y, self.h, self.slopes
         t = np.asarray(t, dtype=float)
         k = np.clip(np.searchsorted(x, t, side="right") - 1, 0, x.size - 2)
+        if self.mode == "linear":
+            if nu == 0:
+                return y[k] + d[k] * (t - x[k])
+            if nu == 1:
+                return d[k] + 0.0 * t
+            if nu == 2:
+                return np.zeros_like(t)
+            raise ValueError(
+                "Only nu=0 (mass) and nu=1 (SFR) and nu=2 (SFR') are supported.")
         hk = h[k]
         s = (t - x[k]) / hk
         y0, y1, d0, d1 = y[k], y[k + 1], d[k], d[k + 1]
@@ -2176,14 +2215,21 @@ class MassHistoryInterpolant:
 class TabularCEM(ChemicalEvolutionModel):
     """Chemical evolution model based on a grid of times and metallicities.
 
-    The cumulative mass history is interpolated with a monotone cubic (PCHIP)
-    whose slope at the last node follows the recent SFR trend
-    (see :class:`MassHistoryInterpolant`).
+    The cumulative mass history is interpolated between the tabulated nodes
+    with :class:`MassHistoryInterpolant`. By default (``interpolation =
+    "linear"``) the SFR is constant within each interval (a step SFH);
+    ``interpolation = "pchip"`` uses a monotone cubic with a smooth SFR.
 
     Description
     -----------
     This model represents the chemical evolution of a galaxy by means of a
     discrete grid of ages and metallicities
+
+    Parameters
+    ----------
+    interpolation : {"linear", "pchip"}, optional
+        Interpolation of the cumulative mass history between nodes.
+        Default ``"linear"``.
 
     Attributes
     ----------
@@ -2204,10 +2250,12 @@ class TabularCEM(ChemicalEvolutionModel):
                  times: Parameter | u.Quantity | np.array,
                  masses: Parameter | u.Quantity | np.array,
                  metallicities: Parameter | u.Quantity | np.array,
+                 interpolation: str = "linear",
                  **kwargs):
 
         super().__init__(**kwargs)
 
+        self.interpolation = interpolation
         self.times = times
         self.masses = masses
         self.metallicities = metallicities
@@ -2220,6 +2268,19 @@ class TabularCEM(ChemicalEvolutionModel):
         self.times.q = self.times.q[sort_times]
         self.masses.q = self.masses.q[sort_times]
         self.metallicities.q = self.metallicities.q[sort_times]
+
+    @property
+    def interpolation(self):
+        """Mass-history interpolation mode, ``"linear"`` or ``"pchip"``."""
+        return getattr(self, "_interpolation", "linear")
+
+    @interpolation.setter
+    def interpolation(self, value):
+        if value not in MASS_HISTORY_INTERPOLATION_MODES:
+            raise ValueError(
+                f"Unknown mass-history interpolation '{value}'. Valid modes: "
+                f"{', '.join(MASS_HISTORY_INTERPOLATION_MODES)}.")
+        self._interpolation = value
 
     @property
     def times(self):
@@ -2306,7 +2367,7 @@ class TabularCEM(ChemicalEvolutionModel):
         table_t, table_mass = self.table_t, self.table_mass
         t_nodes, m_nodes = table_t.value, table_mass.value
         t = times.to_value(table_t.unit)
-        integral = MassHistoryInterpolant(t_nodes, m_nodes)(t)
+        integral = MassHistoryInterpolant(t_nodes, m_nodes, self.interpolation)(t)
         integral = np.where(t > t_nodes[-1], m_nodes[-1], integral)
         integral = np.where(t < t_nodes[0], 0.0, integral)
         # Add units back
@@ -2332,7 +2393,7 @@ class TabularCEM(ChemicalEvolutionModel):
             The star formation rate at each input time.
         """
         interpolator = MassHistoryInterpolant(
-           self.table_t.value, self.table_mass.value)
+           self.table_t.value, self.table_mass.value, self.interpolation)
         sfr = interpolator(times.to_value(self.table_t.unit), nu=1) << (self.table_mass.unit / self.table_t.unit)
         sfr[times > self.table_t[-1]] = 0
         sfr[times < self.table_t[0]] = 0
