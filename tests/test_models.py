@@ -225,13 +225,25 @@ class TestModels(unittest.TestCase):
     def test_tabular(self):
         low_res_time = np.linspace(0, 13.7, 10) * u.Gyr
         masses = 1 - np.exp(-low_res_time / 3.0 / u.Gyr)
+        # A smooth history on a coarse grid is reproduced to 1% only by the
+        # cubic interpolation
         model = models.TabularCEM(
             times=low_res_time, masses=masses * u.Msun,
-            metallicities=np.full(masses.size, fill_value=0.02))
+            metallicities=np.full(masses.size, fill_value=0.02),
+            interpolation="pchip")
 
         mass = model.stellar_mass_formed(self.dummy_times)
         real_mass = 1 - np.exp(- self.dummy_times / 3 / u.Gyr)
         self.assertTrue(np.allclose(mass, real_mass * u.Msun, rtol=1e-2))
+
+        # Default (linear): exact at the nodes, mean SFR within each interval
+        model = models.TabularCEM(
+            times=low_res_time, masses=masses * u.Msun,
+            metallicities=np.full(masses.size, fill_value=0.02))
+        self.assertEqual(model.interpolation, "linear")
+        np.testing.assert_allclose(
+            model.stellar_mass_formed(low_res_time).to_value(u.Msun), masses,
+            rtol=1e-12, atol=1e-15)
 
     def test_cc25tabular(self):
         tau = np.array([1.0, 0.1]) << u.Gyr
@@ -543,7 +555,7 @@ def reference_tabular_stellar_mass_formed(model, times):
     from pst.model import Parameter
     times = times.q.to(u.Gyr) if isinstance(times, Parameter) else check_unit(times, u.Gyr)
     interpolator = cem.MassHistoryInterpolant(
-        model.table_t.value, model.table_mass.value)
+        model.table_t.value, model.table_mass.value, model.interpolation)
     integral = interpolator(times.to_value(model.table_t.unit)) << model.table_mass.unit
     integral[times > model.table_t[-1]] = model.table_mass[-1]
     integral[times < model.table_t[0]] = 0
@@ -805,8 +817,90 @@ class TestPlainArraySynthesis(unittest.TestCase):
         self.assertNotEqual(second.value[0], 0.0)
 
 
+class TestLinearMassHistory(unittest.TestCase):
+    """Default (linear) mass-history interpolation: a step SFH."""
+
+    times = np.array([0.0, 4.0, 8.0, 11.0, 13.0, 13.69, 13.7])
+    masses = np.array([0.0, 0.3, 0.8, 0.97, 0.99, 0.999, 1.0])
+
+    def test_default_mode_is_linear(self):
+        self.assertEqual(cem.MassHistoryInterpolant(self.times, self.masses).mode,
+                         "linear")
+
+    def test_masses_are_linear_between_nodes(self):
+        interp = cem.MassHistoryInterpolant(self.times, self.masses)
+        grid = np.linspace(0.0, 13.7, 4001)
+        np.testing.assert_allclose(interp(grid), np.interp(grid, self.times, self.masses),
+                                   rtol=1e-12, atol=1e-15)
+        np.testing.assert_allclose(interp(self.times), self.masses, atol=1e-15)
+
+    def test_sfr_is_the_interval_mean(self):
+        interp = cem.MassHistoryInterpolant(self.times, self.masses)
+        means = np.diff(self.masses) / np.diff(self.times)
+        mid = 0.5 * (self.times[:-1] + self.times[1:])
+        np.testing.assert_allclose(interp(mid, nu=1), means, rtol=1e-12)
+        # Nodes take the younger interval, and t_obs the last interval
+        np.testing.assert_allclose(interp(self.times[:-1], nu=1), means, rtol=1e-12)
+        self.assertAlmostEqual(float(interp(self.times[-1], nu=1)), means[-1], places=12)
+        np.testing.assert_array_equal(interp(mid, nu=2), 0.0)
+        self.assertEqual(np.shape(interp(5.0, nu=1)), ())
+
+    def test_no_structure_inside_a_long_interval(self):
+        # The case that made PCHIP rise over the last Gyr: a long interval
+        # followed by a very short one with a much higher SFR
+        interp = cem.MassHistoryInterpolant(self.times, self.masses)
+        inside = np.linspace(13.0, 13.69, 200, endpoint=False)
+        np.testing.assert_allclose(interp(inside, nu=1), 0.009 / 0.69, rtol=1e-12)
+        pchip = cem.MassHistoryInterpolant(self.times, self.masses, "pchip")
+        sfr_pchip = pchip(inside, nu=1)
+        self.assertGreater(sfr_pchip.max() / sfr_pchip.min(), 2.0)
+
+    def test_constant_sfr_and_mass_conservation(self):
+        times = np.array([0.0, 2.0, 5.0, 9.0, 12.0, 13.7])
+        interp = cem.MassHistoryInterpolant(times, 0.1 * times)
+        grid = np.linspace(0.0, 13.7, 1001)
+        np.testing.assert_allclose(interp(grid, nu=1), 0.1, rtol=1e-12)
+        # The integral of the SFR over each interval equals its mass
+        rng = np.random.default_rng(3)
+        masses = np.concatenate(([0.0], np.cumsum(rng.uniform(0.0, 1.0, 5))))
+        interp = cem.MassHistoryInterpolant(times, masses)
+        for a, b, dm in zip(times[:-1], times[1:], np.diff(masses)):
+            t = np.linspace(a, b, 2001)[:-1] + 0.5 * (b - a) / 2000
+            self.assertAlmostEqual(np.sum(interp(t, nu=1)) * (b - a) / 2000, dm, places=10)
+
+    def test_invalid_mode(self):
+        with self.assertRaises(ValueError):
+            cem.MassHistoryInterpolant(self.times, self.masses, "cubic")
+        with self.assertRaises(ValueError):
+            cem.TabularCEM(times=self.times * u.Gyr, masses=self.masses * u.Msun,
+                           metallicities=np.full(self.times.size, 0.02),
+                           interpolation="cubic")
+
+    def test_tabular_models_forward_the_mode(self):
+        kwargs = dict(today=13.7 * u.Gyr, mass_today=1.0 * u.Msun,
+                      ism_metallicity_today=0.02, alpha_powerlaw=1.0)
+        frac = models.TabularMassFracCEM(
+            mass_frac=self.masses[1:-1], times=self.times[1:-1] << u.Gyr, **kwargs)
+        self.assertEqual(frac.interpolation, "linear")
+        for mode in ("pchip", "linear"):
+            frac = models.TabularMassFracCEM(
+                mass_frac=self.masses[1:-1], times=self.times[1:-1] << u.Gyr,
+                interpolation=mode, **kwargs)
+            self.assertEqual(frac.interpolation, mode.lower())
+            cc25 = models.CC25TabularCEM(
+                tau_ssfr=np.array([1.0, 0.1]) << u.Gyr,
+                ssfr=np.array([0.1, 0.1]) << 1 / u.Gyr, interpolation=mode, **kwargs)
+            self.assertEqual(cc25.interpolation, mode.lower())
+        # TabularCEM.sfr and stellar_mass_formed follow the mode
+        sfr = frac.sfr(np.array([2.0, 12.0]) << u.Gyr).to_value(u.Msun / u.Gyr)
+        np.testing.assert_allclose(sfr, [0.3 / 4.0, 0.02 / 2.0], rtol=1e-12)
+        frac.interpolation = "pchip"
+        self.assertNotAlmostEqual(
+            frac.sfr(np.array([2.0]) << u.Gyr).to_value(u.Msun / u.Gyr)[0], 0.3 / 4.0)
+
+
 class TestMassHistoryInterpolator(unittest.TestCase):
-    """End condition of the tabular mass-history interpolation."""
+    """End condition of the PCHIP mass-history interpolation."""
 
     # Last interval (3% of the mass in 2.7 Gyr) is ~5x shallower than the
     # previous one: standard PCHIP clamps SFR(today) to exactly 0 here.
@@ -826,7 +920,8 @@ class TestMassHistoryInterpolator(unittest.TestCase):
         self.assertAlmostEqual(standard, 0.0, places=12)  # the old behaviour
 
         model = cem.TabularCEM(times=self.times * u.Gyr, masses=self.masses * u.Msun,
-                               metallicities=np.full(self.times.size, 0.02))
+                               metallicities=np.full(self.times.size, 0.02),
+                               interpolation="pchip")
         sfr_today = model.sfr(np.array([self.times[-1] - 1e-9]) * u.Gyr)[0]
         expected = self._expected_end_slope(self.times, self.masses)
         self.assertTrue(u.isclose(sfr_today, expected * u.Msun / u.Gyr, rtol=1e-6))
@@ -841,7 +936,7 @@ class TestMassHistoryInterpolator(unittest.TestCase):
         for _ in range(200):
             times = np.concatenate(([0.0], np.sort(rng.uniform(0.0, 13.7, 5)), [13.7]))
             masses = np.concatenate(([0.0], np.sort(rng.uniform(0.0, 1.0, 5)), [1.0]))
-            interp = cem.MassHistoryInterpolant(times, masses)
+            interp = cem.MassHistoryInterpolant(times, masses, "pchip")
             np.testing.assert_allclose(interp(times), masses, atol=1e-12)
             self.assertTrue(np.all(np.diff(interp(grid)) >= -1e-12))
             self.assertTrue(np.all(interp(grid, nu=1) >= -1e-12))
@@ -849,7 +944,7 @@ class TestMassHistoryInterpolator(unittest.TestCase):
 
     def test_constant_sfr_is_reproduced(self):
         times = np.array([0.0, 2.0, 5.0, 9.0, 12.0, 13.7])
-        interp = cem.MassHistoryInterpolant(times, 0.1 * times)
+        interp = cem.MassHistoryInterpolant(times, 0.1 * times, "pchip")
         grid = np.linspace(0.0, 13.7, 1001)
         np.testing.assert_allclose(interp(grid, nu=1), 0.1, rtol=1e-10)
 
@@ -857,14 +952,14 @@ class TestMassHistoryInterpolator(unittest.TestCase):
         from scipy.interpolate import PchipInterpolator
         grid = np.linspace(0.0, self.times[-2], 2001)
         np.testing.assert_allclose(
-            cem.MassHistoryInterpolant(self.times, self.masses)(grid),
+            cem.MassHistoryInterpolant(self.times, self.masses, "pchip")(grid),
             PchipInterpolator(self.times, self.masses)(grid), rtol=1e-12, atol=1e-14)
 
     def test_rising_sfr_end_slope_is_limited(self):
         times = np.array([0.0, 6.0, 12.0, 13.0, 13.7])
         masses = np.array([0.0, 0.05, 0.2, 0.5, 1.0])
         mean_last = (masses[-1] - masses[-2]) / (times[-1] - times[-2])
-        slope = cem.MassHistoryInterpolant(times, masses)(times[-1], nu=1)
+        slope = cem.MassHistoryInterpolant(times, masses, "pchip")(times[-1], nu=1)
         self.assertGreater(slope, mean_last)            # follows the rising trend
         self.assertLessEqual(slope, 3 * mean_last + 1e-12)
 
