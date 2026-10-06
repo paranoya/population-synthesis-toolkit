@@ -534,10 +534,9 @@ class SSPBase(object):
         pts = np.where(self.wavelength <= wl_limit)[0]
         photon_rate = np.empty((self.metallicities.size, self.ages.size)) * u.s**-1 / u.Msun
 
-        # q = int(L_lambda / (h c / lambda) dlamda)
-        # Divide by 1e40 to avoid overflow
+        # with float32 NumPy >= 2 casts 1e40 to float32 (inf)
         q_lambda = (
-            self.L_lambda[:, :, pts].to("erg / (s * Angstrom * Msun)") / 1e40 * self.wavelength.to("Angstrom")[pts]
+            self.L_lambda[:, :, pts].astype(np.float64).to("erg / (s * Angstrom * Msun)") / 1e40 * self.wavelength.to("Angstrom")[pts]
         ) / (constants.h.to("erg s") * constants.c.to("Angstrom/s"))
 
         for i in range(self.metallicities.size):
@@ -2157,6 +2156,180 @@ class EMILES(SSPBase):
             wcs = WCS(hdul[0].header)
             self.wavelength = wcs.array_index_to_world_values(
                 np.arange(0, self._n_wavelength)) << u.AA
+
+
+class BPASS(SSPBase):
+    """
+    BPASS v2.3 SSP models (Binary Population and Spectral Synthesis).
+
+    This class uses the BPASS v2.3 data release (Byrne & Stanway 2023), which
+    provides SSP spectral energy distributions computed with six alternative
+    stellar atmosphere libraries and two values of [alpha/Fe], for populations
+    that include interacting binary stars or only single stars.
+
+    See ``ssp_installation/bpass/convert_bpass_to_fits.py`` for instructions on
+    how to convert the original format into the one used by PST.
+
+    Parameters
+    ----------
+    stellar_library : str, optional
+        Stellar atmosphere library (case-insensitive). One of 'AP', 'BASEL',
+        'C3K', 'CKC', 'Coelho' or 'sMILES'. Default is 'C3K'.
+    alpha_fe : float, optional
+        [alpha/Fe] abundance ratio of the models, fixed at initialisation.
+        BPASS v2.3 provides 0.0 and +0.4, although not every library covers
+        both (BASEL and CKC only provide 0.0). Default is 0.0.
+    binary : bool, optional
+        If True (default), use the populations including binary evolution.
+        Otherwise, use the single-star populations (not recommended by the
+        BPASS team).
+    imf : str, optional
+        BPASS initial mass function. The v2.3 release only provides 'imf135_300' (default):
+        a broken power law with slopes -1.30 (0.1-0.5 Msun) and -2.35
+        (0.5-300 Msun).
+    path : str or None, optional
+        Directory containing the PST BPASS FITS files. If None (default), the
+        package default path plus 'BPASS' subdirectory is used.
+    load_properties : bool, optional
+        If True, load the mass fractions, supernova rates and
+        ionising photon rates.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    >>> from pst.SSP import BPASS
+    >>> ssp = BPASS(stellar_library='C3K', alpha_fe=0.4)
+    >>> print(ssp.metallicities)
+    >>> sed = ssp.L_lambda[-1, 30]  # highest metallicity, log(age/yr) = 9
+
+    Notes
+    -----
+    - The SEDs are given in Lsun / Angstrom per Msun **formed**. BPASS uses
+      Lsun = 3.848e33 erg/s; the converter rescales the luminosities to the
+      astropy (IAU 2015) value, 3.828e33 erg/s.
+    - Ages range from 10^6 to 10^11 yr in steps of 0.1 dex (51 ages). The last
+      BPASS age (10^11 yr) shows an unphysical drop of the surviving stellar
+      mass.
+    - Metallicities (mass fractions) range from 1e-5 to 0.04 (Zsun = 0.02);
+      the available values depend on the library and [alpha/Fe].
+    - Wavelengths are in vacuum. The native sampling is 1 Angstrom from
+      1 Angstrom to 10 micron, but the effective spectral resolution depends
+      on the stellar library.
+    - The models do not include nebular emission.
+    - BPASS only tabulates the mass of surviving stars, not that of the
+      stellar remnants. Hence ``returned_mass_frac`` is computed as
+      ``1 - surviving stellar mass`` and ``remnant_mass_frac`` is zero, so
+      ``current_mass`` corresponds to the mass in (non-remnant) stars.
+    - ``supernova_rate`` includes all supernova types (core-collapse and
+      Type Ia). The rate of each type is available in
+      ``supernova_rate_by_type``.
+    - Ionising photon rates are computed by integrating the native SEDs.
+
+    References
+    ----------
+    Eldridge, J. J., Stanway, E. R., et al. (2017). Binary Population and Spectral Synthesis Version 2.1: Construction, Observational Verification, and New Results. `PASA, 34, e058 <https://ui.adsabs.harvard.edu/abs/2017PASA...34...58E>`_.
+
+    Stanway, E. R. & Eldridge, J. J. (2018). Re-evaluating old stellar populations. `MNRAS, 479, 75 <https://ui.adsabs.harvard.edu/abs/2018MNRAS.479...75S>`_.
+
+    Byrne, C. M. & Stanway, E. R. (2023). BPASS v2.3 release with alternative stellar atmosphere libraries.
+
+    `BPASS website <https://bpass.auckland.ac.nz>`_
+    """
+    version = "2.3"
+    _stellar_libraries = {"ap": "AP", "basel": "BASEL", "c3k": "C3K",
+                          "ckc": "CKC", "coelho": "Coelho", "smiles": "sMILES"}
+    _imfs = ("imf135_300",)
+    _sn_types = ("IIP", "IIOTHER", "IB", "IC", "LGRB", "PISN", "LOWMASS", "IA")
+
+    def __init__(self, stellar_library="C3K", alpha_fe=0.0, binary=True,
+                 imf="imf135_300", path=None, load_properties=False,
+                 verbose=True):
+        self.stellar_library = self._parse_library(stellar_library)
+        if imf not in self._imfs:
+            raise NameError(f"Unrecognized IMF: {imf}. "
+                            f"Available IMFs: {self._imfs}")
+        self.imf = imf
+        self.binary = bool(binary)
+        population = "bin" if self.binary else "sin"
+        self.isochrone = (f"BPASS v{self.version} "
+                          + ("binary" if self.binary else "single-star")
+                          + " evolution models")
+
+        if path is None:
+            self.path = os.path.join(self.default_path, "BPASS")
+        else:
+            self.path = path
+        filename = os.path.join(
+            self.path, f"bpass_v{self.version}_{population}_{self.imf}_"
+            f"{self.stellar_library}.fits")
+        if not os.path.isfile(filename):
+            raise FileNotFoundError(
+                f"BPASS file not found: {filename}\nConvert the native BPASS "
+                "data with ssp_installation/bpass/convert_bpass_to_fits.py")
+
+        if verbose:
+            print(f"> Initialising BPASS v{self.version} models "
+                  f"({population}, {self.stellar_library}, IMF={self.imf}, "
+                  f"[alpha/Fe]={alpha_fe:+.1f})")
+
+        with fits.open(filename) as hdul:
+            tag = self._select_alpha(hdul, alpha_fe)
+            self.alpha_fe = float(hdul[f"SED_{tag}"].header["ALPHAFE"])
+            self.wavelength = np.array(hdul["WAVE"].data, dtype=float
+                                       ) << u.Angstrom
+            self.log_ages_yr = np.array(hdul["LOGAGE"].data, dtype=float)
+            self.ages = 10**self.log_ages_yr << u.yr
+            props = hdul[f"PROP_{tag}"].data
+            self.metallicities = np.array(props["Z"], dtype=float
+                                          ) << u.dimensionless_unscaled
+            self.L_lambda = np.array(hdul[f"SED_{tag}"].data, dtype=np.float32
+                                     ) << u.Lsun / u.Angstrom / u.Msun
+
+            if load_properties:
+                self.returned_mass_frac = 1.0 - np.array(
+                    props["STELLAR_MASS_FRAC"], dtype=float)
+                dex_unit = u.dex(u.s**-1 / u.Msun)
+                self.log_ionising_HI_photons = np.array(
+                    props["LOG_Q_HI"], dtype=float) << dex_unit
+                self.log_ionising_HeI_photons = np.array(
+                    props["LOG_Q_HEI"], dtype=float) << dex_unit
+                self.log_ionising_HeII_photons = np.array(
+                    props["LOG_Q_HEII"], dtype=float) << dex_unit
+                sn_rates = {sn_type: np.array(props[f"SNR_{sn_type}"],
+                                              dtype=float)
+                            for sn_type in self._sn_types}
+                self.supernova_rate_by_type = {
+                    sn_type: rate << 1 / (u.yr * u.Msun)
+                    for sn_type, rate in sn_rates.items()}
+                self.supernova_rate = np.sum(list(sn_rates.values()), axis=0
+                                             ) << 1 / (u.yr * u.Msun)
+
+        self.name = (f"BPASS_v{self.version}_{population}_{self.imf}_"
+                     f"{self.stellar_library}_afe{self.alpha_fe:+.1f}")
+
+    def _parse_library(self, library):
+        key = library.lower()
+        if key not in self._stellar_libraries:
+            raise NameError(
+                f"Unrecognized stellar library: {library}.\nSelect one of "
+                f"{list(self._stellar_libraries.values())}")
+        return self._stellar_libraries[key]
+
+    @staticmethod
+    def _select_alpha(hdul, alpha_fe):
+        """Return the FITS extension tag matching the requested [alpha/Fe]."""
+        available = {}
+        for hdu in hdul:
+            if hdu.name.startswith("SED_"):
+                available[float(hdu.header["ALPHAFE"])] = hdu.name[4:]
+        for value, tag in available.items():
+            if np.isclose(value, alpha_fe, atol=1e-3):
+                return tag
+        raise ValueError(
+            f"[alpha/Fe] = {alpha_fe} not available for this model. "
+            f"Available values: {sorted(available)}")
+
 
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
