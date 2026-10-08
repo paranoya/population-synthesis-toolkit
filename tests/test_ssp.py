@@ -207,5 +207,37 @@ class TestSSP(unittest.TestCase):
         with self.assertRaises(ValueError):
             ssp.get_ionising_photon_rate(species='CIV')
 
+class TestWavelengthMedium(unittest.TestCase):
+
+    def test_convert_wavelength_medium(self):
+        from pst.utils import convert_wavelength_medium
+        # H-alpha: 6564.614 A in vacuum, 6562.80 A in air
+        halpha = convert_wavelength_medium([6564.614] * u.AA, "vacuum", "air")
+        self.assertAlmostEqual(halpha[0].value, 6562.80, delta=0.02)
+        # Exact round trip, also below 2000 A, and monotonic across it
+        wl = np.geomspace(1.0, 5e4, 5000) * u.AA
+        air = convert_wavelength_medium(wl, "vacuum", "air")
+        back = convert_wavelength_medium(air, "air", "vacuum")
+        np.testing.assert_allclose(back.value, wl.value, rtol=1e-12)
+        self.assertTrue(np.all(np.diff(air.value) > 0))
+        # Same medium: nothing to do
+        np.testing.assert_array_equal(
+            convert_wavelength_medium(wl, "air", "air").value, wl.value)
+        with self.assertRaises(ValueError):
+            convert_wavelength_medium(wl, "air", "water")
+
+    def test_popstar_wavelength_medium(self):
+        # PopStar is assumed to be tabulated in air
+        air = SSP.PopStar(IMF="cha", verbose=False)
+        SSP.SSPBase.wavelength_medium = "vacuum"
+        try:
+            vacuum = SSP.PopStar(IMF="cha", verbose=False)
+        finally:
+            SSP.SSPBase.wavelength_medium = "air"
+        optical = (air.wavelength > 3000 * u.AA) & (air.wavelength < 9000 * u.AA)
+        self.assertTrue(np.all((vacuum.wavelength - air.wavelength)[optical] > 0.8 * u.AA))
+        np.testing.assert_array_equal(vacuum.L_lambda.value, air.L_lambda.value)
+
+
 if __name__ == '__main__':
     unittest.main()
