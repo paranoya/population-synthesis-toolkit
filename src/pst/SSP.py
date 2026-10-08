@@ -9,7 +9,8 @@ from astropy.table import Table
 from astropy import units as u
 from astropy import units
 from astropy import constants
-from pst.utils import check_unit, flux_conserving_interpolation, trapz
+from pst.utils import (check_unit, flux_conserving_interpolation, trapz,
+                       convert_wavelength_medium)
 
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
@@ -31,8 +32,13 @@ class SSPBase(object):
         (metallicity, ages, wavelength).
     wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
+    wavelength_medium: str
+        Medium of ``wavelength``, "air" (default) or "vacuum". Models that are
+        tabulated in the other medium are converted when they are loaded. Set
+        it before initialising a model, e.g. ``SSPBase.wavelength_medium = "vacuum"``.
     """
     default_path = os.getenv("PST_SSP_DIR", os.path.join(os.path.dirname(__file__), "data", "ssp"))
+    wavelength_medium = "air"
 
     @property
     def name(self):
@@ -1060,6 +1066,8 @@ class PopStar(SSPBase):
             ) as hdul:
             self.wavelength = hdul[1].data["wavelength"] * u.Unit(
                 hdul[1].header["TUNIT1"])
+            self.wavelength = convert_wavelength_medium(
+                self.wavelength, "air", self.wavelength_medium)
 
             self.L_lambda = np.empty(
                 shape=(self.metallicities.size, self.log_ages_yr.size,
@@ -1168,6 +1176,8 @@ class PyPopStar(SSPBase):
                 self.metallicities.value[0], self.log_ages_yr.value[0]))
                        ) as hdul:
             self.wavelength = hdul[1].data['wavelength'] * units.Angstrom # Angstrom
+            self.wavelength = convert_wavelength_medium(
+                self.wavelength, "air", self.wavelength_medium)
 
         self.L_lambda = np.empty(
             shape=(self.metallicities.size, self.log_ages_yr.size,
@@ -1298,6 +1308,8 @@ class BC03_2003(SSPBase):
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value * u.angstrom
+                self.wavelength = convert_wavelength_medium(
+                    self.wavelength, "air", self.wavelength_medium)
                 self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
                                           self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
                 load_wavelength = True
@@ -1449,6 +1461,8 @@ class BC03_2013(SSPBase):
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value * u.angstrom
+                self.wavelength = convert_wavelength_medium(
+                    self.wavelength, "air", self.wavelength_medium)
                 self.L_lambda = np.zeros((self.metallicities.size, self.ages.size,
                                           self.wavelength.size))  * u.Lsun / u.Angstrom / u.Msun
                 load_wavelength = True
@@ -1629,6 +1643,8 @@ class BC03_2016(SSPwithCloudyGasModel):
             table = Table.read(fits_path)
             if not load_wavelength:
                 self.wavelength = table['wavelength'].value << u.angstrom
+                self.wavelength = convert_wavelength_medium(
+                    self.wavelength, "air", self.wavelength_medium)
                 self.stellar_L_lambda = np.zeros((self.metallicities.size, self.ages.size,
                                           self.wavelength.size))  << u.Lsun / u.Angstrom / u.Msun
                 load_wavelength = True
@@ -1807,6 +1823,8 @@ class BaseGM(SSPBase):
         self.norm = self.norm.transpose(1, 0)
         self.wavelength = np.arange(wl0, wl0 + deltawl * SED.shape[-1],
                                     deltawl)  * units.Angstrom # AA
+        self.wavelength = convert_wavelength_medium(
+            self.wavelength, "air", self.wavelength_medium)
         self.L_lambda = SED
         ssp_fits.close()
 
@@ -1987,6 +2005,8 @@ class XSL(SSPBase):
                 (np.arange(0, hdul[0].data.size, 1) - hdul[0].header['CRPIX1'])
                 * hdul[0].header['CDELT1'] + hdul[0].header['CRVAL1'] + 1
                 ) * units.Angstrom
+            self.wavelength = convert_wavelength_medium(
+                self.wavelength, "air", self.wavelength_medium)
 
 class EMILES(SSPBase):
     """
@@ -2156,6 +2176,8 @@ class EMILES(SSPBase):
             wcs = WCS(hdul[0].header)
             self.wavelength = wcs.array_index_to_world_values(
                 np.arange(0, self._n_wavelength)) << u.AA
+            self.wavelength = convert_wavelength_medium(
+                self.wavelength, "air", self.wavelength_medium)
 
 
 class BPASS(SSPBase):
@@ -2213,9 +2235,10 @@ class BPASS(SSPBase):
       mass.
     - Metallicities (mass fractions) range from 1e-5 to 0.04 (Zsun = 0.02);
       the available values depend on the library and [alpha/Fe].
-    - Wavelengths are in vacuum. The native sampling is 1 Angstrom from
-      1 Angstrom to 10 micron, but the effective spectral resolution depends
-      on the stellar library.
+    - The native sampling is 1 Angstrom from 1 Angstrom to 10 micron, but the
+      effective spectral resolution depends on the stellar library. The native
+      wavelengths are in vacuum for the BASEL, C3K and CKC libraries and in air
+      for the others; they are converted to ``wavelength_medium`` when loaded.
     - The models do not include nebular emission.
     - BPASS only tabulates the mass of surviving stars, not that of the
       stellar remnants. Hence ``returned_mass_frac`` is computed as
@@ -2240,6 +2263,9 @@ class BPASS(SSPBase):
     _stellar_libraries = {"ap": "AP", "basel": "BASEL", "c3k": "C3K",
                           "ckc": "CKC", "coelho": "Coelho", "smiles": "sMILES"}
     _imfs = ("imf135_300",)
+    # Libraries whose native wavelengths are in vacuum (BASEL: assumed, too
+    # low resolution to check from the line positions); the rest are in air.
+    _vacuum_libraries = ("BASEL", "C3K", "CKC")
     _sn_types = ("IIP", "IIOTHER", "IB", "IC", "LGRB", "PISN", "LOWMASS", "IA")
 
     def __init__(self, stellar_library="C3K", alpha_fe=0.0, binary=True,
@@ -2278,6 +2304,10 @@ class BPASS(SSPBase):
             self.alpha_fe = float(hdul[f"SED_{tag}"].header["ALPHAFE"])
             self.wavelength = np.array(hdul["WAVE"].data, dtype=float
                                        ) << u.Angstrom
+            native = ("vacuum" if self.stellar_library in self._vacuum_libraries
+                      else "air")
+            self.wavelength = convert_wavelength_medium(
+                self.wavelength, native, self.wavelength_medium)
             self.log_ages_yr = np.array(hdul["LOGAGE"].data, dtype=float)
             self.ages = 10**self.log_ages_yr << u.yr
             props = hdul[f"PROP_{tag}"].data
