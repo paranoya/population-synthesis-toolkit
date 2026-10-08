@@ -17,6 +17,47 @@ else:
     trapz = np.trapz
 
 
+def convert_wavelength_medium(wavelength, native, target):
+    """Convert wavelengths between air and vacuum (Morton 1991, ApJS, 77, 119).
+
+    The relation is only defined above 2000 Angstrom, so the refractivity of
+    air is held constant below that wavelength. This keeps the conversion
+    monotonic and invertible over the whole spectral range.
+
+    Parameters
+    ----------
+    wavelength : astropy.units.Quantity
+        Wavelengths in the ``native`` medium.
+    native : {"air", "vacuum"}
+        Medium of the input wavelengths.
+    target : {"air", "vacuum"}
+        Medium of the output wavelengths.
+
+    Returns
+    -------
+    astropy.units.Quantity
+        Wavelengths in Angstrom in the ``target`` medium.
+    """
+    for medium in (native, target):
+        if medium not in ("air", "vacuum"):
+            raise ValueError(f"Unrecognized wavelength medium: {medium!r}. "
+                             "Select 'air' or 'vacuum'")
+    if native == target:
+        return wavelength
+
+    def refractivity(wl_vac):  # n - 1 as a function of the vacuum wavelength
+        wl_vac = np.maximum(wl_vac, 2000.0)
+        return 2.735182e-4 + 131.4182 / wl_vac**2 + 2.76249e8 / wl_vac**4
+
+    wl = wavelength.to_value(u.AA)
+    if target == "air":
+        return wl / (1.0 + refractivity(wl)) * u.AA
+    wl_vac = wl * (1.0 + refractivity(wl))
+    for _ in range(4):  # fixed-point iteration, converges to machine precision
+        wl_vac = wl * (1.0 + refractivity(wl_vac))
+    return wl_vac * u.AA
+
+
 def _const_interp_cumflux(edges_out, edges_in, f_centers_seg):
     """
     Interpolate the cumulative integrated flux assuming constant
