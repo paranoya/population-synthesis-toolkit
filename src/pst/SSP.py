@@ -1030,6 +1030,7 @@ class PopStar(SSPBase):
             self.path = os.path.join(self.default_path, 'PopStar')
         else:
             self.path = path
+        self.imf = IMF
         self.metallicities = np.array([0.0001, 0.0004, 0.004, 0.008, 0.02,
                                        0.05]) * units.dimensionless_unscaled
         self.log_ages_yr = np.array([5.00, 5.48, 5.70, 5.85, 6.00, 6.10, 6.18,
@@ -1139,6 +1140,7 @@ class PyPopStar(SSPBase):
             self.path = os.path.join(self.default_path, 'PyPopStar', IMF)
         else:
             self.path = path
+        self.imf = IMF
         self.metallicities = np.array([0.004, 0.008, 0.02, 0.05]
                                       ) * units.dimensionless_unscaled
         self.log_ages_yr = np.array([
@@ -1797,6 +1799,7 @@ class BaseGM(SSPBase):
             self._ssp_properties_path = os.path.join(os.path.dirname(path),
                                                     "fits_like_properties.dat")
 
+        self.imf = "Salpeter"
         self.metallicities = np.loadtxt(self._ssp_properties_path, usecols=(1)
                                         ) * units.dimensionless_unscaled
         self.ages = np.loadtxt(self._ssp_properties_path, usecols=(0)) * units.yr
@@ -1949,6 +1952,7 @@ class XSL(SSPBase):
                 IMF, ISO))
         if (IMF != 'Kroupa') & (IMF != 'Salpeter'):
             raise NameError('IMF not valid (use Kroupa | Salpeter)')
+        self.imf = IMF
         if (ISO != 'P00') & (ISO != 'PC'):
             raise NameError('ISO not valid (use P00 for Padova2000 or PC for PARSEC/COLIBRI)')
         if path:
@@ -2125,6 +2129,7 @@ class EMILES(SSPBase):
         else:
             self.path = os.path.join(self.default_path, 'EMILES')
         model_name = self._get_models_prefix(iso, imf)
+        self.imf = imf
         self._load_models(model_name)
 
     def _get_models_prefix(self, iso, imf):
