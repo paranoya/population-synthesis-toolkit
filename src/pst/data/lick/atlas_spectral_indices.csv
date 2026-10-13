@@ -37,7 +37,7 @@ Emission_OI6300,Emission,OI6300,6270.0,6290.0,6294.0,6307.0,6312.0,6332.0,emissi
 Emission_OI6364,Emission,OI6364,6335.0,6353.0,6357.0,6371.0,6375.0,6395.0,emission_line,angstrom,pragmatic,Local integration window; simultaneous Gaussian fitting is preferred.
 Spiniello_CaH1,Spiniello,CaH1,6342.125,6356.5,6357.5,6401.75,6408.5,6429.75,absorption_index,mag,standard,IMF-sensitive; can be affected by emission/tellurics.
 Emission_NII6548,Emission,NII6548,6480.0,6530.0,6542.0,6554.0,6605.0,6650.0,emission_line,angstrom,pragmatic,Local integration window; simultaneous Gaussian fitting is preferred.
-Custom_Halpha,Custom,Halpha,6515.0,6540.0,6554.0,6575.0,6575.0,6585.0,absorption_index,angstrom,pragmatic,For emission-subtracted spectra; red continuum kept short to limit [NII] contamination.
+Custom_Halpha,Custom,Halpha,6515.0,6540.0,6558.0,6570.0,6575.0,6585.0,absorption_index,angstrom,pragmatic,For emission-subtracted spectra; red continuum kept short to limit [NII] contamination.
 Emission_Halpha,Emission,Halpha,6480.0,6530.0,6555.0,6571.0,6605.0,6650.0,emission_line,angstrom,pragmatic,Local integration window; simultaneous Gaussian fitting is preferred.
 Emission_NII6583,Emission,NII6583,6480.0,6530.0,6577.0,6590.0,6605.0,6650.0,emission_line,angstrom,pragmatic,Local integration window; simultaneous Gaussian fitting is preferred.
 Emission_HeI6678,Emission,HeI6678,6645.0,6665.0,6672.0,6684.0,6690.0,6708.0,emission_line,angstrom,pragmatic,Local integration window; simultaneous Gaussian fitting is preferred.
