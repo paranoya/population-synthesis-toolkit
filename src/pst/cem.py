@@ -8,7 +8,7 @@ from astropy import units as u
 from scipy import special
 from scipy import interpolate
 
-from pst.SSP import SSPBase
+from pst.SSP import SSPBase, _alpha_fe_values
 from pst.model import ModelBase, Parameter
 from pst.utils import SQRT_2, check_parameter, check_unit
 
@@ -224,6 +224,219 @@ class TimePropMetallicityMixin:
             self.ism_metallicity_today
             * np.power(times / self.today, self.alpha_powerlaw).decompose(),
             1e-6 << u.dimensionless_unscaled, None)
+
+
+def alpha_fe_from_sfh(time_edges, formed_mass, tau_alpha_fe=1.0,
+                      alpha_fe_max=0.35, alpha_fe_min=0.0, alpha_fe_gamma=1.0):
+    r"""Phenomenological [alpha/Fe] of the stars formed in each SFH time bin.
+
+    The [alpha/Fe] of the stars formed at time :math:`t` is set by the
+    fraction of the mass formed so far that was formed "recently", i.e.
+    within the chemical memory timescale :math:`\tau_\alpha`:
+
+    .. math::
+
+        A(t) = \int_0^t \psi(t')\, e^{-(t - t')/\tau_\alpha}\, dt', \qquad
+        f(t) = \mathrm{clip}\left(\frac{A(t)}{M(t)}, 0, 1\right),
+
+    .. math::
+
+        [\alpha/\mathrm{Fe}](t) = [\alpha/\mathrm{Fe}]_{\min}
+        + ([\alpha/\mathrm{Fe}]_{\max} - [\alpha/\mathrm{Fe}]_{\min})\, f^\gamma,
+
+    where :math:`\psi` is the SFR and :math:`M` the mass formed. Early or
+    bursty star formation gives :math:`f \to 1` (alpha-enhanced stars); long,
+    extended star formation lets type Ia SNe dilute [alpha/Fe] towards the
+    minimum. The SFR is taken as constant within each bin and the result is
+    evaluated at the bin midpoints.
+
+    The recurrence over bins is evaluated in closed form (accumulated in log
+    space to avoid overflow for ``t / tau_alpha_fe`` >> 1), so the cost is a
+    few vectorised operations per call.
+
+    Parameters
+    ----------
+    time_edges : array-like
+        Chronological (increasing) time-bin edges in Gyr, shape ``(n + 1,)``.
+    formed_mass : array-like
+        Stellar mass formed in each bin, shape ``(n,)``. Negative values are
+        treated as zero.
+    tau_alpha_fe : float
+        Chemical memory timescale in Gyr.
+    alpha_fe_max, alpha_fe_min : float
+        Upper and lower [alpha/Fe] bounds in dex.
+    alpha_fe_gamma : float
+        Shape parameter :math:`\gamma`.
+
+    Returns
+    -------
+    alpha_fe : np.ndarray
+        [alpha/Fe] (dex) at the midpoint of each bin. Bins before any star
+        formation (:math:`M = 0`) take the :math:`f \to 1` limit,
+        ``alpha_fe_max``.
+    """
+    tau = float(tau_alpha_fe)
+    if not tau > 0:
+        raise ValueError(f"tau_alpha_fe must be positive; got {tau}")
+    time_edges = np.asarray(time_edges, dtype=float)
+    dm = np.clip(np.asarray(formed_mass, dtype=float), 0.0, None)
+    width = np.diff(time_edges)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        # Mass formed per unit memory time, psi * tau, in each bin
+        psi_tau = np.where(width > 0, dm / width, 0.0) * tau
+        x = width / tau
+        # A at the end of each bin:
+        # A_i = sum_{j<=i} psi_j tau (1 - e^{-x_j}) e^{-(T_{i+1} - T_{j+1}) / tau}
+        t_end = time_edges[1:] / tau
+        log_gain = np.log(psi_tau * -np.expm1(-x)) + t_end
+        a_end = np.exp(np.logaddexp.accumulate(log_gain) - t_end)
+        a_start = np.concatenate(([0.0], a_end[:-1]))
+        # Propagate to the bin midpoints
+        a_mid = a_start * np.exp(-0.5 * x) + psi_tau * -np.expm1(-0.5 * x)
+        m_mid = np.cumsum(dm) - 0.5 * dm
+        f = np.where(m_mid > 0, a_mid / m_mid, 1.0)
+    f = np.clip(f, 0.0, 1.0)
+    return alpha_fe_min + (alpha_fe_max - alpha_fe_min) * f**alpha_fe_gamma
+
+
+class SFHAlphaFeMixin:
+    r"""Optional mixin coupling [alpha/Fe] to the star formation history.
+
+    The [alpha/Fe] of the stars formed in each time bin follows
+    :func:`alpha_fe_from_sfh`: stars formed while most of the mass is recent
+    (within ``tau_alpha_fe``) are alpha-enhanced up to ``alpha_fe_max``, and
+    [alpha/Fe] decreases towards ``alpha_fe_min`` as star formation extends
+    over longer times.
+
+    Place it first in the bases of a CEM (as in :class:`TabularCEM_ZPowerLaw`)::
+
+        class AlphaExponentialCEM(SFHAlphaFeMixin, ExponentialCEM):
+            pass
+
+        model = AlphaExponentialCEM(..., tau_alpha_fe=1.0, alpha_fe_max=0.35)
+
+    Parameters
+    ----------
+    tau_alpha_fe : float, Quantity or Parameter, optional
+        Chemical memory timescale (Gyr if a bare number). Default 1 Gyr.
+    alpha_fe_max, alpha_fe_min : float or Parameter, optional
+        Upper and lower [alpha/Fe] bounds in dex. Default 0 for both.
+    alpha_fe_gamma : float or Parameter, optional
+        Shape parameter. Default 1.
+
+    Notes
+    -----
+    - The defaults give a constant, solar-scaled history ([alpha/Fe] = 0),
+      identical to a model without [alpha/Fe]; the SSP interpolation then
+      takes its solar path at no extra cost. More generally, whenever
+      ``alpha_fe_max == alpha_fe_min`` the history is constant and
+      ``tau_alpha_fe`` and ``alpha_fe_gamma`` have no effect.
+    - Parameters given as numbers or Quantities are **fixed**, so models that
+      do not use [alpha/Fe] keep the same free parameters. To fit them, pass a
+      :class:`pst.model.Parameter` with ``fixed=False`` or call
+      ``model.unfreeze(["alpha_fe_max", ...])``.
+    - The constant ``alpha_fe`` parameter of :class:`ChemicalEvolutionModel`
+      can be used instead of the SFH-coupled history (it then takes
+      precedence), but not together with any of the parameters above.
+    - A subclass that overrides :meth:`ism_alpha_fe` replaces the SFH-coupled
+      history with its own [alpha/Fe](t).
+    """
+    _alpha_fe_defaults = {"tau_alpha_fe": 1.0 << u.Gyr, "alpha_fe_max": 0.0,
+                          "alpha_fe_min": 0.0, "alpha_fe_gamma": 1.0}
+    _alpha_fe_units = {"tau_alpha_fe": u.Gyr,
+                       "alpha_fe_max": u.dimensionless_unscaled,
+                       "alpha_fe_min": u.dimensionless_unscaled,
+                       "alpha_fe_gamma": u.dimensionless_unscaled}
+    _alpha_fe_docs = {"tau_alpha_fe": "[alpha/Fe] chemical memory timescale",
+                      "alpha_fe_max": "Maximum [alpha/Fe] (dex)",
+                      "alpha_fe_min": "Minimum [alpha/Fe] (dex)",
+                      "alpha_fe_gamma": "[alpha/Fe] shape parameter"}
+
+    def __init__(self, *args,
+                 tau_alpha_fe: Parameter | u.Quantity | float | None = None,
+                 alpha_fe_max: Parameter | float | None = None,
+                 alpha_fe_min: Parameter | float | None = None,
+                 alpha_fe_gamma: Parameter | float | None = None,
+                 **kwargs):
+        given = {"tau_alpha_fe": tau_alpha_fe, "alpha_fe_max": alpha_fe_max,
+                 "alpha_fe_min": alpha_fe_min, "alpha_fe_gamma": alpha_fe_gamma}
+        if kwargs.get("alpha_fe") is not None and any(
+                v is not None for v in given.values()):
+            raise ValueError(
+                "Use either the constant alpha_fe or the SFH-coupled [alpha/Fe] "
+                f"parameters ({', '.join(given)}), not both")
+        super().__init__(*args, **kwargs)
+        for name, value in given.items():
+            if value is None:
+                value = self._alpha_fe_defaults[name]
+            if not isinstance(value, Parameter):
+                # Fixed unless explicitly given as a free Parameter
+                value = Parameter(check_unit(value, self._alpha_fe_units[name]),
+                                  fixed=True, doc=self._alpha_fe_docs[name])
+            setattr(self, name, check_parameter(value, self._alpha_fe_units[name]))
+
+    def _alpha_fe_parameters(self):
+        """Plain-float parameters of :func:`alpha_fe_from_sfh`."""
+        return dict(
+            tau_alpha_fe=self.tau_alpha_fe.q.to_value(u.Gyr),
+            alpha_fe_max=self.alpha_fe_max.q.to_value(u.dimensionless_unscaled),
+            alpha_fe_min=self.alpha_fe_min.q.to_value(u.dimensionless_unscaled),
+            alpha_fe_gamma=self.alpha_fe_gamma.q.to_value(u.dimensionless_unscaled))
+
+    def _constant_alpha_fe(self):
+        """The constant [alpha/Fe] if ``alpha_fe_max == alpha_fe_min``, else None."""
+        alpha_max = self.alpha_fe_max.q.value
+        if alpha_max == self.alpha_fe_min.q.value:
+            return float(alpha_max)
+        return None
+
+    def _alpha_fe_cache_key(self):
+        if self.alpha_fe is not None:
+            return super()._alpha_fe_cache_key()
+        constant = self._constant_alpha_fe()
+        if constant is not None:
+            return constant
+        return tuple(self._alpha_fe_parameters().values())
+
+    def alpha_fe_in_bins(self, time_edges, bin_mass):
+        """[alpha/Fe] of each SFH bin from :func:`alpha_fe_from_sfh`.
+
+        Returns None for the solar-scaled constant history. The constant
+        ``alpha_fe`` parameter, or an :meth:`ism_alpha_fe` overridden by a
+        subclass, take precedence over the SFH-coupled history.
+        """
+        if (self.alpha_fe is not None
+                or type(self).ism_alpha_fe is not SFHAlphaFeMixin.ism_alpha_fe):
+            return super().alpha_fe_in_bins(time_edges, bin_mass)
+        constant = self._constant_alpha_fe()
+        if constant is not None:
+            if constant == 0.0:
+                return None
+            return np.full(np.shape(bin_mass), constant)
+        return alpha_fe_from_sfh(
+            u.Quantity(time_edges, u.Gyr).value,
+            np.asarray(getattr(bin_mass, "value", bin_mass)),
+            **self._alpha_fe_parameters())
+
+    def ism_alpha_fe(self, time, n_bins=1024):
+        """[alpha/Fe] (dex) of the stars formed at each cosmic time.
+
+        Evaluated on ``n_bins`` uniform bins from 0 to ``max(time)`` and
+        interpolated, for plotting and inspection. SSP weights use
+        :meth:`alpha_fe_in_bins` on the actual SFH bins instead.
+        """
+        if self.alpha_fe is not None:
+            return super().ism_alpha_fe(time)
+        constant = self._constant_alpha_fe()
+        if constant is not None:
+            return np.full(np.shape(time), constant)
+        time = np.asarray(u.Quantity(time, u.Gyr).value, dtype=float)
+        edges = np.linspace(0.0, max(float(np.max(time)), 1e-6), n_bins + 1)
+        mass = self.stellar_mass_formed(edges << u.Gyr)
+        mass = np.asarray(getattr(mass, "value", mass), dtype=float)
+        mid = 0.5 * (edges[1:] + edges[:-1])
+        values = self.alpha_fe_in_bins(edges, np.diff(mass))
+        return np.interp(time, mid, values)
 
 
 class LogNormalMetallicityDistributionMixin:
@@ -641,7 +854,8 @@ def weights_cache_decorator(func):
     @wraps(func)
     def wrapper(self, ssp, t_obs, *args, **kwargs):
         if self._cache_interp_ssp_mass:
-            key = (ssp.name, np.round(t_obs.to_value("Gyr"), decimals=6))
+            key = (ssp.name, np.round(t_obs.to_value("Gyr"), decimals=6),
+                   self._alpha_fe_cache_key())
             if key in self._ssp_weights_cache:
                 return self._ssp_weights_cache[key]
             
@@ -698,6 +912,11 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         name and observing time. This can accelerate repeated evaluations with
         identical inputs, but it is only safe when all other inputs affecting the
         interpolation, such as ``oversample_factor``, remain unchanged.
+    alpha_fe : float, :class:`astropy.units.Quantity`, :class:`pst.model.Parameter` or None, optional
+        Constant [alpha/Fe] of the stars formed (dex if a bare number). It is
+        only a model parameter when set; if None (default) the stars are
+        solar-scaled ([alpha/Fe] = 0). Override :meth:`ism_alpha_fe` for an
+        [alpha/Fe] that evolves with time.
 
     Notes
     -----
@@ -711,11 +930,75 @@ class ChemicalEvolutionModel(ModelBase, ABC):
     name = "base_cem"
 
     def __init__(self, today: Parameter | u.Quantity | float=None,
-                 cache_interp_ssp_mass: bool=False):
+                 cache_interp_ssp_mass: bool=False,
+                 alpha_fe: Parameter | u.Quantity | float | None = None):
 
         self.today = today
+        self.alpha_fe = alpha_fe
         self._cache_interp_ssp_mass = cache_interp_ssp_mass
         self._ssp_weights_cache = {}
+
+    @property
+    def alpha_fe(self):
+        """[alpha/Fe] of the stars formed (dex), or None for solar-scaled stars.
+
+        Stored as a dimensionless :class:`pst.model.Parameter` holding the
+        value in dex. It is not part of :meth:`parameters` while it is None.
+        """
+        return getattr(self, "_alpha_fe", None)
+
+    @alpha_fe.setter
+    def alpha_fe(self, value):
+        if value is None:
+            self._alpha_fe = None
+            return
+        if isinstance(value, Parameter):
+            value = check_unit(value, u.dimensionless_unscaled)
+        else:
+            value = _alpha_fe_values(value) << u.dimensionless_unscaled
+        self._alpha_fe = check_parameter(
+            value, u.dimensionless_unscaled, doc="[alpha/Fe] (dex)")
+
+    def _alpha_fe_cache_key(self):
+        """Hashable summary of the [alpha/Fe] model, for the weights cache."""
+        if self.alpha_fe is None:
+            return None
+        return np.asarray(self.alpha_fe.q.value).tobytes()
+
+    def alpha_fe_in_bins(self, time_edges, bin_mass) -> Optional[np.ndarray]:
+        """[alpha/Fe] (dex) of the stars formed in each SFH time bin.
+
+        Parameters
+        ----------
+        time_edges : :class:`astropy.units.Quantity`
+            Chronological (increasing) cosmic-time bin edges, shape ``(n + 1,)``.
+        bin_mass : :class:`astropy.units.Quantity`
+            Stellar mass formed in each bin, shape ``(n,)``.
+
+        Returns
+        -------
+        alpha_fe : np.ndarray or None
+            By default :meth:`ism_alpha_fe` at the bin midpoints (None for
+            solar-scaled models). Override it for an [alpha/Fe] that depends
+            on the SFH itself (see :class:`SFHAlphaFeMixin`).
+        """
+        if self.alpha_fe is None and (type(self).ism_alpha_fe
+                                      is ChemicalEvolutionModel.ism_alpha_fe):
+            return None
+        return self.ism_alpha_fe(0.5 * (time_edges[1:] + time_edges[:-1]))
+
+    def ism_alpha_fe(self, time: u.Quantity) -> Optional[np.ndarray]:
+        """[alpha/Fe] (dex) of the stars formed at each cosmic time.
+
+        Returns None for solar-scaled models (:attr:`alpha_fe` is None), so that
+        the SSP interpolation takes its [alpha/Fe] = 0 path. Otherwise the
+        constant :attr:`alpha_fe` broadcast to the shape of ``time``.
+        Subclasses can override this method for an evolving [alpha/Fe].
+        """
+        if self.alpha_fe is None:
+            return None
+        return np.broadcast_to(
+            self.alpha_fe.q.to_value(u.dimensionless_unscaled), np.shape(time))
 
     @property
     def today(self):
@@ -825,15 +1108,21 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             mass = self.stellar_mass_formed(grid.formation_times)
             bin_metallicity = self.ism_metallicity(grid.bin_formation_times)
         bin_mass = mass[:-1] - mass[1:]
+        # Chronological order for the [alpha/Fe] history
+        bin_alpha_fe = self.alpha_fe_in_bins(grid.formation_times[::-1],
+                                             bin_mass[::-1])
+        if bin_alpha_fe is not None:
+            bin_alpha_fe = np.asarray(bin_alpha_fe)[::-1]
 
         if grid.age_idx is None:
             # SSP class with its own ``get_weights``
             return ssp.get_weights(ages=grid.bin_age,
                                    metallicities=bin_metallicity,
-                                   masses=bin_mass)
+                                   masses=bin_mass, alpha_fe=bin_alpha_fe)
         return ssp.weights_from_age_interpolation(
             grid.age_idx, grid.age_weights,
-            metallicities=bin_metallicity, masses=bin_mass)
+            metallicities=bin_metallicity, masses=bin_mass,
+            alpha_fe=bin_alpha_fe)
 
     def surviving_stellar_mass(self, ssp: SSPBase, t_obs: u.Quantity):
         """
@@ -1054,6 +1343,29 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         weights = self.interpolate_ssp_masses(ssp, t_obs)
         mean_metals = np.nansum(ssp.metallicities[:, None] * weights) / np.nansum(weights)
         return mean_metals
+
+    def mean_stellar_alpha_fe(self, ssp: SSPBase, t_obs: u.Quantity):
+        """Formed-mass-weighted [alpha/Fe] (dex) on the projected SSP grid.
+
+        Parameters
+        ----------
+        ssp : :class:`pst.SSP.SSPBase`
+            SSP model. Models without an [alpha/Fe] axis give 0.
+        t_obs : :class:`astropy.units.Quantity`
+            Cosmic time of observation.
+
+        Returns
+        -------
+        mean_alpha_fe : float
+            Mean [alpha/Fe] in dex. Values outside the SSP [alpha/Fe] grid are
+            clipped to its edges by the SSP interpolation.
+        """
+        weights = self.interpolate_ssp_masses(ssp, t_obs).value
+        if ssp.alpha_fe is None:
+            return 0.0
+        grid = ssp.alpha_fe.to_value(u.dex(u.dimensionless_unscaled))
+        return float(np.nansum(grid[:, None, None] * weights)
+                     / np.nansum(weights))
 
     def _age_bin_matrix(self, idx: np.ndarray, nbin: int) -> np.ndarray:
         b = np.arange(nbin)[None, :]
@@ -1391,10 +1703,16 @@ class ChemicalEvolutionModel2D(ChemicalEvolutionModel, ABC):
             ssp.metallicities[np.newaxis, :], n_time, axis=0
         )
 
+        alpha_fe = self.alpha_fe_in_bins(formation_time_edges, bin_mass)
+        if alpha_fe is not None:
+            # Same [alpha/Fe] for every metallicity formed at a given time
+            alpha_fe = np.repeat(np.asarray(alpha_fe)[:, np.newaxis],
+                                 n_metallicity, axis=1).ravel()
         return ssp.get_weights(
             ages=ages.ravel(),
             metallicities=metallicities.ravel(),
             masses=joint_mass.ravel(),
+            alpha_fe=alpha_fe,
         )
 
     def mean_stellar_metallicity(
@@ -1440,8 +1758,9 @@ class SingleBurstCEM(ChemicalEvolutionModel):
         time_burst: Parameter | u.Quantity | float = 0 << u.Gyr,
         burst_metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
         self.mass_burst = check_parameter(mass_burst, u.Msun, doc="Total stellar mass in the burst")
         self.time_burst = check_parameter(time_burst, u.Gyr, doc="Cosmic time of the burst")
         self.burst_metallicity = check_parameter(
@@ -1496,8 +1815,9 @@ class ExponentialCEM(ChemicalEvolutionModel):
         tau: Parameter | u.Quantity | float = 1 << u.Gyr,
         metallicity: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
         self.stellar_mass_inf = check_parameter(stellar_mass_inf, u.Msun, doc="Total stellar mass at infinity")
         self.tau = check_parameter(tau, u.Gyr, doc="E-folding SFH timescale")
         self.metallicity = check_parameter(metallicity, u.dimensionless_unscaled, doc="Constant ISM metallicity")
@@ -1587,8 +1907,9 @@ class ExponentialDelayedCEM(ChemicalEvolutionModel):
         mass_today: Parameter | u.Quantity | float = 1.0 * u.Msun,
         ism_metallicity_today: Parameter | u.Quantity | float = 0.02,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
 
         self.mass_today = check_parameter(mass_today, u.Msun, doc="Total stellar mass at observing time")
         self.tau = check_parameter(tau, u.Gyr, doc="E-folding SFH timescale")
@@ -1708,8 +2029,9 @@ class GaussianBurstCEM(ChemicalEvolutionModel):
         sigma_burst: Parameter | u.Quantity | float,
         burst_metallicity: Parameter | u.Quantity | float,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
 
         self.mass_burst = check_parameter(mass_burst, u.Msun, doc="Total stellar mass formed during the burst")
         self.time_burst = check_parameter(time_burst, u.Gyr, doc="Burst cosmic time")
@@ -1761,8 +2083,9 @@ class LogNormalCEM(ChemicalEvolutionModel):
         mass_today: Parameter | u.Quantity | float = 1 << u.Msun,
         ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
 
         self.t0 = check_parameter(
             t0,
@@ -1922,8 +2245,9 @@ class BetaCEM(ChemicalEvolutionModel):
         t_end: Parameter | u.Quantity | float | None = None,
         ism_metallicity_today: Parameter | u.Quantity | float = 0.02 << u.dimensionless_unscaled,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
 
         self.mass_today = check_parameter(mass_today, u.Msun, doc="Total formed stellar mass by t_end")
         self.t_start = check_parameter(t_start, u.Gyr, doc="Cosmic start time of star formation")
@@ -2510,13 +2834,19 @@ class TabularCEM(ChemicalEvolutionModel):
         return integral
 
 
-class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
+class TabularCEM_ZPowerLaw(SFHAlphaFeMixin, MassPropMetallicityMixin, TabularCEM):
     """Chemical evolution model based on a grid of times that assumes an analytic chemical enrichment history.
+
+    The [alpha/Fe] history is coupled to the SFH through
+    :class:`SFHAlphaFeMixin` (parameters ``tau_alpha_fe``, ``alpha_fe_max``,
+    ``alpha_fe_min`` and ``alpha_fe_gamma``). By default it is constant and
+    solar-scaled, and the parameters are fixed.
 
     See Also
     --------
     :class:`TabularCEM`
     :class:`MassPropMetallicityMixin`
+    :class:`SFHAlphaFeMixin`
     """
     name = "tabular_zpowlaw_cem"
 
@@ -2821,6 +3151,9 @@ class ParticleListCEM(ChemicalEvolutionModel):
     masses : numpy.array or astropy.units.Quantity
         Array representing the masses of each SSP particle. If the input is a 
         `numpy.array`, it is assumed to be in solar masses.
+    alpha_fe : float, numpy.array or None, optional
+        [alpha/Fe] (dex) of all particles (scalar) or of each particle. If
+        None (default), the particles are solar-scaled.
     """
     name = "particle_list_cem"
 
@@ -2831,8 +3164,9 @@ class ParticleListCEM(ChemicalEvolutionModel):
         metallicities: Parameter | u.Quantity | np.ndarray,
         masses: Parameter | u.Quantity | np.ndarray,
         today: Parameter | u.Quantity | float | None = None,
+        alpha_fe: Parameter | u.Quantity | float | None = None,
     ):
-        super().__init__(today=today)
+        super().__init__(today=today, alpha_fe=alpha_fe)
         self.time_form = check_parameter(time_form, u.Gyr, doc="Particle formation time")
         self.metallicities = check_parameter(metallicities, u.dimensionless_unscaled,
                                              doc="Particle metallicity (at observing time)")
@@ -2887,9 +3221,15 @@ class ParticleListCEM(ChemicalEvolutionModel):
             particle in the base SSP grid. Units are in solar masses.
         """
         valid_particles = self.time_form.q <= t_obs
+        alpha_fe = self.alpha_fe
+        if alpha_fe is not None:
+            alpha_fe = alpha_fe.q.to_value(u.dimensionless_unscaled)
+            if np.ndim(alpha_fe) > 0:
+                alpha_fe = alpha_fe[valid_particles]
         return ssp.get_weights(ages=t_obs - self.time_form.q[valid_particles],
                                metallicities=self.metallicities.q[valid_particles],
-                               masses=self.masses.q[valid_particles])
+                               masses=self.masses.q[valid_particles],
+                               alpha_fe=alpha_fe)
 
     def stellar_mass_formed(self, time):
         sort_idx = np.argsort(self.time_form.q)
