@@ -17,6 +17,11 @@ class TestObservables(unittest.TestCase):
                                      ) * constants.c / self.dummy_wavelength**2 * 3631 * u.Jy
         self.dummy_fnu = np.ones(self.dummy_wavelength.size
                                 ) * 3631 * u.Jy
+        # The broad-band grid above samples ~15 A around H-alpha, coarser than
+        # the 12 A Lick Ha central band: equivalent widths need a finer grid
+        self.ew_wavelength = np.linspace(6400.0, 6700.0, 3001) * u.angstrom
+        self.ew_flam = (np.ones(self.ew_wavelength.size) * constants.c
+                        / self.ew_wavelength**2 * 3631 * u.Jy)
 
     def test_default_dir(self):
         self.assertTrue(
@@ -87,10 +92,10 @@ class TestObservables(unittest.TestCase):
 
     def test_equivalent_width(self):
         eqwidth = observables.EquivalentWidth.from_name("lick_ha")
-        ew, ew_err = eqwidth.compute_ew(self.dummy_wavelength, self.dummy_flam)
+        ew, ew_err = eqwidth.compute_ew(self.ew_wavelength, self.ew_flam)
         self.assertTrue(np.isfinite(ew), "Unexpected EW value")
         ew2, ew2_err = eqwidth.compute_ew(
-            self.dummy_wavelength, self.dummy_flam, spectra_err=0.1 * self.dummy_flam
+            self.ew_wavelength, self.ew_flam, spectra_err=0.1 * self.ew_flam
         )
         self.assertTrue(np.isfinite(ew2))
         self.assertTrue(np.isfinite(ew2_err))
@@ -98,15 +103,15 @@ class TestObservables(unittest.TestCase):
     def test_equivalent_width_error_shape_consistency(self):
         eqwidth = observables.EquivalentWidth.from_name("lick_ha")
         ew_1d, ew_err_1d = eqwidth.compute_ew(
-            self.dummy_wavelength,
-            self.dummy_flam,
-            spectra_err=0.1 * self.dummy_flam,
+            self.ew_wavelength,
+            self.ew_flam,
+            spectra_err=0.1 * self.ew_flam,
         )
 
         ew_2d, ew_err_2d = eqwidth.compute_ew(
-            self.dummy_wavelength,
-            self.dummy_flam[:, np.newaxis],
-            spectra_err=(0.1 * self.dummy_flam)[:, np.newaxis],
+            self.ew_wavelength,
+            self.ew_flam[:, np.newaxis],
+            spectra_err=(0.1 * self.ew_flam)[:, np.newaxis],
         )
 
         self.assertTrue(np.isclose(ew_1d, ew_2d[0]))
