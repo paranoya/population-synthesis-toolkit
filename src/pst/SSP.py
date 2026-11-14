@@ -12,6 +12,76 @@ from astropy import constants
 from pst.utils import (check_unit, flux_conserving_interpolation, trapz,
                        convert_wavelength_medium)
 
+
+def _alpha_fe_values(value):
+    """Return [alpha/Fe] as a float array in dex.
+
+    Bare numbers are interpreted as dex.
+    """
+    if isinstance(value, u.Quantity):
+        if value.unit == u.dex or value.unit == u.dimensionless_unscaled:
+            return np.asarray(value.value, dtype=float)
+        raise u.UnitTypeError(
+            f"[alpha/Fe] must be given in dex, got unit '{value.unit}'")
+    return np.asarray(value, dtype=float)
+
+
+def _axis_interpolation(grid, values, log=False):
+    """Helper function for linear interpolation indices and weights along one SSP grid axis.
+
+    Parameters
+    ----------
+    grid : np.ndarray
+        Strictly increasing grid nodes.
+    values : np.ndarray
+        Values to interpolate. Values outside the grid are clipped to the edges.
+    log : bool, optional
+        If True, interpolate linearly in ``log(values)``.
+
+    Returns
+    -------
+    upper_idx : np.ndarray of int
+        Index of the upper node of each value. The lower node is
+        ``upper_idx - 1``, except for single-node grids, where only node 0
+        exists and receives all the weight.
+    upper_weight : np.ndarray of float
+        Weight of the upper node, in [0, 1].
+    """
+    values = np.asarray(values, dtype=float)
+    if grid.size == 1:
+        return (np.zeros(values.shape, dtype=int),
+                np.ones(values.shape, dtype=float))
+    if log:
+        grid, values = np.log(grid), np.log(values)
+    upper_idx = np.clip(grid.searchsorted(values), 1, grid.size - 1)
+    upper_weight = (values - grid[upper_idx - 1]) / (
+        grid[upper_idx] - grid[upper_idx - 1])
+    return upper_idx, np.clip(upper_weight, 0., 1.)
+
+
+def _axis_corners(upper_idx, upper_weight, n_nodes):
+    """Stack the interpolation nodes of one axis.
+
+    Returns arrays of shape ``(2, n)`` with the lower and upper node indices and
+    their weights, or ``(1, n)`` for single-node axes (no lower node).
+    """
+    if n_nodes == 1:
+        return upper_idx[np.newaxis], upper_weight[np.newaxis]
+    return (np.stack((upper_idx - 1, upper_idx)),
+            np.stack((1. - upper_weight, upper_weight)))
+
+
+def _project_on_grid(weights, cube):
+    """Sum ``cube`` over its SSP axes weighted by ``weights``.
+
+    ``weights`` has the SSP grid shape ``(n_alpha_fe, n_metallicities, n_ages)``
+    and ``cube`` has that shape plus a trailing axis (e.g. wavelength). Cubes
+    without the leading [alpha/Fe] axis are accepted when ``n_alpha_fe == 1``.
+    """
+    weights = weights.reshape(cube.shape[:-1])
+    return np.tensordot(weights, cube, axes=weights.ndim)
+
+
 class SSPBase(object):
     """Base class that represents a model of Simple Stellar Populations.
     
@@ -110,6 +180,32 @@ class SSPBase(object):
         self._metallicities = metallicities_array
 
     @property
+    def alpha_fe(self):
+        """[alpha/Fe] grid of the SSPs, in ``dex(1)``, or None for models
+        that only provide a single (typically solar-scaled) abundance pattern."""
+        return getattr(self, '_alpha_fe', None)
+
+    @alpha_fe.setter
+    def alpha_fe(self, value):
+        """Set the [alpha/Fe] grid of the SSPs.
+
+        Accepts bare numbers (interpreted as dex), ``u.dex`` or ``u.dex(1)``
+        quantities, scalars or 1D arrays. Values must be strictly increasing.
+        ``None`` removes the [alpha/Fe] axis.
+        """
+        if value is None:
+            self._alpha_fe = None
+            return
+        values = np.atleast_1d(_alpha_fe_values(value))
+        if values.ndim != 1:
+            raise ValueError("alpha_fe must be a scalar or a 1D array")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("alpha_fe values must be finite")
+        if np.any(np.diff(values) <= 0):
+            raise ValueError("alpha_fe values must be strictly increasing")
+        self._alpha_fe = values << u.dex(u.dimensionless_unscaled)
+
+    @property
     def n_ages(self):
         """Number of ages in the SSP model."""
         return self.ages.size
@@ -120,9 +216,21 @@ class SSPBase(object):
         return self.metallicities.size
 
     @property
+    def n_alpha_fe(self):
+        """Number of [alpha/Fe] values in the SSP model (1 if no grid is set)."""
+        if self.alpha_fe is None:
+            return 1
+        return self.alpha_fe.size
+
+    @property
     def n_ssps(self):
         """Number of SSPs in the model."""
-        return self.n_ages * self.n_metallicities
+        return self.n_ages * self.n_metallicities * self.n_alpha_fe
+
+    @property
+    def ssp_shape(self):
+        """Shape of the SSP model."""
+        return (self.n_alpha_fe, self.n_metallicities, self.n_ages, self.n_wavelengths)
 
     @property
     def n_wavelengths(self):
@@ -156,7 +264,7 @@ class SSPBase(object):
         if hasattr(self, '_remnant_mass_frac'):
             return self._remnant_mass_frac
         else:
-            return np.zeros((self.metallicities.size, self.ages.size))
+            return np.zeros(self.ssp_shape[:-1])
     
     @remnant_mass_frac.setter
     def remnant_mass_frac(self, value):
@@ -169,7 +277,7 @@ class SSPBase(object):
         if hasattr(self, '_returned_mass_frac'):
             return self._returned_mass_frac
         else:
-            return np.zeros((self.metallicities.size, self.ages.size))
+            return np.zeros(self.ssp_shape[:-1])
 
     @returned_mass_frac.setter
     def returned_mass_frac(self, value):
@@ -230,28 +338,42 @@ class SSPBase(object):
             return self._supernova_rate
         else:
             return None
-    
+
     @supernova_rate.setter
     def supernova_rate(self, value):
         """Set the supernova rate of the SSP model."""
         value = check_unit(value, u.s**-1 * u.Msun**-1)
         self._supernova_rate = value
 
-    def get_weights(self, ages, metallicities, masses=None):
-        """2D interpolation of a list of ages and metallicities.
-        
+    def get_weights(self, ages, metallicities, masses=None, *, alpha_fe=None):
+        """Interpolate a list of SSPs onto the (alpha/Fe, metallicity, age) grid.
+
+        Each input SSP distributes its mass over the (up to) 8 surrounding grid
+        nodes. Interpolation is linear in log(age), log(Z) and [alpha/Fe].
+        Values outside the grid are clipped to the edge nodes.
+
         Parameters
         ----------
         ages : np.array or astropy.units.Quantity
-            SSP ages to interpolate.
-        metallicites : np.array or astropy.units.Quantity
+            SSP ages to interpolate (Gyr if bare numbers).
+        metallicities : np.array or astropy.units.Quantity
             Metallicity associated to each age.
         masses : np.array, astropy.units.Quantity or None, optional
-            Stellar mass corresponding to each SSP.
+            Stellar mass corresponding to each SSP (Msun if bare numbers).
+        alpha_fe : np.array, astropy.units.Quantity or None, optional
+            [alpha/Fe] associated to each age (dex if bare numbers).
+            Keyword-only. If None, 0 (solar-scaled) is assumed.
+
+        Returns
+        -------
+        weights : astropy.units.Quantity
+            Mass on the SSP grid, shape ``(n_alpha_fe, n_metallicities, n_ages)``,
+            in Msun.
         """
         age_idx, weights_age = self.age_interpolation(ages)
         return self.weights_from_age_interpolation(
-            age_idx, weights_age, metallicities, masses=masses)
+            age_idx, weights_age, metallicities, masses=masses,
+            alpha_fe=alpha_fe)
 
     def age_interpolation(self, ages):
         """Age-grid part of :meth:`get_weights`.
@@ -271,19 +393,13 @@ class SSPBase(object):
         weights_age : np.ndarray of float
             Weight of the upper node, linear in log(age) and clipped to [0, 1].
         """
-        ages = check_unit(ages, u.Gyr)
-        age_idx = np.clip(self.ages.searchsorted(ages), 1, self.ages.size-1)
-        weights_age = np.log(ages / self.ages[age_idx-1])
-        weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
-        weights_age = np.clip(weights_age, 0., 1.)
-        weights_age = np.asarray(
-            u.Quantity(weights_age).to_value(u.dimensionless_unscaled),
-            dtype=float)
-        return age_idx, weights_age
+        ages = check_unit(ages, u.Gyr).to_value(u.Gyr)
+        return _axis_interpolation(self.ages.to_value(u.Gyr), ages, log=True)
 
     def weights_from_age_interpolation(self, age_idx, weights_age,
-                                       metallicities, masses=None):
-        """Metallicity and mass part of :meth:`get_weights`.
+                                       metallicities, masses=None, *,
+                                       alpha_fe=None):
+        """Metallicity, [alpha/Fe] and mass part of :meth:`get_weights`.
 
         Parameters
         ----------
@@ -293,20 +409,29 @@ class SSPBase(object):
             Metallicity associated to each age.
         masses : np.array, astropy.units.Quantity or None, optional
             Stellar mass corresponding to each age (Msun if bare numbers).
+        alpha_fe : np.array, astropy.units.Quantity or None, optional
+            [alpha/Fe] associated to each age (dex if bare numbers).
+            Keyword-only. If None, 0 (solar-scaled) is assumed.
 
         Returns
         -------
         weights : astropy.units.Quantity
-            Mass on the SSP grid, shape ``(n_metallicities, n_ages)``, in Msun.
+            Mass on the SSP grid, shape ``(n_alpha_fe, n_metallicities, n_ages)``,
+            in Msun.
         """
-        metallicities = check_unit(metallicities, u.dimensionless_unscaled)
-        metallicities = np.asarray(
-            metallicities.to_value(u.dimensionless_unscaled), dtype=float)
-        grid_z = self.metallicities
-        if isinstance(grid_z, u.Quantity):
-            grid_z = grid_z.to_value(u.dimensionless_unscaled)
-        grid_z = np.asarray(grid_z, dtype=float)
-        n_z, n_age = grid_z.size, self.ages.size
+        metallicities = check_unit(
+            metallicities, u.dimensionless_unscaled).to_value(
+                u.dimensionless_unscaled)
+        alpha_fe = (np.zeros(np.shape(metallicities)) if alpha_fe is None
+                    else _alpha_fe_values(alpha_fe))
+
+        grid_z = np.asarray(
+            self.metallicities.to_value(u.dimensionless_unscaled), dtype=float)
+        # Models without an [alpha/Fe] axis are treated as a single node
+        grid_alpha_fe = (np.zeros(1) if self.alpha_fe is None
+                         else self.alpha_fe.to_value(
+                             u.dex(u.dimensionless_unscaled)))
+        n_alpha_fe, n_z, n_age = grid_alpha_fe.size, grid_z.size, self.ages.size
 
         if masses is None:
             masses = np.ones(np.size(age_idx))
@@ -314,26 +439,29 @@ class SSPBase(object):
             masses = np.asarray(
                 check_unit(masses, u.Msun).to_value(u.Msun), dtype=float)
 
-        z_idx = np.clip(grid_z.searchsorted(metallicities), 1, n_z-1)
-        weights_z = np.log(metallicities / grid_z[z_idx-1])
-        weights_z /= np.log(grid_z[z_idx] / grid_z[z_idx-1])
-        weights_z = np.clip(weights_z, 0., 1.)
+        # Interpolate both metallicity and [alpha/Fe] axes
+        z_idx, weights_z = _axis_interpolation(grid_z, metallicities, log=True)
+        alpha_fe_idx, weights_alpha_fe = _axis_interpolation(
+            grid_alpha_fe, alpha_fe)
 
-        terms = (
-            (z_idx, age_idx, masses * weights_age * weights_z),
-            (z_idx-1, age_idx, masses * weights_age * (1-weights_z)),
-            (z_idx-1, age_idx-1, masses * (1-weights_age) * (1-weights_z)),
-            (z_idx, age_idx-1, masses * (1-weights_age) * weights_z),
-        )
-        flat_idx, values = [], []
-        for zi, ai, value in terms:
-            zi, ai, value = np.broadcast_arrays(zi, ai, value)
-            flat_idx.append(((zi % n_z) * n_age + ai % n_age).ravel())
-            values.append(value.ravel())
-        weights = np.bincount(np.concatenate(flat_idx),
-                              weights=np.concatenate(values),
-                              minlength=n_z * n_age)
-        return weights.reshape(n_z, n_age) << u.Msun
+        # Distribute the mass over the (up to) 8 surrounding nodes
+        # 1) broadcast all to the same shape
+        (alpha_fe_idx, weights_alpha_fe, z_idx, weights_z, age_idx,
+         weights_age, masses) = (np.ravel(a) for a in np.broadcast_arrays(
+            alpha_fe_idx, weights_alpha_fe, z_idx, weights_z, age_idx,
+            weights_age, masses))
+        # 2) get indices and weights of the nodes
+        af_idx, af_w = _axis_corners(alpha_fe_idx, weights_alpha_fe, n_alpha_fe)
+        z_idx, z_w = _axis_corners(z_idx, weights_z, n_z)
+        age_idx, age_w = _axis_corners(age_idx, weights_age, n_age)
+        # 3) compute the flat indices and weights of the nodes
+        flat_idx = ((af_idx[:, None, None] * n_z + z_idx[None, :, None])
+                    * n_age + age_idx[None, None, :])
+        values = (masses * af_w[:, None, None] * z_w[None, :, None]
+                  * age_w[None, None, :])
+        weights = np.bincount(flat_idx.ravel(), weights=values.ravel(),
+                              minlength=n_alpha_fe * n_z * n_age)
+        return weights.reshape(n_alpha_fe, n_z, n_age) << u.Msun
 
     def get_ssp_l_lambda(self, age, metallicity):
         """Compute the SED associated to an SSP of a given age and metallicity.
@@ -402,8 +530,8 @@ class SSPBase(object):
         for j, m_bin in enumerate(metallicity_bins):
             for i, a_bin in enumerate(age_bins):
                 weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                new_l_lambda[j, i] = np.sum(
-                    self.L_lambda * weights[:, :, np.newaxis] / u.Msun, axis=(0, 1))
+                new_l_lambda[j, i] = _project_on_grid(
+                    weights, self.L_lambda) / u.Msun
 
         if verbose:
             print("Updating SSP model metallicities, ages and SED")
@@ -707,9 +835,8 @@ class SSPwithCloudyGasModel(SSPBase):
             for j, m_bin in enumerate(metallicity_bins):
                 for i, a_bin in enumerate(age_bins):
                     weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                    new_cube[k, j, i] = np.sum(
-                        cube[k] * weights[:, :, np.newaxis] / u.Msun,
-                        axis=(0, 1))
+                    new_cube[k, j, i] = _project_on_grid(
+                        weights, cube[k]) / u.Msun
         return new_cube
 
     def _interpolate_cube_wavelength(self, cube, new_wl, log=False,
@@ -883,9 +1010,8 @@ class SSPwithCloudyGasModel(SSPBase):
         for j, m_bin in enumerate(metallicity_bins):
             for i, a_bin in enumerate(age_bins):
                 weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                new_stellar_l_lambda[j, i] = np.sum(
-                    self.stellar_L_lambda * weights[:, :, np.newaxis] / u.Msun,
-                    axis=(0, 1))
+                new_stellar_l_lambda[j, i] = _project_on_grid(
+                    weights, self.stellar_L_lambda) / u.Msun
 
         if self._has_gas_model():
             new_gas_l_lambda_grid = self._regrid_cube(
@@ -2306,7 +2432,8 @@ class BPASS(SSPBase):
 
         with fits.open(filename) as hdul:
             tag = self._select_alpha(hdul, alpha_fe)
-            self.alpha_fe = float(hdul[f"SED_{tag}"].header["ALPHAFE"])
+            alpha_fe = float(hdul[f"SED_{tag}"].header["ALPHAFE"])
+            self.alpha_fe = alpha_fe
             self.wavelength = np.array(hdul["WAVE"].data, dtype=float
                                        ) << u.Angstrom
             native = ("vacuum" if self.stellar_library in self._vacuum_libraries
@@ -2341,7 +2468,7 @@ class BPASS(SSPBase):
                                              ) << 1 / (u.yr * u.Msun)
 
         self.name = (f"BPASS_v{self.version}_{population}_{self.imf}_"
-                     f"{self.stellar_library}_afe{self.alpha_fe:+.1f}")
+                     f"{self.stellar_library}_afe{alpha_fe:+.1f}")
 
     def _parse_library(self, library):
         key = library.lower()
