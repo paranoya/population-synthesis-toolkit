@@ -102,7 +102,8 @@ class SSPBase(object):
         Metallicities of the SSPs.
     L_lambda: astropy.units.Quantity
         Spectral energy distribution of each SSP. Each dimension correspond to
-        (metallicity, ages, wavelength).
+        (metallicity, ages, wavelength), or ([alpha/Fe], metallicity, ages,
+        wavelength) for models with several [alpha/Fe] values.
     wavelength: astroy.units.Quantity
         Wavelength array associated to the SED of the SSPs.
     wavelength_medium: str
@@ -207,6 +208,40 @@ class SSPBase(object):
         if np.any(np.diff(values) <= 0):
             raise ValueError("alpha_fe values must be strictly increasing")
         self._alpha_fe = values << u.dex(u.dimensionless_unscaled)
+
+    @property
+    def available_models(self):
+        """Boolean mask of the (alpha/Fe, metallicity) nodes that have a model.
+
+        Shape ``(n_alpha_fe, n_metallicities)``, or None when the grid is
+        complete. Some libraries (e.g. BPASS) do not provide every metallicity
+        for every [alpha/Fe]. The SEDs of missing nodes are zero and
+        :meth:`get_weights` never assigns mass to them. At each [alpha/Fe] the
+        metallicity interpolation only uses the available nodes.
+        """
+        return getattr(self, '_available_models', None)
+
+    @available_models.setter
+    def available_models(self, value):
+        """Set the mask of available models (None for a complete grid)."""
+        if value is None:
+            self._available_models = None
+            self._available_z_idx = None
+            return
+        mask = np.asarray(value, dtype=bool)
+        expected = (self.n_alpha_fe, self.n_metallicities)
+        if mask.shape != expected:
+            raise ValueError(
+                f"available_models must have shape {expected}; got {mask.shape}")
+        if not mask.any(axis=1).all():
+            raise ValueError(
+                "Every [alpha/Fe] value needs at least one available metallicity")
+        if mask.all():
+            self.available_models = None
+            return
+        self._available_models = mask
+        # Available metallicity indices of each [alpha/Fe] node
+        self._available_z_idx = [np.flatnonzero(row) for row in mask]
 
     @property
     def n_ages(self):
@@ -422,11 +457,35 @@ class SSPBase(object):
             Mass on the SSP grid, shape ``(n_alpha_fe, n_metallicities, n_ages)``,
             in Msun.
         """
+        flat_idx, values = self._grid_corners(
+            age_idx, weights_age, metallicities, masses, alpha_fe)
+        n_alpha_fe, n_z, n_age = (self.n_alpha_fe, self.n_metallicities,
+                                  self.n_ages)
+        weights = np.bincount(flat_idx.ravel(), weights=values.ravel(),
+                              minlength=n_alpha_fe * n_z * n_age)
+        return weights.reshape(n_alpha_fe, n_z, n_age) << u.Msun
+
+    def _grid_corners(self, age_idx, weights_age, metallicities, masses,
+                      alpha_fe):
+        """Flat grid indices and masses of the nodes surrounding each SSP.
+
+        Returns two arrays of shape ``(n_af_corners, n_z_corners,
+        n_age_corners, n_ssp)``: the flat index of each node on the
+        ``(n_alpha_fe, n_metallicities, n_ages)`` grid and the mass it
+        receives. Axes with a single node contribute one corner.
+        """
         metallicities = check_unit(
             metallicities, u.dimensionless_unscaled).to_value(
                 u.dimensionless_unscaled)
-        alpha_fe = (np.zeros(np.shape(metallicities)) if alpha_fe is None
-                    else _alpha_fe_values(alpha_fe))
+        if alpha_fe is None:
+            alpha_fe = 0.
+        else:
+            alpha_fe = _alpha_fe_values(alpha_fe)
+        if masses is None:
+            masses = 1.
+        else:
+            masses = np.asarray(
+                check_unit(masses, u.Msun).to_value(u.Msun), dtype=float)
 
         grid_z = np.asarray(
             self.metallicities.to_value(u.dimensionless_unscaled), dtype=float)
@@ -436,70 +495,78 @@ class SSPBase(object):
                              u.dex(u.dimensionless_unscaled)))
         n_alpha_fe, n_z, n_age = grid_alpha_fe.size, grid_z.size, self.ages.size
 
-        if masses is None:
-            masses = np.ones(np.size(age_idx))
-        else:
-            masses = np.asarray(
-                check_unit(masses, u.Msun).to_value(u.Msun), dtype=float)
+        # 1) broadcast all inputs to the same 1D shape
+        age_idx, weights_age, metallicities, alpha_fe, masses = (
+            np.ravel(a) for a in np.broadcast_arrays(
+                age_idx, weights_age, metallicities, alpha_fe, masses))
 
-        # Interpolate both metallicity and [alpha/Fe] axes
-        z_idx, weights_z = _axis_interpolation(grid_z, metallicities, log=True)
-        alpha_fe_idx, weights_alpha_fe = _axis_interpolation(
-            grid_alpha_fe, alpha_fe)
-
-        # Distribute the mass over the (up to) 8 surrounding nodes
-        # 1) broadcast all to the same shape
-        (alpha_fe_idx, weights_alpha_fe, z_idx, weights_z, age_idx,
-         weights_age, masses) = (np.ravel(a) for a in np.broadcast_arrays(
-            alpha_fe_idx, weights_alpha_fe, z_idx, weights_z, age_idx,
-            weights_age, masses))
-        # 2) get indices and weights of the nodes
-        af_idx, af_w = _axis_corners(alpha_fe_idx, weights_alpha_fe, n_alpha_fe)
-        z_idx, z_w = _axis_corners(z_idx, weights_z, n_z)
+        # 2) interpolation nodes and weights of each axis, shape (k, n_ssp)
+        af_idx, af_w = _axis_corners(
+            *_axis_interpolation(grid_alpha_fe, alpha_fe), n_alpha_fe)
         age_idx, age_w = _axis_corners(age_idx, weights_age, n_age)
-        # 3) compute the flat indices and weights of the nodes
-        flat_idx = ((af_idx[:, None, None] * n_z + z_idx[None, :, None])
-                    * n_age + age_idx[None, None, :])
-        values = (masses * af_w[:, None, None] * z_w[None, :, None]
-                  * age_w[None, None, :])
-        weights = np.bincount(flat_idx.ravel(), weights=values.ravel(),
-                              minlength=n_alpha_fe * n_z * n_age)
-        return weights.reshape(n_alpha_fe, n_z, n_age) << u.Msun
+        z_idx, z_w = self._metallicity_corners(grid_z, metallicities, af_idx)
 
-    def get_ssp_l_lambda(self, age, metallicity):
+        # 3) flat indices and masses of the nodes
+        flat_idx = ((af_idx[:, None, None] * n_z + z_idx[:, :, None])
+                    * n_age + age_idx[None, None, :])
+        values = (masses * af_w[:, None, None] * z_w[:, :, None]
+                  * age_w[None, None, :])
+        return flat_idx, values
+
+    def _metallicity_corners(self, grid_z, metallicities, af_idx):
+        """Metallicity nodes and weights for each [alpha/Fe] corner.
+
+        Returns arrays of shape ``(n_af_corners or 1, n_z_corners, n_ssp)``.
+        For incomplete grids (see :attr:`available_models`) the metallicity
+        interpolation at each [alpha/Fe] node only uses its available nodes.
+        """
+        if self.available_models is None:
+            z_idx, z_w = _axis_corners(
+                *_axis_interpolation(grid_z, metallicities, log=True),
+                grid_z.size)
+            # Same metallicity nodes for every [alpha/Fe] corner
+            return z_idx[np.newaxis], z_w[np.newaxis]
+
+        # Interpolate on the available metallicities of each [alpha/Fe] node
+        # (a short loop over the alpha/Fe grid, vectorised over the SSPs)
+        n_ssp = metallicities.size
+        node_idx = np.empty((len(self._available_z_idx), 2, n_ssp), dtype=int)
+        node_w = np.empty((len(self._available_z_idx), 2, n_ssp))
+        for a, available in enumerate(self._available_z_idx):
+            upper, upper_w = _axis_interpolation(
+                grid_z[available], metallicities, log=True)
+            # Single available node: lower == upper and gets no weight
+            node_idx[a, 0] = available[np.maximum(upper - 1, 0)]
+            node_idx[a, 1] = available[upper]
+            node_w[a, 0] = 1. - upper_w
+            node_w[a, 1] = upper_w
+        if af_idx.shape[0] == node_idx.shape[0]:
+            # Two [alpha/Fe] nodes: the corners are always nodes 0 and 1
+            return node_idx, node_w
+        # Select the nodes of the [alpha/Fe] node of each corner and SSP
+        af_idx = af_idx[:, np.newaxis, :]
+        return (np.take_along_axis(node_idx, af_idx, axis=0),
+                np.take_along_axis(node_w, af_idx, axis=0))
+
+    def get_ssp_l_lambda(self, age, metallicity, alpha_fe=None):
         """Compute the SED associated to an SSP of a given age and metallicity.
-        
+
         Parameters
         ----------
         age : float or u.Quantity
             SSP age.
         metallicity : float or u.Quantity
             SSP metallicity
-        
+        alpha_fe : float, u.Quantity or None, optional
+            SSP [alpha/Fe] (dex if bare number). If None, 0 is assumed.
+
         Returns
         -------
         sed : u.Quantity
             Spectra energy distribution associated to the SSP.
         """
-        age = check_unit(age, u.Gyr)
-        metallicity = check_unit(metallicity, u.dimensionless_unscaled)
-
-        age_idx = np.clip(self.ages.searchsorted(age), 1, self.ages.size-1)
-        weights_age = np.log(age / self.ages[age_idx-1])
-        weights_age /= np.log(self.ages[age_idx] / self.ages[age_idx-1])
-        weights_age = np.clip(weights_age, 0., 1.)
-
-        z_idx = np.clip(self.metallicities.searchsorted(metallicity), 1,
-                        self.metallicities.size-1)
-        weights_z = np.log(metallicity / self.metallicities[z_idx-1])
-        weights_z /= np.log(self.metallicities[z_idx] / self.metallicities[z_idx-1])
-        weights_z = np.clip(weights_z, 0., 1.)
-
-        sed = self.L_lambda[z_idx, age_idx] *  weights_age * weights_z
-        sed += self.L_lambda[z_idx-1, age_idx] * weights_age * (1-weights_z)
-        sed += self.L_lambda[z_idx-1, age_idx-1] * (1-weights_age) * (1-weights_z)
-        sed += self.L_lambda[z_idx, age_idx-1] * (1-weights_age) * weights_z
-        return sed
+        weights = self.get_weights(age, metallicity, alpha_fe=alpha_fe)
+        return _project_on_grid(weights.to_value(u.Msun), self.L_lambda)
 
     def get_ssp_logedges(self):
         """Get the edges of the SSP metallicities and ages."""
@@ -514,32 +581,65 @@ class SSPBase(object):
                 [lim[0], (log_met_bins[1:] + log_met_bins[:-1])/2, lim[1]])
         return logmet_bin_edges, logage_bin_edges
 
+    def _regrid_matrix(self, age_bins, metallicity_bins):
+        """Interpolation matrix from the SSP grid to new age/metallicity bins.
+
+        Each [alpha/Fe] node is kept. Returns an array of shape
+        ``(n_alpha_fe * n_metallicity_bins * n_age_bins, n_ssps)`` whose rows
+        hold the weights of the SSP grid nodes for each new SSP.
+        """
+        grid_alpha_fe = (np.zeros(1) if self.alpha_fe is None
+                         else self.alpha_fe.to_value(
+                             u.dex(u.dimensionless_unscaled)))
+        alpha_fe, metallicities, ages = (a.ravel() for a in np.meshgrid(
+            grid_alpha_fe,
+            metallicity_bins.to_value(u.dimensionless_unscaled),
+            age_bins.to_value(u.Gyr), indexing="ij"))
+        age_idx, weights_age = self.age_interpolation(ages)
+        flat_idx, values = self._grid_corners(
+            age_idx, weights_age, metallicities, None, alpha_fe)
+        n_new, n_nodes = ages.size, self.n_ssps
+        rows = np.broadcast_to(np.arange(n_new), flat_idx.shape)
+        matrix = np.bincount((rows * n_nodes + flat_idx).ravel(),
+                             weights=values.ravel(),
+                             minlength=n_new * n_nodes)
+        return matrix.reshape(n_new, n_nodes)
+
+    @staticmethod
+    def _apply_regrid_matrix(matrix, cube, new_grid_shape):
+        """Project ``cube`` (SSP axes + one trailing axis) with ``matrix``."""
+        n_wl = cube.shape[-1]
+        new = matrix @ cube.value.reshape(-1, n_wl)
+        return new.reshape(*new_grid_shape, n_wl) << cube.unit
+
     def regrid(self, age_bins, metallicity_bins, verbose=True):
         """Interpolate the SSP model to a new grid of input ages and metallicities.
-        
+
+        The [alpha/Fe] nodes are kept. After regridding every node has a model.
+
         Parameters
         ----------
         age_bins : np.array or astropy.units.Quantity
+            New SSP ages (Gyr if bare numbers).
+        metallicity_bins : np.array or astropy.units.Quantity
+            New SSP metallicities.
         """
         if verbose:
             print("[SSP] Interpolating the SSP model to a new grid of ages and metallicities")
         age_bins = check_unit(age_bins, u.Gyr)
         metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
-        # Bin the SED of the SSPs
-        new_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
-                                 self.wavelength.size)) * self.L_lambda.unit
+        new_shape = (metallicity_bins.size, age_bins.size)
+        if self.L_lambda.ndim == 4:
+            new_shape = (self.n_alpha_fe,) + new_shape
+        new_l_lambda = self._apply_regrid_matrix(
+            self._regrid_matrix(age_bins, metallicity_bins), self.L_lambda,
+            new_shape)
         if verbose:
             print("New SSP SED shape: ", new_l_lambda.shape)
-        for j, m_bin in enumerate(metallicity_bins):
-            for i, a_bin in enumerate(age_bins):
-                weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                new_l_lambda[j, i] = _project_on_grid(
-                    weights, self.L_lambda) / u.Msun
-
-        if verbose:
             print("Updating SSP model metallicities, ages and SED")
         self.metallicities = metallicity_bins
         self.ages = age_bins
+        self.available_models = None
         self.L_lambda = new_l_lambda
 
     def cut_wavelength(self, wl_min=None, wl_max=None, verbose=True):
@@ -571,7 +671,7 @@ class SSPBase(object):
                             )
         else:
             self.wavelength = self.wavelength[cut_pts]
-            self.L_lambda = self.L_lambda[:, :, cut_pts]
+            self.L_lambda = self.L_lambda[..., cut_pts]
             if verbose:
                 print('[SSP] Models cut between {} {}'.format(wl_min, wl_max))
 
@@ -600,14 +700,12 @@ class SSPBase(object):
             ref_wl = self.wavelength
 
         new_l_lambda = np.empty(
-            shape=(self.metallicities.size, self.ages.size,
-                   new_wl.size), dtype=np.float32) * self.L_lambda.unit
+            shape=(*self.L_lambda.shape[:-1], new_wl.size),
+            dtype=np.float32) * self.L_lambda.unit
 
-        for i in range(self.L_lambda.shape[0]):
-            for j in range(self.L_lambda.shape[1]):
-                new_l_lambda[i, j] = flux_conserving_interpolation(
-                    target_wl, ref_wl, self.L_lambda[i, j],
-                    **interp_kwargs)
+        for index in np.ndindex(self.L_lambda.shape[:-1]):
+            new_l_lambda[index] = flux_conserving_interpolation(
+                target_wl, ref_wl, self.L_lambda[index], **interp_kwargs)
 
         self.L_lambda = new_l_lambda
         self.wavelength = new_wl
@@ -619,14 +717,8 @@ class SSPBase(object):
             wl_range = np.array(wl_range) * self.wavelength.unit
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
-        mass_to_lum = np.empty(
-            (self.metallicities.size, self.ages.size)
-            ) * 1 / (self.L_lambda.unit * self.wavelength.unit)
-
-        for i in range(self.metallicities.size):
-            for j in range(self.ages.size):
-                mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts] * self.wavelength[pts])
-        return mass_to_lum
+        return 1 / np.mean(self.L_lambda[..., pts] * self.wavelength[pts],
+                           axis=-1)
     
     def get_specific_mass_lum_ratio(self, wl_range):
         """Compute the mass-to-light ratio per wavelength unit within a wavelength range."""
@@ -635,14 +727,7 @@ class SSPBase(object):
             wl_range = np.array(wl_range) * self.wavelength.unit
         pts = np.where((self.wavelength >= wl_range[0]) &
                        (self.wavelength <= wl_range[1]))[0]
-        mass_to_lum = np.empty(
-            (self.metallicities.size, self.ages.size)
-            ) * 1 / self.L_lambda.unit
-
-        for i in range(self.metallicities.size):
-            for j in range(self.ages.size):
-                mass_to_lum[i, j] = 1/np.mean(self.L_lambda[i, j][pts])
-        return mass_to_lum
+        return 1 / np.mean(self.L_lambda[..., pts], axis=-1)
     
     def get_ionising_photon_rate(self, species='HI'):
         """Compute the ionising photon rate of the SSP model for a given species.
@@ -669,23 +754,23 @@ class SSPBase(object):
             raise ValueError("Species must be one of 'HI', 'HeI' or 'HeII'")
         
         pts = np.where(self.wavelength <= wl_limit)[0]
-        photon_rate = np.empty((self.metallicities.size, self.ages.size)) * u.s**-1 / u.Msun
 
         # with float32 NumPy >= 2 casts 1e40 to float32 (inf)
         q_lambda = (
-            self.L_lambda[:, :, pts].astype(np.float64).to("erg / (s * Angstrom * Msun)") / 1e40 * self.wavelength.to("Angstrom")[pts]
+            self.L_lambda[..., pts].astype(np.float64).to("erg / (s * Angstrom * Msun)") / 1e40 * self.wavelength.to("Angstrom")[pts]
         ) / (constants.h.to("erg s") * constants.c.to("Angstrom/s"))
+        photon_rate = trapz(q_lambda, self.wavelength[pts], axis=-1).to(
+            u.s**-1 / u.Msun)
 
-        for i in range(self.metallicities.size):
-            for j in range(self.ages.size):
-                photon_rate[i, j] = trapz(q_lambda[i, j], self.wavelength[pts])
-
+        # Missing models (zero SED) give log Q = -inf
+        with np.errstate(divide='ignore'):
+            log_q = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
         if species == 'HI':
-            self.log_ionising_HI_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+            self.log_ionising_HI_photons = log_q
         elif species == 'HeI':
-            self.log_ionising_HeI_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+            self.log_ionising_HeI_photons = log_q
         elif species == 'HeII':
-            self.log_ionising_HeII_photons = np.log10(photon_rate.to_value(u.s**-1 / u.Msun)) + 40 << u.dex(u.s**-1 / u.Msun)
+            self.log_ionising_HeII_photons = log_q
 
         return photon_rate.to_value(u.s**-1 / u.Msun) << 1e40 * u.s**-1 / u.Msun
 
@@ -831,16 +916,10 @@ class SSPwithCloudyGasModel(SSPBase):
         )
         self._update_total_sed()
 
-    def _regrid_cube(self, cube, age_bins, metallicity_bins):
-        new_cube = np.zeros((cube.shape[0], metallicity_bins.size, age_bins.size,
-                             cube.shape[-1])) * cube.unit
-        for k in range(cube.shape[0]):
-            for j, m_bin in enumerate(metallicity_bins):
-                for i, a_bin in enumerate(age_bins):
-                    weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                    new_cube[k, j, i] = _project_on_grid(
-                        weights, cube[k]) / u.Msun
-        return new_cube
+    def _regrid_cube(self, cube, matrix, new_grid_shape):
+        """Regrid a ``(log_u, metallicity, age, wavelength)`` cube."""
+        return np.stack([self._apply_regrid_matrix(matrix, cube_k, new_grid_shape)
+                         for cube_k in cube])
 
     def _interpolate_cube_wavelength(self, cube, new_wl, log=False,
                                      conserve_flux=True, **interp_kwargs):
@@ -1006,21 +1085,18 @@ class SSPwithCloudyGasModel(SSPBase):
         age_bins = check_unit(age_bins, u.Gyr)
         metallicity_bins = check_unit(metallicity_bins, u.dimensionless_unscaled)
 
-        new_stellar_l_lambda = np.zeros((metallicity_bins.size, age_bins.size,
-                                         self.wavelength.size)) * self.stellar_L_lambda.unit
+        matrix = self._regrid_matrix(age_bins, metallicity_bins)
+        new_shape = (metallicity_bins.size, age_bins.size)
+        new_stellar_l_lambda = self._apply_regrid_matrix(
+            matrix, self.stellar_L_lambda, new_shape)
         if verbose:
             print("New SSP SED shape: ", new_stellar_l_lambda.shape)
-        for j, m_bin in enumerate(metallicity_bins):
-            for i, a_bin in enumerate(age_bins):
-                weights = self.get_weights(a_bin, m_bin, 1.0 * u.Msun)
-                new_stellar_l_lambda[j, i] = _project_on_grid(
-                    weights, self.stellar_L_lambda) / u.Msun
 
         if self._has_gas_model():
             new_gas_l_lambda_grid = self._regrid_cube(
-                self.gas_L_lambda_grid, age_bins, metallicity_bins)
+                self.gas_L_lambda_grid, matrix, new_shape)
             new_gas_transmission_grid = self._regrid_cube(
-                self.gas_transmission_grid, age_bins, metallicity_bins)
+                self.gas_transmission_grid, matrix, new_shape)
 
         if verbose:
             print("Updating SSP model metallicities, ages and SED")
@@ -2331,10 +2407,11 @@ class BPASS(SSPBase):
     stellar_library : str, optional
         Stellar atmosphere library (case-insensitive). One of 'AP', 'BASEL',
         'C3K', 'CKC', 'Coelho' or 'sMILES'. Default is 'C3K'.
-    alpha_fe : float, optional
-        [alpha/Fe] abundance ratio of the models, fixed at initialisation.
-        BPASS v2.3 provides 0.0 and +0.4, although not every library covers
-        both (BASEL and CKC only provide 0.0). Default is 0.0.
+    alpha_fe : float, list of float or None, optional
+        [alpha/Fe] values to load. BPASS v2.3 provides 0.0 and +0.4, although
+        not every library covers both (BASEL and CKC only provide 0.0). If
+        None (default), every value available for the library is loaded into
+        the [alpha/Fe] axis of the grid.
     binary : bool, optional
         If True (default), use the populations including binary evolution.
         Otherwise, use the single-star populations (not recommended by the
@@ -2355,12 +2432,17 @@ class BPASS(SSPBase):
     Example
     -------
     >>> from pst.SSP import BPASS
-    >>> ssp = BPASS(stellar_library='C3K', alpha_fe=0.4)
-    >>> print(ssp.metallicities)
-    >>> sed = ssp.L_lambda[-1, 30]  # highest metallicity, log(age/yr) = 9
+    >>> ssp = BPASS(stellar_library='C3K')
+    >>> print(ssp.alpha_fe, ssp.metallicities)
+    >>> sed = ssp.L_lambda[1, -1, 30]  # [alpha/Fe]=+0.4, highest Z, log(age/yr) = 9
 
     Notes
     -----
+    - ``L_lambda`` has shape ``(n_alpha_fe, n_metallicities, n_ages,
+      n_wavelengths)``. The metallicity grid is the union of the metallicities
+      available at each [alpha/Fe]; nodes without a BPASS model are flagged in
+      ``available_models``, have zero SED and properties (log Q = -inf), and
+      never receive mass in :meth:`get_weights`.
     - The SEDs are given in Lsun / Angstrom per Msun **formed**. BPASS uses
       Lsun = 3.848e33 erg/s; the converter rescales the luminosities to the
       astropy (IAU 2015) value, 3.828e33 erg/s.
@@ -2402,7 +2484,7 @@ class BPASS(SSPBase):
     _vacuum_libraries = ("BASEL", "C3K", "CKC")
     _sn_types = ("IIP", "IIOTHER", "IB", "IC", "LGRB", "PISN", "LOWMASS", "IA")
 
-    def __init__(self, stellar_library="C3K", alpha_fe=0.0, binary=True,
+    def __init__(self, stellar_library="C3K", alpha_fe=None, binary=True,
                  imf="imf135_300", path=None, load_properties=False,
                  verbose=True):
         self.stellar_library = self._parse_library(stellar_library)
@@ -2428,15 +2510,14 @@ class BPASS(SSPBase):
                 f"BPASS file not found: {filename}\nConvert the native BPASS "
                 "data with ssp_installation/bpass/convert_bpass_to_fits.py")
 
-        if verbose:
-            print(f"> Initialising BPASS v{self.version} models "
-                  f"({population}, {self.stellar_library}, IMF={self.imf}, "
-                  f"[alpha/Fe]={alpha_fe:+.1f})")
-
         with fits.open(filename) as hdul:
-            tag = self._select_alpha(hdul, alpha_fe)
-            alpha_fe = float(hdul[f"SED_{tag}"].header["ALPHAFE"])
-            self.alpha_fe = alpha_fe
+            selected = self._select_alpha(hdul, alpha_fe)
+            alpha_values = [value for value, _ in selected]
+            if verbose:
+                print(f"> Initialising BPASS v{self.version} models "
+                      f"({population}, {self.stellar_library}, IMF={self.imf}, "
+                      "[alpha/Fe]=" + ", ".join(f"{a:+.1f}" for a in alpha_values)
+                      + ")")
             self.wavelength = np.array(hdul["WAVE"].data, dtype=float
                                        ) << u.Angstrom
             native = ("vacuum" if self.stellar_library in self._vacuum_libraries
@@ -2445,24 +2526,46 @@ class BPASS(SSPBase):
                 self.wavelength, native, self.wavelength_medium)
             self.log_ages_yr = np.array(hdul["LOGAGE"].data, dtype=float)
             self.ages = 10**self.log_ages_yr << u.yr
-            props = hdul[f"PROP_{tag}"].data
-            self.metallicities = np.array(props["Z"], dtype=float
-                                          ) << u.dimensionless_unscaled
-            self.L_lambda = np.array(hdul[f"SED_{tag}"].data, dtype=np.float32
-                                     ) << u.Lsun / u.Angstrom / u.Msun
+
+            # Common metallicity grid: union over the selected [alpha/Fe]
+            props = [hdul[f"PROP_{tag}"].data for _, tag in selected]
+            z_per_alpha = [np.array(p["Z"], dtype=float) for p in props]
+            grid_z = np.unique(np.concatenate(z_per_alpha))
+            z_rows = [np.searchsorted(grid_z, z) for z in z_per_alpha]
+            available = np.zeros((len(selected), grid_z.size), dtype=bool)
+            for a, rows in enumerate(z_rows):
+                available[a, rows] = True
+
+            self.alpha_fe = alpha_values
+            self.metallicities = grid_z << u.dimensionless_unscaled
+            self.available_models = available
+
+            grid_shape = (len(selected), grid_z.size, self.ages.size)
+            sed = np.zeros(grid_shape + (self.wavelength.size,),
+                           dtype=np.float32)
+            for a, (_, tag) in enumerate(selected):
+                sed[a, z_rows[a]] = hdul[f"SED_{tag}"].data
+            self.L_lambda = sed << u.Lsun / u.Angstrom / u.Msun
 
             if load_properties:
-                self.returned_mass_frac = 1.0 - np.array(
-                    props["STELLAR_MASS_FRAC"], dtype=float)
+                def gather(column, fill=0.0):
+                    """(n_alpha_fe, n_metallicities, n_ages) property grid."""
+                    grid = np.full(grid_shape, fill, dtype=float)
+                    for a, rows in enumerate(z_rows):
+                        grid[a, rows] = props[a][column]
+                    return grid
+
+                # Missing models: no mass returned, no SNe, no ionising photons
+                self.returned_mass_frac = 1.0 - gather("STELLAR_MASS_FRAC",
+                                                       fill=1.0)
                 dex_unit = u.dex(u.s**-1 / u.Msun)
-                self.log_ionising_HI_photons = np.array(
-                    props["LOG_Q_HI"], dtype=float) << dex_unit
-                self.log_ionising_HeI_photons = np.array(
-                    props["LOG_Q_HEI"], dtype=float) << dex_unit
-                self.log_ionising_HeII_photons = np.array(
-                    props["LOG_Q_HEII"], dtype=float) << dex_unit
-                sn_rates = {sn_type: np.array(props[f"SNR_{sn_type}"],
-                                              dtype=float)
+                self.log_ionising_HI_photons = gather(
+                    "LOG_Q_HI", -np.inf) << dex_unit
+                self.log_ionising_HeI_photons = gather(
+                    "LOG_Q_HEI", -np.inf) << dex_unit
+                self.log_ionising_HeII_photons = gather(
+                    "LOG_Q_HEII", -np.inf) << dex_unit
+                sn_rates = {sn_type: gather(f"SNR_{sn_type}")
                             for sn_type in self._sn_types}
                 self.supernova_rate_by_type = {
                     sn_type: rate << 1 / (u.yr * u.Msun)
@@ -2471,7 +2574,8 @@ class BPASS(SSPBase):
                                              ) << 1 / (u.yr * u.Msun)
 
         self.name = (f"BPASS_v{self.version}_{population}_{self.imf}_"
-                     f"{self.stellar_library}_afe{alpha_fe:+.1f}")
+                     f"{self.stellar_library}_afe"
+                     + "_".join(f"{a:+.1f}" for a in alpha_values))
 
     def _parse_library(self, library):
         key = library.lower()
@@ -2482,18 +2586,28 @@ class BPASS(SSPBase):
         return self._stellar_libraries[key]
 
     @staticmethod
-    def _select_alpha(hdul, alpha_fe):
-        """Return the FITS extension tag matching the requested [alpha/Fe]."""
+    def _select_alpha(hdul, alpha_fe=None):
+        """Return ``(alpha_fe, tag)`` pairs of the requested [alpha/Fe] values.
+
+        ``alpha_fe`` is None (all available values), a number or a sequence.
+        The pairs are sorted by increasing [alpha/Fe].
+        """
         available = {}
         for hdu in hdul:
             if hdu.name.startswith("SED_"):
                 available[float(hdu.header["ALPHAFE"])] = hdu.name[4:]
-        for value, tag in available.items():
-            if np.isclose(value, alpha_fe, atol=1e-3):
-                return tag
-        raise ValueError(
-            f"[alpha/Fe] = {alpha_fe} not available for this model. "
-            f"Available values: {sorted(available)}")
+        if alpha_fe is None:
+            return sorted(available.items())
+        selected = {}
+        for requested in np.atleast_1d(_alpha_fe_values(alpha_fe)):
+            matches = [value for value in available
+                       if np.isclose(value, requested, atol=1e-3)]
+            if not matches:
+                raise ValueError(
+                    f"[alpha/Fe] = {requested} not available for this model. "
+                    f"Available values: {sorted(available)}")
+            selected[matches[0]] = available[matches[0]]
+        return sorted(selected.items())
 
 
 if __name__ == '__main__':
