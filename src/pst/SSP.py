@@ -74,6 +74,55 @@ def _axis_corners(upper_idx, upper_weight, n_nodes):
             np.stack((1. - upper_weight, upper_weight)))
 
 
+def _resample_spectra(target_wl, ref_wl, cube, chunk_size=2**24,
+                      out_dtype=np.float32, **interp_kwargs):
+    """Flux-conserving resampling of every spectrum in ``cube``.
+
+    Parameters
+    ----------
+    target_wl, ref_wl : array-like or Quantity
+        Output and input wavelength grids (see
+        :func:`pst.utils.flux_conserving_interpolation`).
+    cube : Quantity
+        Spectra along the last axis, any leading shape.
+    chunk_size : int, optional
+        Maximum number of input values resampled per batch, to bound the
+        temporary float64 memory (default 2**24, ~128 MB).
+    out_dtype : dtype, optional
+        Output dtype (default float32).
+    **interp_kwargs
+        Passed to :func:`pst.utils.flux_conserving_interpolation`.
+
+    Returns
+    -------
+    new_cube : Quantity
+        Shape ``cube.shape[:-1] + (target_wl.size,)``, same unit as ``cube``.
+
+    Notes
+    -----
+    With ``method="binfrac"`` (default) the bin-overlap matrix depends only on
+    the wavelength grids, so the spectra are resampled in batches (one sparse
+    matrix product each) rather than one at a time. Other methods fall back to
+    a loop over spectra.
+    """
+    n_wl = cube.shape[-1]
+    flat = cube.value.reshape(-1, n_wl)
+    n_new = np.size(target_wl)
+    out = np.empty((flat.shape[0], n_new), dtype=out_dtype)
+    if interp_kwargs.get("method", "binfrac") == "binfrac":
+        step = max(1, int(chunk_size // n_wl))
+        for start in range(0, flat.shape[0], step):
+            block = flat[start:start + step]
+            # Wavelength along the first axis, one column per spectrum
+            out[start:start + step] = np.asarray(flux_conserving_interpolation(
+                target_wl, ref_wl, block.T, **interp_kwargs)).T
+    else:
+        for i, spectrum in enumerate(flat):
+            out[i] = np.asarray(flux_conserving_interpolation(
+                target_wl, ref_wl, spectrum, **interp_kwargs))
+    return out.reshape(*cube.shape[:-1], n_new) << cube.unit
+
+
 def _project_on_grid(weights, cube):
     """Sum ``cube`` over its SSP axes weighted by ``weights``.
 
@@ -699,15 +748,8 @@ class SSPBase(object):
             target_wl = new_wl
             ref_wl = self.wavelength
 
-        new_l_lambda = np.empty(
-            shape=(*self.L_lambda.shape[:-1], new_wl.size),
-            dtype=np.float32) * self.L_lambda.unit
-
-        for index in np.ndindex(self.L_lambda.shape[:-1]):
-            new_l_lambda[index] = flux_conserving_interpolation(
-                target_wl, ref_wl, self.L_lambda[index], **interp_kwargs)
-
-        self.L_lambda = new_l_lambda
+        self.L_lambda = _resample_spectra(target_wl, ref_wl, self.L_lambda,
+                                          **interp_kwargs)
         self.wavelength = new_wl
 
     def get_mass_lum_ratio(self, wl_range):
@@ -930,15 +972,13 @@ class SSPwithCloudyGasModel(SSPBase):
             target_wl = new_wl
             ref_wl = self.wavelength
 
+        if conserve_flux:
+            return _resample_spectra(target_wl, ref_wl, cube, **interp_kwargs)
         new_cube = np.empty((*cube.shape[:-1], new_wl.size), dtype=np.float32) * cube.unit
         for index in np.ndindex(cube.shape[:-1]):
-            if conserve_flux:
-                new_cube[index] = flux_conserving_interpolation(
-                    target_wl, ref_wl, cube[index], **interp_kwargs)
-            else:
-                new_cube[index] = np.interp(
-                    np.asarray(target_wl), np.asarray(ref_wl), cube[index].value,
-                    left=cube[index].value[0], right=cube[index].value[-1]) * cube.unit
+            new_cube[index] = np.interp(
+                np.asarray(target_wl), np.asarray(ref_wl), cube[index].value,
+                left=cube[index].value[0], right=cube[index].value[-1]) * cube.unit
         return new_cube
 
     @property
