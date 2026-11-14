@@ -152,6 +152,79 @@ class MassPropMetallicityMixin:
         """
         return self.ism_metallicity(t_obs) / (1 + self.alpha_powerlaw)
 
+class TimePropMetallicityMixin:
+    r"""
+    Mixin implementing a time-dependent metallicity evolution.
+
+    This mixin provides a default implementation of
+    :meth:`~pst.cem.ChemicalEvolutionModel.ism_metallicity` where the ISM
+    metallicity scales with the cosmic time since the Big Bang:
+
+    .. math::
+        Z(t) = Z_{\rm today}\,\left(\frac{t}{t_{\rm today}}\right)^\alpha
+
+    The intention is to allow any star-formation-history (SFH) model to be
+    combined with a simple analytic chemical enrichment prescription.
+
+    Required host attributes
+    ------------------------
+    The host class must define:
+
+    - ``mass_today`` : :class:`~astropy.units.Quantity` or :class:`pst.model.Parameter`
+        Total stellar mass formed at the observing time (same units as
+        :meth:`stellar_mass_formed`).
+    - ``ism_metallicity_today`` : Quantity or Parameter
+        Present-day ISM metallicity (dimensionless mass fraction).
+    - ``alpha_powerlaw`` : Quantity/Parameter or float
+        Power-law exponent controlling the enrichment rate.
+    - :meth:`stellar_mass_formed(times)`
+        Cumulative stellar mass formed as a function of cosmic time.
+
+    Notes
+    -----
+    - The returned metallicity is dimensionless (mass fraction).
+    - For physical results, host models should ensure
+      :meth:`stellar_mass_formed` is non-decreasing and non-negative.
+    """
+    @property
+    def ism_metallicity_today(self) -> Parameter:
+        """ISM metals mass fraction at present."""
+        return self._ism_metallicity_today
+    
+    @ism_metallicity_today.setter
+    def ism_metallicity_today(self, value: Parameter):
+        self._ism_metallicity_today = value
+    
+    @property
+    def alpha_powerlaw(self) -> Parameter:
+        """Stellar mass power-law exponent."""
+        return self._alpha_powerlaw
+
+    @alpha_powerlaw.setter
+    def alpha_powerlaw(self, value: Parameter):
+        self._alpha_powerlaw = value
+
+    def ism_metallicity(self, times: Union[np.array, u.Quantity]) -> u.Quantity:
+        """
+        Evaluate ISM metallicity at one or more cosmic times.
+
+        Parameters
+        ----------
+        times : array-like or :class:`astropy.units.Quantity`
+            Cosmic times since the Big Bang. If a bare array is provided, it is
+            interpreted as Gyr.
+
+        Returns
+        -------
+        z_t : :class:`astropy.units.Quantity`
+            Dimensionless ISM metallicity (mass fraction) evaluated at each input
+            time. Shape matches ``times``.
+        """
+        return np.clip(
+            self.ism_metallicity_today
+            * np.power(times / self.today, self.alpha_powerlaw).decompose(),
+            1e-6 << u.dimensionless_unscaled, None)
+
 
 class LogNormalMetallicityDistributionMixin:
     r"""Bidimensional log-normal metallicity distribution.
@@ -2461,6 +2534,44 @@ class TabularCEM_ZPowerLaw(MassPropMetallicityMixin, TabularCEM):
         if self.today is None:
             raise ValueError("Parameter ``today`` must be set")
 
+
+class TabularCEM_ZTimePowerLaw(TimePropMetallicityMixin, TabularCEM):
+    """Chemical evolution model based on a grid of times that assumes an analytic chemical enrichment history.
+
+    The ISM metallicity is a power law of the cosmic time, decoupled from the
+    stellar mass history.
+
+    See Also
+    --------
+    :class:`TabularCEM`
+    :class:`TimePropMetallicityMixin`
+    """
+    name = "tabular_ztimepowlaw_cem"
+
+    def __init__(self, *,
+                 mass_today: Parameter,
+                 ism_metallicity_today: Parameter,
+                 alpha_powerlaw: Parameter, **kwargs):
+
+        self.mass_today = check_parameter(mass_today, u.Msun,
+                                          doc="Stellar mass at observing time")
+        self.ism_metallicity_today = check_parameter(ism_metallicity_today,
+                                                     u.dimensionless_unscaled,
+                                                     doc="ISM metallicity at observing time")
+        self.alpha_powerlaw = check_parameter(alpha_powerlaw, u.dimensionless_unscaled,
+                                              doc="Metallicity enrichment power-law index")
+
+        # Create a dummy one before TabularCEM __post_init__
+        if kwargs.get("metallicities") is None:
+            kwargs["metallicities"] = np.zeros(len(kwargs["times"]))
+
+        super().__init__(**kwargs)
+
+        # This parameter is controlled by the chemical enrichment history
+        self.metallicities.fixed = True
+
+        if self.today is None:
+            raise ValueError("Parameter ``today`` must be set")
 
 class CC25TabularCEM(TabularCEM_ZPowerLaw):
     r"""Chemical evolution model based on the SFH parameterization from Corcho-Caballero et al. (2025).
