@@ -546,7 +546,8 @@ def reference_interpolate_ssp_masses(model, ssp, t_obs, oversample_factor=10):
     bin_mass = mass[:-1] - mass[1:]
     bin_age = (age_bins[1:] + age_bins[:-1]) / 2
     bin_metallicity = model.ism_metallicity(t_obs - bin_age)
-    return reference_get_weights(ssp, bin_age, bin_metallicity, bin_mass)
+    # SSP weights now carry a leading [alpha/Fe] axis (a single node here)
+    return reference_get_weights(ssp, bin_age, bin_metallicity, bin_mass)[np.newaxis]
 
 
 def reference_tabular_stellar_mass_formed(model, times):
@@ -635,7 +636,7 @@ class TestSSPAgeGridCache(unittest.TestCase):
         new = model.compute_SED(self.ssp, self.today)
         weights = reference_interpolate_ssp_masses(model, self.ssp, self.today)
         weights = np.where(weights > 0, weights, 0.0 << weights.unit)
-        ref = np.einsum("za,zaw->w", weights.value, self.ssp.L_lambda.value)
+        ref = np.einsum("za,zaw->w", weights.value[0], self.ssp.L_lambda.value)
         np.testing.assert_allclose(new.value, ref, rtol=1e-12)
 
     def test_sed_matches_previous_implementation_float64(self):
@@ -647,7 +648,7 @@ class TestSSPAgeGridCache(unittest.TestCase):
         new = model.compute_SED(ssp, self.today)
         weights = reference_interpolate_ssp_masses(model, ssp, self.today)
         weights = np.where(weights > 0, weights, 0.0 << weights.unit)
-        ref = np.einsum("za,zaw->w", weights.value, ssp.L_lambda.value)
+        ref = np.einsum("za,zaw->w", weights.value[0], ssp.L_lambda.value)
         self.assertEqual(new.unit, weights.unit * ssp.L_lambda.unit)
         np.testing.assert_allclose(new.value, ref, rtol=1e-12)
 
@@ -703,12 +704,13 @@ class TestSSPAgeGridCache(unittest.TestCase):
         for kwargs in ({"masses": masses}, {}):
             new = self.ssp.get_weights(ages, metallicities, **kwargs)
             ref = reference_get_weights(self.ssp, ages, metallicities, **kwargs)
-            np.testing.assert_allclose(new.to_value(u.Msun), ref.to_value(u.Msun),
+            self.assertEqual(new.shape, (1,) + ref.shape)
+            np.testing.assert_allclose(new[0].to_value(u.Msun), ref.to_value(u.Msun),
                                        rtol=1e-12, atol=1e-15)
         # Scalar inputs, as used by SSPBase.regrid
         new = self.ssp.get_weights(1.3 * u.Gyr, 0.01, 1.0 * u.Msun)
         ref = reference_get_weights(self.ssp, 1.3 * u.Gyr, 0.01, 1.0 * u.Msun)
-        np.testing.assert_allclose(new.value, ref.value, rtol=1e-12, atol=1e-15)
+        np.testing.assert_allclose(new[0].value, ref.value, rtol=1e-12, atol=1e-15)
         self.assertAlmostEqual(new.sum().to_value(u.Msun), 1.0)
 
 
