@@ -790,8 +790,8 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         Returns
         -------
         weights : :class:`astropy.units.Quantity`
-            Mass weights on the SSP grid. The expected shape is ``(Z, A)``
-            (metallicity, age). Units are mass (typically Msun).
+            Mass weights on the SSP grid. The shape is ``(n_alpha_fe, Z, A)``
+            ([alpha/Fe], metallicity, age). Units are mass (typically Msun).
 
         Notes
         -----
@@ -1074,7 +1074,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         Parameters
         ----------
         ssp : :class:`pst.SSP.SSPBase`
-            SSP model providing ``ssp.L_lambda`` with shape ``(Z, A, W)`` where
+            SSP model providing ``ssp.L_lambda`` with shape ``([n_alpha_fe,] Z, A, W)`` where
             ``W`` is wavelength.
         t_obs : :class:`astropy.units.Quantity`
             Cosmic time of observation.
@@ -1103,12 +1103,18 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         sed_grid = l_lambda.value
         out_unit = _product_unit(weights.unit, l_lambda.unit)
 
+        # Collapse the ([alpha/Fe], Z) axes into one: weights have shape
+        # (n_alpha_fe, Z, A) and the SED grid may lack the [alpha/Fe] axis
+        # when n_alpha_fe == 1. Views for C-contiguous grids (no copy).
+        n_age, n_wl = sed_grid.shape[-2:]
+        weights_val = weights_val.reshape(-1, n_age)
+        sed_grid = sed_grid.reshape(-1, n_age, n_wl)
+
         if age_bin_edges is None:
-            if (sed_grid.dtype == weights_val.dtype and sed_grid.ndim == 3
+            if (sed_grid.dtype == weights_val.dtype
                     and sed_grid.flags.c_contiguous):
                 # This operation does not copy the full SSP grid
-                sed_val = weights_val.reshape(-1) @ sed_grid.reshape(
-                    -1, sed_grid.shape[-1])
+                sed_val = weights_val.reshape(-1) @ sed_grid.reshape(-1, n_wl)
             else:
                 # Mixed precision or non-contiguous grid
                 sed_val = np.einsum("za,zaw->w", weights_val, sed_grid)
@@ -1133,7 +1139,7 @@ class ChemicalEvolutionModel(ModelBase, ABC):
         t_obs : :class:`astropy.units.Quantity`
             Cosmic time of observation.
         photometry : :class:`astropy.units.Quantity` or ndarray, optional
-            Photometry grid on the SSP axes with shape ``(B, Z, A)``, where
+            Photometry grid on the SSP axes with shape ``(B, [n_alpha_fe,] Z, A)``, where
             ``B`` is the number of bands. If an ndarray is provided, it is assumed
             to be in ``Jy / Msun``.
             If None, uses ``ssp.photometry``.
@@ -1166,16 +1172,21 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             print("Assuming input photometry array in Jy/Msun")
             photometry = photometry << u.Jy / u.Msun
         out_unit = _product_unit(photometry.unit, weights.unit)
+        # Collapse the ([alpha/Fe], Z) axes of the photometry grid
+        # (band, [alpha_fe,] Z, age) and of the weights into one
+        n_band, n_age = photometry.shape[0], photometry.shape[-1]
+        phot_val = photometry.value.reshape(n_band, -1, n_age)
+        weights_val = weights_val.reshape(-1, n_age)
 
         if age_bin_edges is None:
             # (band, z, age) * (z, age) -> band
-            out_val = np.einsum("bza,za->b", photometry.value, weights_val)
+            out_val = np.einsum("bza,za->b", phot_val, weights_val)
             return out_val << out_unit
 
         idx = np.digitize(ssp.ages, check_unit(age_bin_edges, ssp.ages.unit)
                           ).clip(0, len(age_bin_edges) - 1) - 1
         M = self._age_bin_matrix(idx, len(age_bin_edges) - 1)
-        out_val = np.einsum("bza,za,an->nb", photometry.value, weights_val, M)
+        out_val = np.einsum("bza,za,an->nb", phot_val, weights_val, M)
         return out_val << out_unit
 
 
