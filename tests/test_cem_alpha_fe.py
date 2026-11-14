@@ -286,6 +286,53 @@ class TestSFHAlphaFeMixin(unittest.TestCase):
         np.testing.assert_allclose(model.ism_alpha_fe(mid)[50:], alpha[50:],
                                    atol=0.01)
 
+    def test_assigning_numbers_updates_in_place(self):
+        model = make_alpha_cem([0.3, 0.5, 0.75, 0.9, 0.95, 0.99])
+        params = {name: getattr(model, name) for name in
+                  ("tau_alpha_fe", "alpha_fe_max", "alpha_fe_min",
+                   "alpha_fe_gamma")}
+        ref = model.mean_stellar_alpha_fe(self.ssp, self.t_obs)
+        # Plain floats, as a sampler would set them
+        model.tau_alpha_fe = 0.3
+        model.alpha_fe_max = 0.4
+        model.alpha_fe_min = 0.05
+        model.alpha_fe_gamma = 2.0
+        for name, param in params.items():
+            self.assertIs(getattr(model, name), param)
+            self.assertTrue(param.fixed)
+        self.assertEqual(model.tau_alpha_fe.q, 0.3 * u.Gyr)
+        new = model.mean_stellar_alpha_fe(self.ssp, self.t_obs)
+        self.assertNotAlmostEqual(new, ref)
+        expected = make_alpha_cem(
+            [0.3, 0.5, 0.75, 0.9, 0.95, 0.99], tau_alpha_fe=0.3,
+            alpha_fe_max=0.4, alpha_fe_min=0.05,
+            alpha_fe_gamma=2.0).mean_stellar_alpha_fe(self.ssp, self.t_obs)
+        self.assertAlmostEqual(new, expected)
+        # Quantities are converted; a Parameter replaces the object
+        model.tau_alpha_fe = 500 * u.Myr
+        self.assertAlmostEqual(model.tau_alpha_fe.q.to_value(u.Gyr), 0.5)
+        free = Parameter(0.3, fixed=False)
+        model.alpha_fe_max = free
+        self.assertIs(model.alpha_fe_max, free)
+        self.assertIn("alpha_fe_max", model.parameter_names(include_fixed=False))
+        model.alpha_fe_max = 0.25
+        self.assertIs(model.alpha_fe_max, free)
+        self.assertFalse(free.fixed)
+        with self.assertRaises(u.UnitsError):
+            model.tau_alpha_fe = 1.0 * u.Msun
+
+    def test_constant_alpha_fe_updates_in_place(self):
+        model = cem.ExponentialCEM(today=13.7 * u.Gyr, alpha_fe=0.1)
+        param = model.alpha_fe
+        model.alpha_fe = 0.3
+        self.assertIs(model.alpha_fe, param)
+        self.assertAlmostEqual(model.alpha_fe.q.value, 0.3)
+        self.assertAlmostEqual(model.mean_stellar_alpha_fe(self.ssp, self.t_obs), 0.3)
+        model.alpha_fe = 0.2 * u.dex
+        self.assertIs(model.alpha_fe, param)
+        model.alpha_fe = None
+        self.assertIsNone(model.alpha_fe)
+
     def test_cache_key_includes_mixin_parameters(self):
         model = make_alpha_cem([0.3, 0.5, 0.75, 0.9, 0.95, 0.99])
         model._cache_interp_ssp_mass = True
