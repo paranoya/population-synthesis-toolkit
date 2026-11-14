@@ -51,11 +51,14 @@ def _axis_interpolation(grid, values, log=False):
     if grid.size == 1:
         return (np.zeros(values.shape, dtype=int),
                 np.ones(values.shape, dtype=float))
-    if log:
-        grid, values = np.log(grid), np.log(values)
     upper_idx = np.clip(grid.searchsorted(values), 1, grid.size - 1)
-    upper_weight = (values - grid[upper_idx - 1]) / (
-        grid[upper_idx] - grid[upper_idx - 1])
+    lower_idx = upper_idx - 1
+    if log:
+        upper_weight = np.log(values / grid[lower_idx])
+        upper_weight /= np.log(grid[1:] / grid[:-1])[lower_idx]
+    else:
+        upper_weight = values - grid[lower_idx]
+        upper_weight /= np.diff(grid)[lower_idx]
     return upper_idx, np.clip(upper_weight, 0., 1.)
 
 
