@@ -299,6 +299,34 @@ def alpha_fe_from_sfh(time_edges, formed_mass, tau_alpha_fe=1.0,
     return alpha_fe_min + (alpha_fe_max - alpha_fe_min) * f**alpha_fe_gamma
 
 
+def _in_place_parameter(name, unit, doc, fixed=True):
+    """Property for a model parameter that is updated in place.
+
+    Assigning a :class:`pst.model.Parameter` replaces it. Assigning a number
+    or a Quantity (bare numbers in ``unit``) updates the value of the current
+    Parameter, keeping the object and its ``fixed`` flag, so samplers can set
+    plain floats on every evaluation without creating new objects. The first
+    assignment of a value creates a Parameter with the given ``fixed`` flag.
+    """
+    attr = "_" + name
+
+    def getter(self):
+        return getattr(self, attr, None)
+
+    def setter(self, value):
+        if isinstance(value, Parameter):
+            setattr(self, attr, check_parameter(value, unit))
+            return
+        value = check_unit(value, unit)
+        current = getattr(self, attr, None)
+        if current is None:
+            setattr(self, attr, Parameter(value, fixed=fixed, doc=doc))
+        else:
+            current.q = value
+
+    return property(getter, setter, doc=doc)
+
+
 class SFHAlphaFeMixin:
     r"""Optional mixin coupling [alpha/Fe] to the star formation history.
 
@@ -340,6 +368,9 @@ class SFHAlphaFeMixin:
       precedence), but not together with any of the parameters above.
     - A subclass that overrides :meth:`ism_alpha_fe` replaces the SFH-coupled
       history with its own [alpha/Fe](t).
+    - Assigning a number to any of the parameters (``model.alpha_fe_max =
+      0.3``) updates the existing :class:`pst.model.Parameter` in place and
+      keeps its ``fixed`` flag; assigning a Parameter replaces it.
     """
     _alpha_fe_defaults = {"tau_alpha_fe": 1.0 << u.Gyr, "alpha_fe_max": 0.0,
                           "alpha_fe_min": 0.0, "alpha_fe_gamma": 1.0}
@@ -351,6 +382,16 @@ class SFHAlphaFeMixin:
                       "alpha_fe_max": "Maximum [alpha/Fe] (dex)",
                       "alpha_fe_min": "Minimum [alpha/Fe] (dex)",
                       "alpha_fe_gamma": "[alpha/Fe] shape parameter"}
+
+    tau_alpha_fe = _in_place_parameter(
+        "tau_alpha_fe", u.Gyr, _alpha_fe_docs["tau_alpha_fe"])
+    alpha_fe_max = _in_place_parameter(
+        "alpha_fe_max", u.dimensionless_unscaled, _alpha_fe_docs["alpha_fe_max"])
+    alpha_fe_min = _in_place_parameter(
+        "alpha_fe_min", u.dimensionless_unscaled, _alpha_fe_docs["alpha_fe_min"])
+    alpha_fe_gamma = _in_place_parameter(
+        "alpha_fe_gamma", u.dimensionless_unscaled,
+        _alpha_fe_docs["alpha_fe_gamma"])
 
     def __init__(self, *args,
                  tau_alpha_fe: Parameter | u.Quantity | float | None = None,
@@ -367,13 +408,9 @@ class SFHAlphaFeMixin:
                 f"parameters ({', '.join(given)}), not both")
         super().__init__(*args, **kwargs)
         for name, value in given.items():
-            if value is None:
-                value = self._alpha_fe_defaults[name]
-            if not isinstance(value, Parameter):
-                # Fixed unless explicitly given as a free Parameter
-                value = Parameter(check_unit(value, self._alpha_fe_units[name]),
-                                  fixed=True, doc=self._alpha_fe_docs[name])
-            setattr(self, name, check_parameter(value, self._alpha_fe_units[name]))
+            # Numbers create fixed Parameters (see _in_place_parameter)
+            setattr(self, name,
+                    self._alpha_fe_defaults[name] if value is None else value)
 
     def _alpha_fe_parameters(self):
         """Plain-float parameters of :func:`alpha_fe_from_sfh`."""
@@ -944,6 +981,8 @@ class ChemicalEvolutionModel(ModelBase, ABC):
 
         Stored as a dimensionless :class:`pst.model.Parameter` holding the
         value in dex. It is not part of :meth:`parameters` while it is None.
+        Assigning a number updates the existing Parameter in place; assigning
+        a Parameter replaces it, and None removes it.
         """
         return getattr(self, "_alpha_fe", None)
 
@@ -953,11 +992,15 @@ class ChemicalEvolutionModel(ModelBase, ABC):
             self._alpha_fe = None
             return
         if isinstance(value, Parameter):
-            value = check_unit(value, u.dimensionless_unscaled)
+            self._alpha_fe = check_parameter(value, u.dimensionless_unscaled)
+            return
+        value = _alpha_fe_values(value) << u.dimensionless_unscaled
+        if self.alpha_fe is None:
+            self._alpha_fe = check_parameter(
+                value, u.dimensionless_unscaled, doc="[alpha/Fe] (dex)")
         else:
-            value = _alpha_fe_values(value) << u.dimensionless_unscaled
-        self._alpha_fe = check_parameter(
-            value, u.dimensionless_unscaled, doc="[alpha/Fe] (dex)")
+            # Update the existing Parameter in place (keeps its fixed flag)
+            self._alpha_fe.q = value
 
     def _alpha_fe_cache_key(self):
         """Hashable summary of the [alpha/Fe] model, for the weights cache."""
