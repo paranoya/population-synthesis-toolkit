@@ -346,16 +346,19 @@ def resample_via_bin_frac(
     ----------
     w_in : (N,) array_like
         Input bin centers (strictly monotonic).
-    f_in : (N,) array_like
-        Input flux density per unit wavelength.
+    f_in : (N,) or (N, ...) array_like
+        Input flux density per unit wavelength. Several spectra can be
+        resampled at once by stacking them along the trailing axes; the
+        mapping matrix is then built only once.
     w_out : (M,) array_like, optional
         Output bin centers. Provide this or `edges_out`.
     edges_in : (N+1,) array_like, optional
         Input edges. If None, inferred from `w_in`.
     edges_out : (M+1,) array_like, optional
         Output edges. If None, inferred from `w_out`.
-    var_in : (N,) array_like, optional
-        Input variances of flux density per input bin (uncorrelated).
+    var_in : (N,) or (N, ...) array_like, optional
+        Input variances of flux density per input bin (uncorrelated), with
+        the same shape as ``f_in``.
     fill_value : float, default 0.0
         Flux *density* to add in output bins lying outside the input
         support (e.g., 0.0 for no extrapolation).
@@ -365,9 +368,9 @@ def resample_via_bin_frac(
 
     Returns
     -------
-    f_out : (M,) ndarray
+    f_out : (M,) or (M, ...) ndarray
         Output flux density per unit wavelength.
-    var_out : (M,) ndarray or None
+    var_out : (M,) or (M, ...) ndarray or None
         Propagated variance (None if `var_in` is None).
     sparse_matrix : scipy.sparse.csr_matrix, optional
         Mapping matrix such that `F_out = M @ (f_in * delta_lambda_in)`.
@@ -404,6 +407,10 @@ def resample_via_bin_frac(
 
     dlam_in  = np.diff(edges_in)
     dlam_out = np.diff(edges_out)
+    # Broadcast the bin widths along the trailing (spectrum) axes
+    trailing = (1,) * (f_in.ndim - 1)
+    dlam_in_b = dlam_in.reshape(-1, *trailing)
+    dlam_out_b = dlam_out.reshape(-1, *trailing)
 
     # Find overlapping bins
     iL = np.searchsorted(edges_in, edges_out[:-1], side="right") - 1
@@ -437,26 +444,28 @@ def resample_via_bin_frac(
     sparse_matrix = csr_matrix((data, (rows, cols)), shape=(dlam_out.size, dlam_in.size))
 
     # --- Apply mapping on integrated flux ---
-    F_in  = f_in * dlam_in
-    F_out = sparse_matrix.dot(F_in)
+    # A sparse (N_out, N_in) matrix times a dense (N_in, K) block
+    F_in  = (f_in * dlam_in_b).reshape(dlam_in.size, -1)
+    F_out = sparse_matrix.dot(F_in).reshape(dlam_out.size, *f_in.shape[1:])
 
     # Only add fill outside input support
     inside = (edges_out[:-1] >= edges_in[0]) & (edges_out[1:] <= edges_in[-1])
     if fill_value != 0.0:
         row_sums = np.array(sparse_matrix.sum(axis=1)).ravel()
         outside  = np.where(inside, 0.0, np.clip(dlam_out - row_sums, 0.0, None))
-        F_out   += fill_value * outside
+        F_out   += fill_value * outside.reshape(-1, *trailing)
 
     with np.errstate(divide='ignore', invalid='ignore'):
-        f_out = np.where(dlam_out > 0, F_out / dlam_out, np.nan)
+        f_out = np.where(dlam_out_b > 0, F_out / dlam_out_b, np.nan)
 
     # Variance (diagonal input covariance)
     var_out = None
     if var_in is not None:
-        var_Fin  = var_in * (dlam_in**2)
-        var_Fout = sparse_matrix.power(2.0).dot(var_Fin)
+        var_Fin  = (var_in * dlam_in_b**2).reshape(dlam_in.size, -1)
+        var_Fout = sparse_matrix.power(2.0).dot(var_Fin).reshape(
+            dlam_out.size, *f_in.shape[1:])
         with np.errstate(divide='ignore', invalid='ignore'):
-            var_out = np.where(dlam_out > 0, var_Fout / (dlam_out**2), 0.0)
+            var_out = np.where(dlam_out_b > 0, var_Fout / (dlam_out_b**2), 0.0)
 
     if return_matrix:
         return f_out, var_out, sparse_matrix
