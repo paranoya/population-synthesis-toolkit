@@ -127,7 +127,7 @@ class MassPropMetallicityMixin:
             1e-6 << u.dimensionless_unscaled, None)
 
     def mean_stellar_metallicity(self, ssp, t_obs):
-        """Compute the mean stellar metallicity at an observing time.
+        r"""Compute the mean stellar metallicity at an observing time.
         
         The mean stellar metallicity of this model has the following analytic form:
 
