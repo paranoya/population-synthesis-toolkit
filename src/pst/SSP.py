@@ -2650,6 +2650,164 @@ class BPASS(SSPBase):
         return sorted(selected.items())
 
 
+class FSPS(SSPBase):
+    """
+    FSPS SSP models (Flexible Stellar Population Synthesis).
+
+    SSP grids computed with FSPS (Conroy, Gunn & White 2009; Conroy & Gunn
+    2010) through python-fsps, on the native age and metallicity grid of the
+    isochrones, for a given fraction of blue horizontal branch stars
+    (``fbhb``). Each value of ``fbhb`` is stored in a separate file.
+
+    See ``ssp_installation/fsps/make_fsps_grid.py`` for instructions on how to
+    build the files used by PST.
+
+    Parameters
+    ----------
+    fbhb : float, optional
+        Fraction of horizontal branch stars in the blue horizontal branch.
+        Default is 0.0. It must match one of the files available in ``path``
+        (see :meth:`list_models`).
+    isochrone : str, optional
+        Isochrones used by FSPS (case-insensitive). Default is 'MIST'.
+    stellar_library : str, optional
+        Stellar spectral library used by FSPS (case-insensitive). Default is
+        'C3K_HR'.
+    imf : str, optional
+        Initial mass function: 'kroupa' (default), 'chabrier' or 'salpeter'.
+    path : str or None, optional
+        Directory containing the PST FSPS FITS files. If None (default), the
+        package default path plus 'FSPS' subdirectory is used.
+    load_properties : bool, optional
+        If True (default), load the mass fractions, bolometric luminosities
+        and ionising photon rates.
+    verbose : bool, optional
+        If True (default), print informational messages during initialization.
+
+    Example
+    -------
+    >>> from pst.SSP import FSPS
+    >>> ssp = FSPS(fbhb=0.25)
+    >>> print(ssp.metallicities, ssp.log_ages_yr)
+    >>> sed = ssp.L_lambda[-3, 100]  # solar metallicity, log(age/yr) = 10
+
+    Notes
+    -----
+    - ``L_lambda`` has shape ``(n_metallicities, n_ages, n_wavelengths)`` and
+      is given in Lsun / Angstrom per Msun **formed**. FSPS uses
+      Lsun = 3.839e33 erg/s; the files are rescaled to the astropy (IAU 2015)
+      value, 3.828e33 erg/s.
+    - The native wavelengths are in vacuum; they are converted to
+      ``wavelength_medium`` when loaded.
+    - The default files only cover the high-resolution range of C3K_HR
+      (3000-10000 Angstrom, R ~ 3000). The ionising photon rates were computed
+      from the full FSPS spectra before the wavelength cut, so
+      :meth:`get_ionising_photon_rate` must not be used with these models.
+    - ``returned_mass_frac`` is ``1 - (living stars + remnants)``, so
+      ``current_mass`` includes the stellar remnants, whose mass is given by
+      ``remnant_mass_frac``.
+    - FSPS does not provide supernova rates: ``supernova_rate`` is None.
+    - The blue horizontal branch only affects SSPs older than 10^9.5 yr. With
+      MIST isochrones ``fbhb=0`` keeps the native horizontal branch of the
+      isochrones, whereas any ``fbhb>0`` first moves every HB star to the red
+      clump, so ``fbhb=0`` is not the limit of small ``fbhb``.
+    - The models do not include nebular emission nor dust attenuation.
+    - The FSPS parameters used to build the grid are stored in
+      ``fsps_parameters``.
+
+    References
+    ----------
+    Conroy, C., Gunn, J. E. & White, M. (2009). The Propagation of Uncertainties in Stellar Population Synthesis Modeling. I. `ApJ, 699, 486 <https://ui.adsabs.harvard.edu/abs/2009ApJ...699..486C>`_.
+
+    Conroy, C. & Gunn, J. E. (2010). The Propagation of Uncertainties in Stellar Population Synthesis Modeling. III. `ApJ, 712, 833 <https://ui.adsabs.harvard.edu/abs/2010ApJ...712..833C>`_.
+    """
+    _imfs = ("salpeter", "chabrier", "kroupa")
+
+    def __init__(self, fbhb=0.0, isochrone="MIST", stellar_library="C3K_HR",
+                 imf="kroupa", path=None, load_properties=True, verbose=True):
+        if imf.lower() not in self._imfs:
+            raise NameError(f"Unrecognized IMF: {imf}. "
+                            f"Available IMFs: {self._imfs}")
+        self.imf = imf.lower()
+        self.isochrone = isochrone.upper()
+        self.stellar_library = stellar_library.upper()
+        self.fbhb = float(fbhb)
+
+        if path is None:
+            self.path = os.path.join(self.default_path, "FSPS")
+        else:
+            self.path = path
+        filename = os.path.join(self.path, self._filename(
+            isochrone, stellar_library, imf, self.fbhb))
+        if not os.path.isfile(filename):
+            available = self.list_models(self.path)
+            raise FileNotFoundError(
+                f"FSPS file not found: {filename}\nAvailable files in "
+                f"{self.path}: {available}\nBuild the models with "
+                "ssp_installation/fsps/make_fsps_grid.py")
+        if verbose:
+            print(f"> Initialising FSPS models ({self.isochrone}, "
+                  f"{self.stellar_library}, IMF={self.imf}, "
+                  f"fbhb={self.fbhb:g})")
+
+        with fits.open(filename) as hdul:
+            header = hdul[0].header
+            self.solar_metallicity = header.get("ZSOL")
+            wavelength = np.array(hdul["WAVE"].data, dtype=float) << u.Angstrom
+            self.wavelength = convert_wavelength_medium(
+                wavelength, header.get("WAVEMED", "vacuum"),
+                self.wavelength_medium)
+            self.log_ages_yr = np.array(hdul["LOGAGE"].data, dtype=float)
+            self.ages = 10**self.log_ages_yr << u.yr
+            props = hdul["PROP"].data
+            self.metallicities = (np.array(props["Z"], dtype=float)
+                                  << u.dimensionless_unscaled)
+            self.L_lambda = (np.array(hdul["SED"].data, dtype=np.float32)
+                             << u.Lsun / u.Angstrom / u.Msun)
+            if "FSPSPAR" in hdul:
+                parameters = hdul["FSPSPAR"].data
+                self.fsps_parameters = {
+                    str(name).strip(): str(value).strip() for name, value
+                    in zip(parameters["NAME"], parameters["VALUE"])}
+            else:
+                self.fsps_parameters = {}
+
+            if load_properties:
+                def column(name):
+                    """(n_metallicities, n_ages) property grid."""
+                    return np.array(props[name], dtype=float)
+
+                self.returned_mass_frac = 1.0 - column("STELLAR_MASS_FRAC")
+                self.remnant_mass_frac = column("REMNANT_MASS_FRAC")
+                self.log_bolometric_luminosity = column("LOG_LBOL") << u.dex(
+                    u.Lsun / u.Msun)
+                dex_unit = u.dex(u.s**-1 / u.Msun)
+                self.log_ionising_HI_photons = column("LOG_Q_HI") << dex_unit
+                self.log_ionising_HeI_photons = column("LOG_Q_HEI") << dex_unit
+                self.log_ionising_HeII_photons = (column("LOG_Q_HEII")
+                                                  << dex_unit)
+
+        self.name = (f"FSPS_{self.isochrone}_{self.stellar_library}_"
+                     f"{self.imf}_fbhb{self.fbhb:.2f}")
+
+    @staticmethod
+    def _filename(isochrone, stellar_library, imf, fbhb):
+        return (f"fsps_{isochrone.lower()}_{stellar_library.lower()}_"
+                f"{imf.lower()}_fbhb{fbhb:.2f}.fits")
+
+    @classmethod
+    def list_models(cls, path=None):
+        """Return the sorted names of the FSPS files available in ``path``.
+
+        If ``path`` is None, the package default path plus 'FSPS'
+        subdirectory is used.
+        """
+        if path is None:
+            path = os.path.join(cls.default_path, "FSPS")
+        return sorted(os.path.basename(f)
+                      for f in glob(os.path.join(path, "fsps_*.fits")))
+
+
 if __name__ == '__main__':
     # ssp = PopStar(IMF='cha_0.15_100')
     from matplotlib import pyplot as plt
